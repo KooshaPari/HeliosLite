@@ -77,8 +77,9 @@ async fn spawn_capture_server() -> (u16, oneshot::Receiver<CapturedRequest>) {
         }
 
         let header_end = find_header_end(&buf).unwrap_or(buf.len());
-        let header_str =
-            std::str::from_utf8(&buf[..header_end]).unwrap_or("").to_string();
+        let header_str = std::str::from_utf8(&buf[..header_end])
+            .unwrap_or("")
+            .to_string();
         let content_length = parse_content_length(&header_str);
         let body_start = header_end + 4;
         let body = if buf.len() >= body_start + content_length {
@@ -175,8 +176,7 @@ async fn sharehub_forwards_sequence_ordered_events_to_tracera_sink() {
         })
         .collect();
     assert_eq!(
-        payloads,
-        expected_payloads,
+        payloads, expected_payloads,
         "server must receive events in the original publish order"
     );
 
@@ -205,6 +205,9 @@ async fn sharehub_forwards_sequence_ordered_events_to_tracera_sink() {
     }
 
     // (7) Sanity: the hub still owns the channel we published to.
-    assert!(hub.has_channel(topic), "hub retains the channel after the test");
+    assert!(
+        hub.has_channel(topic),
+        "hub retains the channel after the test"
+    );
     assert_eq!(hub.topics(), vec![topic.to_string()]);
 }
