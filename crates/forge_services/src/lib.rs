@@ -15,6 +15,7 @@ mod forge_services;
 mod instructions;
 mod mcp;
 mod policy;
+mod semantic_memory;
 
 mod provider_auth;
 pub mod provider_service;

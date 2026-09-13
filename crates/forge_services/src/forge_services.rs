@@ -1,16 +1,5 @@
 use std::sync::Arc;
 
-use forge_app::{
-    AgentRepository, CommandInfra, DirectoryReaderInfra, EnvironmentInfra, FileDirectoryInfra,
-    FileInfoInfra, FileReaderInfra, FileRemoverInfra, FileWriterInfra, HttpInfra, KVStore,
-    McpServerInfra, Services, StrategyFactory, UserInfra, WalkerInfra,
-};
-use forge_domain::{
-    ChatRepository, ConversationRepository, FuzzySearchRepository, ProviderRepository,
-    SkillRepository, SnapshotRepository, TextPatchRepository, ValidationRepository,
-    WorkspaceIndexRepository,
-};
-
 use crate::ForgeProviderAuthService;
 use crate::agent_registry::ForgeAgentRegistryService;
 use crate::app_config::ForgeAppConfigService;
@@ -28,6 +17,16 @@ use crate::template::ForgeTemplateService;
 use crate::tool_services::{
     ForgeFetch, ForgeFollowup, ForgeFsPatch, ForgeFsRead, ForgeFsRemove, ForgeFsSearch,
     ForgeFsUndo, ForgeFsWrite, ForgeImageRead, ForgePlanCreate, ForgeShell, ForgeSkillFetch,
+};
+use forge_app::{
+    AgentRepository, CommandInfra, DirectoryReaderInfra, EnvironmentInfra, FileDirectoryInfra,
+    FileInfoInfra, FileReaderInfra, FileRemoverInfra, FileWriterInfra, HttpInfra, KVStore,
+    McpServerInfra, Services, StrategyFactory, UserInfra, WalkerInfra,
+};
+use forge_domain::{
+    ChatRepository, ConversationRepository, FuzzySearchRepository, ProviderRepository,
+    SkillRepository, SnapshotRepository, TextPatchRepository, ValidationRepository,
+    WorkspaceIndexRepository,
 };
 
 type McpService<F> = ForgeMcpService<ForgeMcpManager<F>, F, <F as McpServerInfra>::Client>;
@@ -56,10 +55,6 @@ pub struct ForgeServices<
         + SkillRepository
         + ValidationRepository,
 > {
-    chat_service: Arc<ForgeProviderService<F>>,
-    config_service: Arc<ForgeAppConfigService<F>>,
-    conversation_service: Arc<ForgeConversationService<F>>,
-    template_service: Arc<ForgeTemplateService<F>>,
     attachment_service: Arc<ForgeChatRequest<F>>,
     discovery_service: Arc<ForgeDiscoveryService<F>>,
     mcp_manager: Arc<ForgeMcpManager<F>>,
@@ -83,6 +78,11 @@ pub struct ForgeServices<
     provider_auth_service: ForgeProviderAuthService<F>,
     workspace_service: Arc<crate::context_engine::ForgeWorkspaceService<F, FdDefault<F>>>,
     skill_service: Arc<ForgeSkillFetch<F>>,
+    semantic_memory_service: Arc<crate::semantic_memory::ForgeSemanticMemory>,
+    config_service: Arc<ForgeAppConfigService<F>>,
+    template_service: Arc<ForgeTemplateService<F>>,
+    chat_service: Arc<ForgeProviderService<F>>,
+    conversation_service: Arc<ForgeConversationService<F>>,
     infra: Arc<F>,
 }
 
@@ -141,6 +141,8 @@ impl<
             discovery,
         ));
         let skill_service = Arc::new(ForgeSkillFetch::new(infra.clone()));
+        let semantic_memory_service =
+            Arc::new(crate::semantic_memory::ForgeSemanticMemory::from_env());
 
         Self {
             conversation_service,
@@ -169,6 +171,7 @@ impl<
             provider_auth_service,
             workspace_service,
             skill_service,
+            semantic_memory_service,
             chat_service,
             infra,
         }
@@ -236,6 +239,7 @@ impl<
     type ProviderService = ForgeProviderService<F>;
     type WorkspaceService = crate::context_engine::ForgeWorkspaceService<F, FdDefault<F>>;
     type SkillFetchService = ForgeSkillFetch<F>;
+    type SemanticMemoryService = crate::semantic_memory::ForgeSemanticMemory;
 
     fn config_service(&self) -> &Self::AppConfigService {
         &self.config_service
@@ -334,6 +338,10 @@ impl<
     }
     fn skill_fetch_service(&self) -> &Self::SkillFetchService {
         &self.skill_service
+    }
+
+    fn semantic_memory_service(&self) -> &Self::SemanticMemoryService {
+        &self.semantic_memory_service
     }
 
     fn provider_service(&self) -> &Self::ProviderService {
