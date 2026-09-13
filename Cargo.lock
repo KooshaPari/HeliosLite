@@ -3343,6 +3343,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "chrono",
+ "forge_tracera",
  "futures",
  "parking_lot",
  "serde",
