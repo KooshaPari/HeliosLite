@@ -2989,6 +2989,7 @@ dependencies = [
  "forge_repo",
  "forge_select",
  "forge_spinner",
+ "forge_tracera",
  "forge_tracker",
  "forge_walker",
  "futures",

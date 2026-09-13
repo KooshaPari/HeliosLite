@@ -22,7 +22,8 @@ use forge_api::ForgeAPI;
 use forge_config::ForgeConfig;
 use forge_domain::TitleFormat;
 use forge_main::{
-    Cli, Sandbox, TitleDisplayExt, TopLevelCommand, UI, render_static_zsh_rprompt, tracker,
+    Cli, Sandbox, TitleDisplayExt, TopLevelCommand, UI, render_static_zsh_rprompt,
+    telemetry::TraceraTelem, tracker,
 };
 use tracing::debug;
 
@@ -101,6 +102,17 @@ fn maybe_render_fast_zsh_rprompt() -> Result<()> {
 }
 
 async fn async_main() {
+    // Initialize outbound Tracera telemetry. This is a no-op unless
+    // `TRACERA_ENDPOINT` is set, so it never adds latency or side effects to
+    // normal sessions.
+    let telem = TraceraTelem::from_env();
+    telem
+        .session(
+            "start",
+            serde_json::json!({ "binary": std::env::args().next().unwrap_or_default() }),
+        )
+        .await;
+
     // Wrap run() in a ctrl_c handler for graceful shutdown.
     let app_future = run();
     tokio::pin!(app_future);
@@ -114,6 +126,28 @@ async fn async_main() {
             Ok(())
         }
     };
+
+    // Emit lifecycle/error telemetry then drain the sink before exiting.
+    match &result {
+        Ok(()) => {
+            telem
+                .session("end", serde_json::json!({ "status": "ok" }))
+                .await
+        }
+        Err(err) => {
+            let msg = format!("{err}");
+            telem.error(&msg).await;
+            telem
+                .session(
+                    "end",
+                    serde_json::json!({ "status": "error", "error": msg }),
+                )
+                .await;
+        }
+    }
+
+    // Best-effort final drain; a failed flush must never fail the CLI.
+    telem.shutdown().await;
 
     if let Err(err) = result {
         eprintln!("{}", TitleFormat::error(format!("{err}")).display());
