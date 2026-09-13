@@ -72,6 +72,9 @@ pub enum RenameResult {
 /// Errors that `RenameProvider::rename` can surface.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RenameError {
+    /// The supplied `new_name` is empty / whitespace-only, which would emit
+    /// a delete-only (destructive) `TextEdit`. Rejected before forwarding.
+    InvalidName(String),
     /// The LSP server returned an error response.
     ServerError(String),
     /// The LSP server returned a non-WorkspaceEdit payload.
@@ -81,6 +84,7 @@ pub enum RenameError {
 impl std::fmt::Display for RenameError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            RenameError::InvalidName(n) => write!(f, "invalid rename target: {n:?}"),
             RenameError::ServerError(m) => write!(f, "lsp server error: {m}"),
             RenameError::InvalidResponse(m) => write!(f, "invalid rename response: {m}"),
         }
@@ -136,6 +140,9 @@ impl<C: LspClient + ?Sized> RenameProvider<C> {
 
     /// Run `textDocument/rename` for `uri` at `position` to `new_name`.
     pub fn rename(&self, uri: &str, position: Position, new_name: &str) -> RenameOutcome {
+        if new_name.trim().is_empty() {
+            return Err(RenameError::InvalidName(new_name.to_string()));
+        }
         let params = RenameParams {
             text_document: TextDocumentIdentifier { uri: uri.to_string() },
             position,
@@ -368,6 +375,25 @@ mod tests {
             )
             .unwrap();
         assert!(r.is_none());
+    }
+
+    #[test]
+    fn rename_rejects_empty_and_whitespace_new_name_before_forwarding() {
+        let client = Arc::new(MockLspClient::new(
+            "rust-analyzer",
+            ok_response(json!({
+                "changes": {},
+            })),
+        ));
+        let p = RenameProvider::new(client);
+        for bad in ["", "   ", "\t", "\n"] {
+            let err = p
+                .rename("file:///foo.rs", Position { line: 0, character: 0 }, bad)
+                .unwrap_err();
+            assert_eq!(err, RenameError::InvalidName(bad.to_string()));
+        }
+        // Nothing should have been forwarded to the server.
+        assert!(p.client.captured.lock().unwrap().is_empty());
     }
 
     #[test]
