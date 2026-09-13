@@ -11,6 +11,8 @@
 //!   rotation with overlap.
 //! - [`MemoryStore`] — pluggable in-memory batch queue with offline retry,
 //!   used by default; suitable for tests and short-lived processes.
+//! - [`DiskStore`] — file-backed persistent batch queue (at-least-once
+//!   NDJSON journal) that survives process restarts.
 //!
 //! ## Wire format
 //!
@@ -63,6 +65,7 @@
 #![warn(missing_docs)]
 
 pub mod config;
+pub mod disk_store;
 pub mod event;
 pub mod sink;
 pub mod store;
@@ -70,6 +73,7 @@ pub mod store;
 mod error;
 
 pub use config::{AuthMode, SinkConfig};
+pub use disk_store::{DiskError, DiskStore};
 pub use error::{SinkError, SinkResult};
 pub use event::{EventKind, TraceraEvent};
 pub use sink::{AuthSnapshot, AuthSnapshotOwned, AuthState, TraceraSink};
