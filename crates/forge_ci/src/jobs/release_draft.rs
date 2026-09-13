@@ -8,7 +8,7 @@ use crate::workflow_model::{Job, Level, Permissions, Step};
 /// sees the last PUBLISHED release (fork releases lag the upstream sync line),
 /// so the draft version is pinned here explicitly; bump the h-block on each
 /// fork release and keep UPSTREAM in step with the sync.
-pub const FORK_RELEASE_VERSION: &str = "2.13.21-h.0.1.7";
+pub const FORK_RELEASE_VERSION: &str = "2.13.21-h.0.1.8";
 
 /// Create a draft release job for GitHub Actions
 pub fn create_draft_release_job(build_job_id: &str) -> Job {

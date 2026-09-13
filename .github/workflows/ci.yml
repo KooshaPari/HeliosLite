@@ -92,7 +92,7 @@ jobs:
       uses: release-drafter/release-drafter@5a60cd8ddda6dc14fce77159675b8fd2cdca4007
       with:
         config-name: release-drafter.yml
-        version: 2.13.21-h.0.1.7
+        version: 2.13.21-h.0.1.8
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     - id: set_output

@@ -2466,9 +2466,9 @@ mod tests {
 
     #[test]
     fn cli_version_omits_a_release_tag_prefix() {
-        let fixture = "v2.13.21-h.0.1.7";
+        let fixture = "v2.13.21-h.0.1.8";
         let actual = cli_version(fixture);
-        let expected = "2.13.21-h.0.1.7";
+        let expected = "2.13.21-h.0.1.8";
         assert_eq!(actual, expected);
     }
 }
