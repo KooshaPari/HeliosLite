@@ -1,10 +1,15 @@
 //! R2 — integration smoke test: `forge_sharecli` `ShareHub` → `forge_tracera`
-//! `TraceraSink`.
+//! `TraceraSink`, over real HTTP.
 //!
 //! Proves the two P3 surfaces compose end-to-end: a `ShareHub` subscriber on a
 //! topic receives published `ShareMessage`s, a forwarding bridge converts each
 //! message into a `TraceraEvent`, and the sink transmits the JSON wire payload
 //! to an in-process HTTP responder which records it and replies `200 OK`.
+//!
+//! This is the HTTP-transport companion to `composes_with_tracera.rs` (which
+//! checks the wire-shape conversion + `MemoryStore` acceptance WITHOUT an HTTP
+//! transport, per its header). Here we drive the actual `reqwest` request over
+//! a `TcpListener` responder so the whole transmit-and-record path is covered.
 //!
 //! `forge_tracera` is a dev-dependency of `forge_sharecli` (see Cargo.toml), so
 //! the tracera crate still builds standalone — this test only compiles when
