@@ -24,3 +24,8 @@ uuid = { workspace = true, features = ["v4", "serde"] }
 tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros", "time", "sync", "test-util"] }
 futures.workspace = true
 serde_json.workspace = true
+# Used by tests/composes_with_tracera.rs — proves ShareHub composes
+# with TraceraSink at the wire-shape level. No new external deps are
+# pulled in: `forge_tracera` is a workspace member declared in the
+# root Cargo.toml.
+forge_tracera = { workspace = true }
