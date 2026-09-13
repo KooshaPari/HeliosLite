@@ -102,6 +102,35 @@ impl ShareHub {
         Ok(ch)
     }
 
+    /// Eagerly register a topic channel. Returns `Ok(())` whether or not the
+    /// topic already existed — the operation is idempotent. Invalid topic
+    /// names yield `ShareError::InvalidTopic`.
+    ///
+    /// This is the explicit counterpart to [`Self::channel`]: callers that
+    /// want the topic to appear in [`Self::topics`] *before* a subscriber
+    /// attaches (e.g. transport wiring that needs to enumerate topics up
+    /// front) can use this method. Errors are returned only for malformed
+    /// topic names; the default channel capacity is used.
+    pub fn register_topic(&self, topic: impl Into<String>) -> Result<(), ShareError> {
+        let topic = topic.into();
+        Self::validate_topic(&topic)?;
+        {
+            let map = self.inner.channels.read();
+            if map.contains_key(&topic) {
+                return Ok(());
+            }
+        }
+        let mut map = self.inner.channels.write();
+        // entry().or_insert_with collapses the contains_key/insert pattern
+        // clippy warns about. The closure may not run if the key exists,
+        // and we ignore the return value — registration is a presence
+        // assertion, the handle doesn't need to be returned.
+        let _ = map.entry(topic.clone()).or_insert_with(|| {
+            Arc::new(Channel::new(topic.clone(), self.inner.default_channel_cap))
+        });
+        Ok(())
+    }
+
     /// Return the channel for `topic` with an explicit capacity when creating.
     /// If the channel already exists the `capacity` argument is ignored.
     pub fn channel_with_capacity(

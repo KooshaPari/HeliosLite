@@ -1,8 +1,10 @@
 //! `forge_sharecli` — ShareCLI realtime relay (P3.3).
 //!
 //! In-process broadcast channels, bounded queues, and a cloneable hub that
-//! ties them together. No network I/O — this crate is the local fanout
-//! substrate that the future WS/SSE transport will sit on top of.
+//! ties them together. The crate is the local fanout substrate; the
+//! `transport` module adds SSE and WebSocket adapters that stream the
+//! fanout out to TCP clients and route inbound messages back through the
+//! hub.
 //!
 //! # Quick start
 //!
@@ -26,6 +28,7 @@ pub mod error;
 pub mod hub;
 pub mod message;
 pub mod queue;
+pub mod transport;
 
 pub use channel::{Channel, Subscriber};
 pub use error::ShareError;
