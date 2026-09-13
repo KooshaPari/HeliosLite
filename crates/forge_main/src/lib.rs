@@ -17,6 +17,7 @@ mod sandbox;
 mod state;
 mod stream_renderer;
 mod sync_display;
+pub mod telemetry;
 mod test_runner;
 mod title_display;
 mod tools_display;
