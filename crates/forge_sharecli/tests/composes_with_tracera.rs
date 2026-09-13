@@ -19,6 +19,11 @@
 //! 3. The resulting `TraceraEvent` is accepted by a `TraceraSink` and
 //!    its underlying `MemoryStore` holds the event with the expected
 //!    fields. This proves the data shape propagates through both crates.
+//!
+//! Index-based assertions below have length-guarded preconditions; we
+//! silence the workspace-wide `indexing_slicing` lint at the file level
+//! rather than refactoring already-stable tests.
+#![allow(clippy::indexing_slicing)]
 
 use forge_sharecli::{ShareHub, ShareMessage};
 use forge_tracera::{
