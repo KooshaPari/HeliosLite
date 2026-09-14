@@ -220,6 +220,11 @@ pub enum TopLevelCommand {
     /// references, rename) through the forge_lsp facade.
     #[command(subcommand)]
     Lsp(LspCommandGroup),
+
+    /// Publish, subscribe, broadcast, and serve the in-process ShareCLI
+    /// realtime relay.
+    #[command(subcommand)]
+    Share(ShareCommandGroup),
 }
 
 /// Arguments for `helioslite heliosdoctor` (or `forge heliosdoctor`).
@@ -868,6 +873,14 @@ pub type AgileplusCommandGroup = forge_agileplus::commands::Command;
 /// `helioslite` / `forge` binary surfaces `helioslite lsp
 /// <subcommand>`.
 pub type LspCommandGroup = forge_lsp::commands::Command;
+
+/// Command group for the ShareCLI realtime relay (publish/subscribe/serve).
+///
+/// Re-export of the [`forge_sharecli::commands::Command`] enum so the
+/// `helioslite` / `forge` binary surfaces `helioslite share
+/// <subcommand>`. Each variant maps 1:1 to a subcommand provided by the
+/// `forge_sharecli` crate.
+pub type ShareCommandGroup = forge_sharecli::commands::Command;
 /// Configuration scope for settings.
 #[derive(Copy, Clone, Debug, ValueEnum, Default)]
 pub enum Scope {

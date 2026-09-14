@@ -257,6 +257,24 @@ async fn run() -> Result<()> {
         }
     }
 
+    // Handle ShareCLI realtime subcommands before the full UI startup.
+    // Mirrors the LSP dispatch pattern; the share facade constructs its own
+    // hub per invocation and exits on its own (Publish / Topics), or blocks
+    // serving (Serve) until SIGINT.
+    if let Some(TopLevelCommand::Share(cmd)) = &cli.subcommands {
+        match forge_sharecli::commands::run_command(cmd) {
+            Ok(Some(output)) => {
+                print!("{output}");
+                return Ok(());
+            }
+            Ok(None) => return Ok(()),
+            Err(err) => {
+                eprintln!("{}", TitleFormat::error(format!("share: {err}")).display());
+                std::process::exit(1);
+            }
+        }
+    }
+
     // Handle worktree creation if specified
     let cwd: PathBuf = match (&cli.sandbox, &cli.directory) {
         (Some(sandbox), Some(cli)) => {

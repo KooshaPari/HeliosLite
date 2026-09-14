@@ -24,6 +24,7 @@
 #![warn(missing_docs)]
 
 pub mod channel;
+pub mod commands;
 pub mod error;
 pub mod hub;
 pub mod message;
@@ -31,6 +32,7 @@ pub mod queue;
 pub mod transport;
 
 pub use channel::{Channel, Subscriber};
+pub use commands::{Cli, CliError, Command as ShareCommand, run_command};
 pub use error::ShareError;
 pub use hub::ShareHub;
 pub use message::ShareMessage;
