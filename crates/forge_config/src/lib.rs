@@ -11,6 +11,7 @@ mod percentage;
 mod reader;
 mod reasoning;
 mod retry;
+mod schema;
 mod writer;
 
 pub use auto_dump::*;
@@ -25,6 +26,7 @@ pub use percentage::*;
 pub use reader::ConfigReader;
 pub use reasoning::*;
 pub use retry::*;
+pub use schema::*;
 pub use writer::*;
 
 /// Returns the path to the primary TOML config file (`~/.forge/.forge.toml`).

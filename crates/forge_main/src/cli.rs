@@ -937,6 +937,14 @@ pub enum ConfigCommand {
 
     /// Migrate the legacy ~/forge directory to ~/.forge.
     Migrate,
+
+    /// Print the env-var schema honored by the binary's subcommands
+    /// (`lsp`, `share`, `agileplus`, `tracera`).
+    ///
+    /// Output is a fixed-width table with one row per env var, grouped
+    /// by the subcommand that reads it. No environment values are
+    /// consulted; this is documentation.
+    Schema,
 }
 
 /// Arguments for `forge config set`.
@@ -1350,6 +1358,19 @@ mod tests {
         let fixture = Cli::parse_from(["forge", "config", "list"]);
         let actual = match fixture.subcommands {
             Some(TopLevelCommand::Config(config)) => matches!(config.command, ConfigCommand::List),
+            _ => false,
+        };
+        let expected = true;
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_config_schema_subcommand() {
+        let fixture = Cli::parse_from(["forge", "config", "schema"]);
+        let actual = match fixture.subcommands {
+            Some(TopLevelCommand::Config(config)) => {
+                matches!(config.command, ConfigCommand::Schema)
+            }
             _ => false,
         };
         let expected = true;
