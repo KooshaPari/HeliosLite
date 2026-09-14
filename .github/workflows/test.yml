@@ -42,16 +42,15 @@ jobs:
       - name: Rust cache
         uses: Swatinem/rust-cache@7e35be21c2b94d972b1143087fabc27d7dc881ef
 
-      - name: Install cargo-nextest
-        uses: taiki-e/install-action@c44f6b046f1c29ae5918b1e0bfdbb2f1813836fd
-        with:
-          tool: cargo-nextest
-
       # PR #308 (test(lsp): add e2e integration test against real rust-analyzer
       # binary) added `crates/forge_lsp/tests/e2e_rust_analyzer.rs`, which
       # silently passes when `rust-analyzer` is not on PATH. Installing the
       # prebuilt rust-analyzer here makes the nextest run actually exercise the
       # LSP round-trip instead of taking the early-return skip path.
+      # We install rust-analyzer before `Install cargo-nextest` so that the
+      # bin dir is populated, then `Rust cache` snapshots the populated dir
+      # on its post step, and `Install cargo-nextest` adds cargo-nextest on
+      # top without the two installs racing for `$GITHUB_PATH` updates.
       - name: Install rust-analyzer
         shell: bash
         run: |
@@ -81,6 +80,11 @@ jobs:
             chmod +x "$bin"
           fi
           "$bin" --version
+
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@c44f6b046f1c29ae5918b1e0bfdbb2f1813836fd
+        with:
+          tool: cargo-nextest
 
       - name: cargo nextest run
         env:
