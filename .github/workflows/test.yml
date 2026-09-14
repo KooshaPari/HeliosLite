@@ -89,4 +89,11 @@ jobs:
       - name: cargo nextest run
         env:
           RUSTFLAGS: "-D warnings"
+          # Belt-and-braces: ensure `~/.cargo/bin` is on PATH for this step so
+          # that cargo's subcommand discovery can find the `cargo-nextest`
+          # binary installed by the previous step. On ubuntu-24.04 runners
+          # this dir is normally already on PATH via the runner image, but an
+          # explicit extension here guards against any case where $GITHUB_PATH
+          # propagation has been perturbed by the prior rust-analyzer install.
+          PATH: $HOME/.cargo/bin:$PATH
         run: cargo nextest run --all-features --workspace
