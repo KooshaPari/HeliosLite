@@ -236,7 +236,11 @@ async fn sse_relay_delivers_ordered_messages_within_two_seconds() {
             .get("seq")
             .and_then(serde_json::Value::as_u64)
             .expect("event must carry a numeric seq");
-        assert_eq!(seq, (i as u64) + 1, "seq must be monotonic in publish order");
+        assert_eq!(
+            seq,
+            (i as u64) + 1,
+            "seq must be monotonic in publish order"
+        );
     }
 
     // (7) Cleanup: drop the response stream so the relay sees EOF and
@@ -310,17 +314,17 @@ async fn sse_relay_handles_two_messages_with_in_process_hub() {
     let second = parse_event_data(events[1]).expect("second event data");
     assert_eq!(first.get("payload"), Some(&payloads[0]));
     assert_eq!(second.get("payload"), Some(&payloads[1]));
-    assert_eq!(
-        first.get("topic").and_then(|v| v.as_str()),
-        Some(topic)
-    );
-    assert_eq!(
-        second.get("topic").and_then(|v| v.as_str()),
-        Some(topic)
-    );
+    assert_eq!(first.get("topic").and_then(|v| v.as_str()), Some(topic));
+    assert_eq!(second.get("topic").and_then(|v| v.as_str()), Some(topic));
     // Seq must be strictly monotonic.
-    let s1 = first.get("seq").and_then(serde_json::Value::as_u64).unwrap();
-    let s2 = second.get("seq").and_then(serde_json::Value::as_u64).unwrap();
+    let s1 = first
+        .get("seq")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap();
+    let s2 = second
+        .get("seq")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap();
     assert!(s2 > s1, "second event seq ({s2}) must exceed first ({s1})");
 
     server.abort();
