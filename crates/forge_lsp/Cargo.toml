@@ -23,3 +23,8 @@ notify = "8"
 
 [dev-dependencies]
 tempfile = "3"
+# `bstr` is used by the e2e integration test for lossy UTF-8 decoding
+# of subprocess output. We keep it in dev-deps only because the
+# runtime crate never needs byte-slice lossy decoding — only the
+# `find_rust_analyzer` probe does.
+bstr = { workspace = true }
