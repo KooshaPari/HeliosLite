@@ -41,6 +41,44 @@ jobs:
       with:
         toolchain: stable
         targets: ${{ matrix.target }}
+
+    # PR #308 (test(lsp): add e2e integration test against real rust-analyzer
+    # binary) added `crates/forge_lsp/tests/e2e_rust_analyzer.rs`, which
+    # silently passes when `rust-analyzer` is not on PATH. Installing the
+    # prebuilt rust-analyzer here makes `cargo test --workspace` actually
+    # exercise the LSP round-trip on the macOS and Windows matrix runners
+    # instead of taking the early-return skip path.
+    - name: Install rust-analyzer
+      shell: bash
+      run: |
+        set -euo pipefail
+        case "$(uname -s)/$(uname -m)" in
+          Linux/x86_64)  asset="rust-analyzer-x86_64-unknown-linux-gnu"  bin="$HOME/.cargo/bin/rust-analyzer" ;;
+          Linux/aarch64) asset="rust-analyzer-aarch64-unknown-linux-gnu" bin="$HOME/.cargo/bin/rust-analyzer" ;;
+          Darwin/x86_64) asset="rust-analyzer-x86_64-apple-darwin"       bin="$HOME/.cargo/bin/rust-analyzer" ;;
+          Darwin/arm64)  asset="rust-analyzer-aarch64-apple-darwin"      bin="$HOME/.cargo/bin/rust-analyzer" ;;
+          MINGW*|MSYS*|CYGWIN*|Windows_NT/x86_64)
+            asset="rust-analyzer-x86_64-pc-windows-msvc"
+            bin="$HOME/.cargo/bin/rust-analyzer.exe" ;;
+          MINGW*|MSYS*|CYGWIN*|Windows_NT/aarch64)
+            asset="rust-analyzer-aarch64-pc-windows-msvc"
+            bin="$HOME/.cargo/bin/rust-analyzer.exe" ;;
+          *) echo "::error::unsupported platform: $(uname -s)/$(uname -m)" >&2; exit 1 ;;
+        esac
+        mkdir -p "$(dirname "$bin")"
+        url="https://github.com/rust-lang/rust-analyzer/releases/latest/download/${asset}"
+        if [[ "$bin" == *.exe ]]; then
+          tmp="$(mktemp -d)/${asset}.zip"
+          curl -fsSL "${url}.zip" -o "$tmp"
+          unzip -q -o "$tmp" -d "$(dirname "$bin")"
+          rm -rf "$(dirname "$tmp")"
+        else
+          curl -fsSL "${url}.gz" | gunzip -c - > "$bin"
+          chmod +x "$bin"
+        fi
+        "$bin" --version
+        echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
     - name: Run tests
       run: cargo test --workspace
       continue-on-error: true
