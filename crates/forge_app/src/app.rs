@@ -129,6 +129,142 @@ async fn store_conversation_in_semantic_memory<S>(
     }
 }
 
+/// Best-effort recall of recent episodic memories from the semantic-memory
+/// adapter for the current workspace, returned as a context digest suitable
+/// for prefixing the system prompt.
+///
+/// Returns `None` if the workspace can't be resolved, the query is invalid,
+/// the adapter errors, or the adapter returns no records — any failure path
+/// is logged via `tracing::warn!` and the caller proceeds without recall.
+///
+/// This is invoked once per `chat()` invocation, before `SystemPrompt` runs,
+/// so the model sees the most recent related work the user has done in this
+/// workspace.
+async fn recall_workspace_episodic_context<S>(services: &Arc<S>, query_text: &str) -> Option<String>
+where
+    S: Services + EnvironmentInfra<Config = ForgeConfig>,
+{
+    let services: &S = services.as_ref();
+    let environment = services.get_environment();
+    let cwd = environment.cwd.clone();
+
+    let workspace_id = match services.init_workspace(cwd.clone()).await {
+        Ok(id) => id,
+        Err(err) => {
+            tracing::warn!(
+                workspace = %cwd.display(),
+                error = %err,
+                "skipping semantic-memory recall; could not resolve workspace_id",
+            );
+            return None;
+        }
+    };
+
+    let namespace = forge_domain::SemanticMemoryNamespace::new(workspace_id);
+    let limit = forge_domain::SemanticMemoryQuery::DEFAULT_LIMIT;
+    let query = match forge_domain::SemanticMemoryQuery::new(namespace, query_text, limit, None) {
+        Ok(q) => q,
+        Err(err) => {
+            tracing::warn!(error = %err, "skipping semantic-memory recall; invalid query");
+            return None;
+        }
+    };
+    let budget = match forge_domain::SemanticMemoryBudget::new(
+        forge_domain::SemanticMemoryBudget::DEFAULT_BYTES,
+    ) {
+        Ok(b) => b,
+        Err(err) => {
+            tracing::warn!(error = %err, "skipping semantic-memory recall; invalid budget");
+            return None;
+        }
+    };
+
+    match services
+        .semantic_memory_service()
+        .recall(query, budget)
+        .await
+    {
+        Ok(records) if records.is_empty() => None,
+        Ok(records) => {
+            let digest: Vec<String> = records
+                .into_iter()
+                .map(|r| {
+                    format!(
+                        "- [{}] {}",
+                        r.provenance().conversation_id(),
+                        r.content().lines().next().unwrap_or("").trim()
+                    )
+                })
+                .collect();
+            Some(format!(
+                "Recent related work in this workspace ({} entries):\n{}",
+                digest.len(),
+                digest.join("\n")
+            ))
+        }
+        Err(err) => {
+            tracing::warn!(
+                error = %err,
+                "semantic-memory recall failed; continuing without recall",
+            );
+            None
+        }
+    }
+}
+
+/// Forgets the conversation's semantic-memory record (best-effort). Wired
+/// into the compaction path so a compacted conversation no longer keeps its
+/// pre-compaction entry in the recall index.
+async fn forget_conversation_in_semantic_memory<S>(
+    services: &Arc<S>,
+    conversation: &forge_domain::Conversation,
+) where
+    S: Services + EnvironmentInfra<Config = ForgeConfig>,
+{
+    let services: &S = services.as_ref();
+    let cwd = conversation
+        .cwd
+        .as_deref()
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| services.get_environment().cwd);
+
+    let workspace_id = match services.init_workspace(cwd.clone()).await {
+        Ok(id) => id,
+        Err(err) => {
+            tracing::warn!(
+                workspace = %cwd.display(),
+                error = %err,
+                "skipping semantic-memory forget; could not resolve workspace_id",
+            );
+            return;
+        }
+    };
+
+    let identity = match forge_domain::SemanticMemoryIdentity::new(
+        forge_domain::SemanticMemoryScope::Episodic,
+        forge_domain::SemanticMemoryNamespace::new(workspace_id),
+        format!("conversation:{}", conversation.id),
+    ) {
+        Ok(id) => id,
+        Err(err) => {
+            tracing::warn!(
+                conversation_id = %conversation.id,
+                error = %err,
+                "skipping semantic-memory forget; invalid identity",
+            );
+            return;
+        }
+    };
+
+    if let Err(err) = services.semantic_memory_service().forget(identity).await {
+        tracing::warn!(
+            conversation_id = %conversation.id,
+            error = %err,
+            "semantic-memory forget failed; continuing without deleting the record",
+        );
+    }
+}
+
 /// ForgeApp handles the core chat functionality by orchestrating various
 /// services. It encapsulates the complex logic previously contained in the
 /// ForgeAPI chat method.
@@ -168,6 +304,31 @@ impl<S: Services + EnvironmentInfra<Config = forge_config::ForgeConfig>> ForgeAp
         let files = services.list_current_directory().await?;
 
         let custom_instructions = services.get_custom_instructions().await;
+
+        // Warm-hydrate: recall recent episodic memories for this workspace
+        // before the model is invoked. The digest is appended to the system
+        // prompt's custom instructions so the model sees prior work without
+        // a round-trip. Best-effort — empty / errored recall is a no-op.
+        // Query text is a stable, generic anchor — the workspace path itself
+        // — so the recall surfaces any prior conversations done here.
+        let query_text: String = services
+            .get_environment()
+            .cwd
+            .to_string_lossy()
+            .into_owned();
+        let recalled = recall_workspace_episodic_context(&self.services, &query_text).await;
+        let mut custom_instructions = custom_instructions;
+        if let Some(recall) = recalled {
+            if !recall.is_empty() {
+                let combined = if custom_instructions.is_empty() {
+                    recall
+                } else {
+                    let existing = custom_instructions.join("\n\n");
+                    format!("{}\n\n{}", existing, recall)
+                };
+                custom_instructions = vec![combined];
+            }
+        }
 
         // Prepare agents with user configuration
         let agent_provider_resolver = AgentProviderResolver::new(services.clone());
@@ -372,7 +533,13 @@ impl<S: Services + EnvironmentInfra<Config = forge_config::ForgeConfig>> ForgeAp
         conversation.context = Some(compacted_context);
 
         // Save the updated conversation
-        self.services.upsert_conversation(conversation).await?;
+        self.services
+            .upsert_conversation(conversation.clone())
+            .await?;
+
+        // Best-effort: remove the pre-compaction semantic-memory record so the
+        // recall index doesn't keep returning stale context for this id.
+        forget_conversation_in_semantic_memory(&self.services, &conversation).await;
 
         Ok(CompactionResult::new(
             original_token_count,
