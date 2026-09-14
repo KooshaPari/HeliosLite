@@ -1522,6 +1522,20 @@ impl<A: API + ConsoleWriter + 'static, F: Fn(ForgeConfig) -> A + Send + Sync> UI
                 }
                 return Ok(());
             }
+            TopLevelCommand::Share(cmd) => {
+                // Same pattern as LSP — dispatched in main.rs before UI
+                // startup. Defensive fallback for the exhaustive match.
+                match forge_sharecli::commands::run_command(&cmd) {
+                    Ok(Some(output)) => {
+                        print!("{output}");
+                    }
+                    Ok(None) => {}
+                    Err(err) => {
+                        self.writeln_title(TitleFormat::error(format!("share: {err}")))?;
+                    }
+                }
+                return Ok(());
+            }
         }
         Ok(())
     }
