@@ -30,7 +30,9 @@ mod zsh;
 mod update;
 use std::sync::LazyLock;
 
-pub use cli::{Cli, ListCommand, ListCommandGroup, TopLevelCommand};
+pub use cli::{
+    Cli, ListCommand, ListCommandGroup, LspCommandGroup, LspSubcommand, TopLevelCommand,
+};
 use forge_domain::{AgentId, Effort};
 pub use sandbox::Sandbox;
 pub use test_runner::{TestResult, TestRunner, parse_cargo_test_output};

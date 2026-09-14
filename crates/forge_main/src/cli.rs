@@ -215,6 +215,131 @@ pub enum TopLevelCommand {
     /// Inspect the AgilePlus 31-pillar scorecard and velocity reports.
     #[command(subcommand)]
     Agileplus(AgileplusCommandGroup),
+
+    /// Run language-server queries (diagnostics, hover, definition,
+    /// completion, references, rename) via forge_lsp.
+    ///
+    /// Each sub-command spawns rust-analyzer and
+    /// typescript-language-server for the workspace and prints the
+    /// result to stdout. If either language server cannot be started,
+    /// the command fails with a clear error to stderr instead of
+    /// panicking.
+    Lsp(LspCommandGroup),
+}
+
+/// Command group for `forge lsp` sub-commands.
+///
+/// Each sub-command constructs a [`forge_lsp::Server`] for the current
+/// directory (spawning rust-analyzer / typescript-language-server),
+/// runs a single language query, prints the result to stdout, and
+/// exits. The `--line`/`--character` arguments are 0-based LSP
+/// coordinates.
+#[derive(Parser, Debug, Clone)]
+pub struct LspCommandGroup {
+    #[command(subcommand)]
+    pub command: LspSubcommand,
+}
+
+/// Sub-commands for `forge lsp`.
+#[derive(Subcommand, Debug, Clone)]
+pub enum LspSubcommand {
+    /// Print diagnostics for a file (or directory) via rustc / tsc.
+    Diagnostics {
+        /// Path to the file to inspect.
+        path: PathBuf,
+    },
+
+    /// Show hover information at a position.
+    Hover {
+        /// Path to the file.
+        path: PathBuf,
+        /// 0-based line.
+        #[arg(long, default_value_t = 0)]
+        line: u32,
+        /// 0-based character.
+        #[arg(long, default_value_t = 0)]
+        character: u32,
+    },
+
+    /// Show the location(s) of the definition at a position.
+    Definition {
+        /// Path to the file.
+        path: PathBuf,
+        /// 0-based line.
+        #[arg(long, default_value_t = 0)]
+        line: u32,
+        /// 0-based character.
+        #[arg(long, default_value_t = 0)]
+        character: u32,
+    },
+
+    /// Show completion items at a position.
+    Complete {
+        /// Path to the file.
+        path: PathBuf,
+        /// 0-based line.
+        #[arg(long, default_value_t = 0)]
+        line: u32,
+        /// 0-based character.
+        #[arg(long, default_value_t = 0)]
+        character: u32,
+        /// Optional trigger character (e.g. `.`).
+        #[arg(long)]
+        trigger: Option<char>,
+    },
+
+    /// Show the implementation(s) of a symbol at a position.
+    Implementation {
+        /// Path to the file.
+        path: PathBuf,
+        /// 0-based line.
+        #[arg(long, default_value_t = 0)]
+        line: u32,
+        /// 0-based character.
+        #[arg(long, default_value_t = 0)]
+        character: u32,
+    },
+
+    /// Show the reference(s) to a symbol at a position.
+    References {
+        /// Path to the file.
+        path: PathBuf,
+        /// 0-based line.
+        #[arg(long, default_value_t = 0)]
+        line: u32,
+        /// 0-based character.
+        #[arg(long, default_value_t = 0)]
+        character: u32,
+        /// Include the declaration site in the result.
+        #[arg(long)]
+        include_declaration: bool,
+    },
+
+    /// Show the type definition(s) of a symbol at a position.
+    TypeDefinition {
+        /// Path to the file.
+        path: PathBuf,
+        /// 0-based line.
+        #[arg(long, default_value_t = 0)]
+        line: u32,
+        /// 0-based character.
+        #[arg(long, default_value_t = 0)]
+        character: u32,
+    },
+
+    /// Rename the symbol at a position.
+    Rename {
+        /// Path to the file.
+        path: PathBuf,
+        /// 0-based line.
+        #[arg(long, default_value_t = 0)]
+        line: u32,
+        /// 0-based character.
+        #[arg(long, default_value_t = 0)]
+        character: u32,
+        /// New name for the symbol.
+        new_name: String,
+    },
 }
 
 /// Arguments for `helioslite heliosdoctor` (or `forge heliosdoctor`).

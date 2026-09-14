@@ -2984,6 +2984,7 @@ dependencies = [
  "forge_domain",
  "forge_embed",
  "forge_fs",
+ "forge_lsp",
  "forge_markdown_stream",
  "forge_paste",
  "forge_repo",

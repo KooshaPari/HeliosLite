@@ -1507,6 +1507,12 @@ impl<A: API + ConsoleWriter + 'static, F: Fn(ForgeConfig) -> A + Send + Sync> UI
                 }
                 return Ok(());
             }
+            TopLevelCommand::Lsp(_) => {
+                // `forge lsp` subcommands are dispatched in main.rs before
+                // the UI starts (same early-exit pattern as `agileplus`).
+                // This arm exists only so the match remains exhaustive.
+                return Ok(());
+            }
         }
         Ok(())
     }

@@ -2,6 +2,8 @@ use std::io::{IsTerminal, Read};
 use std::panic;
 use std::path::PathBuf;
 
+mod lsp;
+
 // Allocator selection per OS:
 //   Linux  — jemalloc (lower fragmentation, higher throughput for long-running
 // streaming).   macOS  — mimalloc (comparable fragmentation wins; jemalloc bug
@@ -235,6 +237,22 @@ async fn run() -> Result<()> {
                     "{}",
                     TitleFormat::error(format!("agileplus: {err}")).display()
                 );
+                std::process::exit(1);
+            }
+        }
+    }
+
+    // Handle forge_lsp subcommands before full UI startup. Each sub-command
+    // spawns rust-analyzer and typescript-language-server and prints the
+    // result to stdout, exiting cleanly without the interactive UI.
+    if let Some(TopLevelCommand::Lsp(cmd)) = &cli.subcommands {
+        match lsp::run(cmd) {
+            Ok(output) => {
+                print!("{output}");
+                return Ok(());
+            }
+            Err(err) => {
+                eprintln!("lsp: {err}");
                 std::process::exit(1);
             }
         }

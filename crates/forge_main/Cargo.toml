@@ -106,6 +106,7 @@ indexmap.workspace = true
 async-recursion.workspace = true
 forge_agileplus.workspace = true
 forge_tracera.workspace = true
+forge_lsp.workspace = true
 
 # ureq is in the dep graph transitively via `update-informer`, but we also
 # use it directly in `helioslite_helper` to download the new binary at
