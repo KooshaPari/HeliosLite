@@ -37,3 +37,8 @@ pub use error::ShareError;
 pub use hub::ShareHub;
 pub use message::ShareMessage;
 pub use queue::{Queue, QueueConsumer, QueueProducer};
+
+/// Re-export of the CLI command tree under the module path required by the
+/// `sharecli attach` ingestion workflow. Downstream callers can refer to
+/// the `Attach` subcommand as `forge_sharecli::commands::Command::Attach`.
+pub use commands::Command;
