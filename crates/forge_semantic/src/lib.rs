@@ -79,6 +79,28 @@ impl StoredRecord {
 }
 
 /// Thread-safe in-memory + file-persisted JSONL adapter.
+///
+/// This is the **default runtime adapter** selected when `FORGE_SEMANTIC_ADAPTER`
+/// is unset (the `Config::from_env()` default is `AdapterKind::Jsonl`, see
+/// `config.rs`). Records are persisted to the file at
+/// `FORGE_SEMANTIC_JSONL_PATH` (default: a per-platform cache path) so that
+/// `recall()` across process restarts surfaces prior conversations.
+///
+/// What this gives you:
+/// - `store()` appends to the file atomically (write-temp-then-rename).
+/// - `recall()` reads from the in-memory cache hydrated from the file at
+///   `open()` time. The cache stays consistent with the file across calls
+///   within a single process lifetime.
+/// - `forget()` removes the matching record from both the cache and the
+///   file (re-serialised on every forget).
+/// - The cache is gated by a `parking_lot::RwLock` so reads are lock-free
+///   under contention.
+///
+/// What this is **not**:
+/// - Not designed for high-throughput concurrent writes from many processes
+///   — the file is single-writer. Use Supermemory / Letta / Cognee for that.
+/// - Not a database — no indexes, no FTS, no paging. Use `recall` only for
+///   small result sets per workspace.
 #[derive(Debug)]
 pub struct JsonlSemanticMemory {
     path: PathBuf,
