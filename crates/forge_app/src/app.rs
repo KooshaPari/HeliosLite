@@ -23,7 +23,7 @@ use crate::tool_resolver::ToolResolver;
 use crate::user_prompt::UserPromptGenerator;
 use crate::{
     AgentExt, AgentProviderResolver, ConversationService, EnvironmentInfra, FileDiscoveryService,
-    ProviderService, Services,
+    ProviderService, Services, WorkspaceService,
 };
 
 /// Builds a [`TemplateConfig`] from a [`ForgeConfig`].
@@ -38,6 +38,94 @@ pub(crate) fn build_template_config(config: &ForgeConfig) -> forge_domain::Templ
         stdout_max_prefix_length: config.max_stdout_prefix_lines,
         stdout_max_suffix_length: config.max_stdout_suffix_lines,
         stdout_max_line_length: config.max_stdout_line_chars,
+    }
+}
+
+/// Stores the conversation summary in the semantic-memory backend (best-effort).
+///
+/// This is wired into the chat-completion path so that every conversation whose
+/// underlying [`ConversationService::upsert_conversation`] succeeds is also
+/// reflected in the semantic-memory adapter selected by
+/// `FORGE_SEMANTIC_ADAPTER` (JSONL by default; Supermemory / Letta / Cognee
+/// when configured). A failure here is logged and swallowed so the chat
+/// completion path is never broken by a memory-side error.
+async fn store_conversation_in_semantic_memory<S>(
+    services: &Arc<S>,
+    conversation: &forge_domain::Conversation,
+) where
+    S: Services + EnvironmentInfra<Config = ForgeConfig>,
+{
+    let services: &S = services.as_ref();
+    // Skip empty conversations — there's nothing meaningful to index.
+    if conversation
+        .title
+        .as_deref()
+        .unwrap_or("")
+        .trim()
+        .is_empty()
+    {
+        return;
+    }
+
+    // Resolve the workspace_id from the conversation's cwd (or fall back to
+    // the runtime environment cwd). init_workspace is idempotent — it returns
+    // the existing workspace for the path if one is already known.
+    let cwd = conversation
+        .cwd
+        .as_deref()
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| services.get_environment().cwd);
+
+    let workspace_id = match services.init_workspace(cwd.clone()).await {
+        Ok(id) => id,
+        Err(err) => {
+            tracing::warn!(
+                workspace = %cwd.display(),
+                error = %err,
+                "skipping semantic-memory store; could not resolve workspace_id",
+            );
+            return;
+        }
+    };
+
+    let namespace = forge_domain::SemanticMemoryNamespace::new(workspace_id);
+    let provenance = forge_domain::SemanticMemoryProvenance::new(
+        conversation.id,
+        namespace.clone(),
+        format!("conversation:{}", conversation.id),
+    );
+
+    // The write payload is the human-readable title + a short text digest of
+    // the context. The full ConversationContext isn't deserialised here to
+    // keep the index lightweight — adapters that need richer payloads can
+    // pull them on recall.
+    let message_count = conversation.message_count.unwrap_or(0);
+    let content = format!(
+        "title: {}\nmessages: {}\ncwd: {}",
+        conversation.title.as_deref().unwrap_or(""),
+        message_count,
+        cwd.display(),
+    );
+
+    let write = match forge_domain::SemanticMemoryWrite::new(
+        forge_domain::SemanticMemoryScope::Episodic,
+        namespace,
+        content,
+        provenance,
+    ) {
+        Ok(w) => w,
+        Err(err) => {
+            tracing::warn!(error = %err, "skipping semantic-memory store; invalid write");
+            return;
+        }
+    };
+
+    if let Err(err) = services.semantic_memory_service().store(write).await {
+        tracing::warn!(
+            conversation_id = %conversation.id,
+            error = %err,
+            "semantic-memory store failed; conversation is still saved",
+        );
     }
 }
 
@@ -200,7 +288,14 @@ impl<S: Services + EnvironmentInfra<Config = forge_config::ForgeConfig>> ForgeAp
 
                     // Always save conversation using get_conversation()
                     let conversation = orch.get_conversation().clone();
-                    let save_result = services.upsert_conversation(conversation).await;
+                    let save_result = services.upsert_conversation(conversation.clone()).await;
+
+                    // Best-effort: mirror the saved conversation into the
+                    // semantic-memory backend so the adapter selected by
+                    // FORGE_SEMANTIC_ADAPTER (JSONL by default; Supermemory /
+                    // Letta / Cognee when configured) reflects it. Failures are
+                    // logged and never break the chat-completion path.
+                    store_conversation_in_semantic_memory(&services, &conversation).await;
 
                     // Send any error to the stream (prioritize dispatch error over save error)
                     #[allow(clippy::collapsible_if)]
