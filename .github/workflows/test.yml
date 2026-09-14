@@ -42,6 +42,53 @@ jobs:
       - name: Rust cache
         uses: Swatinem/rust-cache@7e35be21c2b94d972b1143087fabc27d7dc881ef
 
+      # PR #308 (test(lsp): add e2e integration test against real rust-analyzer
+      # binary) added `crates/forge_lsp/tests/e2e_rust_analyzer.rs`, which
+      # silently passes when `rust-analyzer` is not on PATH. Installing the
+      # prebuilt rust-analyzer here makes the nextest run actually exercise the
+      # LSP round-trip instead of taking the early-return skip path.
+      # We install rust-analyzer before `Install cargo-nextest` so that the
+      # bin dir is populated, then `Rust cache` snapshots the populated dir
+      # on its post step, and `Install cargo-nextest` adds cargo-nextest on
+      # top without the two installs racing for `$GITHUB_PATH` updates.
+      - name: Install rust-analyzer
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "$(uname -s)/$(uname -m)" in
+            Linux/x86_64)  asset="rust-analyzer-x86_64-unknown-linux-gnu"  bin="$HOME/.cargo/bin/rust-analyzer" ;;
+            Linux/aarch64) asset="rust-analyzer-aarch64-unknown-linux-gnu" bin="$HOME/.cargo/bin/rust-analyzer" ;;
+            Darwin/x86_64) asset="rust-analyzer-x86_64-apple-darwin"       bin="$HOME/.cargo/bin/rust-analyzer" ;;
+            Darwin/arm64)  asset="rust-analyzer-aarch64-apple-darwin"      bin="$HOME/.cargo/bin/rust-analyzer" ;;
+            MINGW*|MSYS*|CYGWIN*|Windows_NT/x86_64)
+              asset="rust-analyzer-x86_64-pc-windows-msvc"
+              bin="$HOME/.cargo/bin/rust-analyzer.exe" ;;
+            MINGW*|MSYS*|CYGWIN*|Windows_NT/aarch64)
+              asset="rust-analyzer-aarch64-pc-windows-msvc"
+              bin="$HOME/.cargo/bin/rust-analyzer.exe" ;;
+            *) echo "::error::unsupported platform: $(uname -s)/$(uname -m)" >&2; exit 1 ;;
+          esac
+          mkdir -p "$(dirname "$bin")"
+          url="https://github.com/rust-lang/rust-analyzer/releases/latest/download/${asset}"
+          if [[ "$bin" == *.exe ]]; then
+            tmp="$(mktemp -d)/${asset}.zip"
+            curl -fsSL "${url}.zip" -o "$tmp"
+            unzip -q -o "$tmp" -d "$(dirname "$bin")"
+            rm -rf "$(dirname "$tmp")"
+          else
+            curl -fsSL "${url}.gz" | gunzip -c - > "$bin"
+            chmod +x "$bin"
+          fi
+          "$bin" --version
+          # Make sure cargo's subcommand lookup (used by `cargo nextest run`)
+          # can find `cargo-nextest` regardless of $GITHUB_PATH propagation
+          # quirks between the rust-analyzer install and the nextest step on
+          # ubuntu-24.04 runner images. $GITHUB_PATH is the canonical GH
+          # Actions mechanism for adding a directory to PATH for all
+          # subsequent steps; on this runner image, it is the only reliable
+          # way to extend PATH.
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
       - name: Install cargo-nextest
         uses: taiki-e/install-action@c44f6b046f1c29ae5918b1e0bfdbb2f1813836fd
         with:
