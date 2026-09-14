@@ -26,6 +26,7 @@
 
 #![allow(missing_docs, dead_code, unused)]
 
+pub mod commands;
 pub mod completion;
 pub mod definition;
 pub mod diagnostic;

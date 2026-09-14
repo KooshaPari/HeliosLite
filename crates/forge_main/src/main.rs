@@ -240,6 +240,23 @@ async fn run() -> Result<()> {
         }
     }
 
+    // Handle LSP capability subcommands before the full UI startup. The
+    // facade is synchronous and constructs the language-server subprocesses
+    // on demand, matching the pattern used by the agileplus engine above.
+    if let Some(TopLevelCommand::Lsp(cmd)) = &cli.subcommands {
+        match forge_lsp::commands::run_command(cmd) {
+            Ok(Some(output)) => {
+                print!("{output}");
+                return Ok(());
+            }
+            Ok(None) => return Ok(()),
+            Err(err) => {
+                eprintln!("{}", TitleFormat::error(format!("lsp: {err}")).display());
+                std::process::exit(1);
+            }
+        }
+    }
+
     // Handle worktree creation if specified
     let cwd: PathBuf = match (&cli.sandbox, &cli.directory) {
         (Some(sandbox), Some(cli)) => {

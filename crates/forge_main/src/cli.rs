@@ -215,6 +215,11 @@ pub enum TopLevelCommand {
     /// Inspect the AgilePlus 31-pillar scorecard and velocity reports.
     #[command(subcommand)]
     Agileplus(AgileplusCommandGroup),
+
+    /// Query language-server capabilities (diagnostics, hover, definitions,
+    /// references, rename) through the forge_lsp facade.
+    #[command(subcommand)]
+    Lsp(LspCommandGroup),
 }
 
 /// Arguments for `helioslite heliosdoctor` (or `forge heliosdoctor`).
@@ -857,6 +862,12 @@ pub struct McpLogoutArgs {
 /// <subcommand>`. Each variant maps 1:1 to a subcommand provided by the
 /// `forge_agileplus` crate.
 pub type AgileplusCommandGroup = forge_agileplus::commands::Command;
+/// Command group for language-server capabilities.
+///
+/// Re-export of the [`forge_lsp::commands::Command`] enum so the
+/// `helioslite` / `forge` binary surfaces `helioslite lsp
+/// <subcommand>`.
+pub type LspCommandGroup = forge_lsp::commands::Command;
 /// Configuration scope for settings.
 #[derive(Copy, Clone, Debug, ValueEnum, Default)]
 pub enum Scope {

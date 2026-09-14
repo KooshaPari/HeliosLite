@@ -1507,6 +1507,21 @@ impl<A: API + ConsoleWriter + 'static, F: Fn(ForgeConfig) -> A + Send + Sync> UI
                 }
                 return Ok(());
             }
+            TopLevelCommand::Lsp(cmd) => {
+                // The LSP capability subcommands are dispatched in main.rs
+                // before the UI starts. This arm is a defensive fallback so
+                // the match remains exhaustive.
+                match forge_lsp::commands::run_command(&cmd) {
+                    Ok(Some(output)) => {
+                        print!("{output}");
+                    }
+                    Ok(None) => {}
+                    Err(err) => {
+                        self.writeln_title(TitleFormat::error(format!("lsp: {err}")))?;
+                    }
+                }
+                return Ok(());
+            }
         }
         Ok(())
     }
