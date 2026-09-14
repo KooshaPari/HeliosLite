@@ -28,6 +28,11 @@ tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros", "time
 futures.workspace = true
 serde_json.workspace = true
 bstr.workspace = true
+# Used by tests/sse_e2e.rs — drives the live HTTP path through
+# `commands::run_relay` so the integration test exercises the actual
+# chunked transfer-encoded SSE stream end-to-end (not just the unit-test
+# paths). The `stream` feature unlocks `Response::bytes_stream`.
+reqwest = { workspace = true, features = ["stream"] }
 # Used by tests/composes_with_tracera.rs — proves ShareHub composes
 # with TraceraSink at the wire-shape level. No new external deps are
 # pulled in: `forge_tracera` is a workspace member declared in the
