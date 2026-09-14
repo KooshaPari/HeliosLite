@@ -88,6 +88,10 @@ jobs:
             chmod +x "$bin"
           fi
           "$bin" --version
+          # Make sure the test step's `which rust-analyzer` lookup finds the
+          # binary we just installed. $GITHUB_PATH is the canonical GH Actions
+          # mechanism for adding a directory to PATH for all subsequent steps.
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
 
       - name: cargo test (workspace)
         run: |
