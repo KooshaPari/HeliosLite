@@ -157,7 +157,20 @@ async fn serve(addr: SocketAddr) -> Result<(), CliError> {
         .await
         .map_err(|e| CliError::Serve(format!("bind {addr}: {e}")))?;
     tracing::info!(%addr, "forge share: listening (SSE + WS)");
+    run_relay(hub, listener).await
+}
 
+/// Drive the `forge share` TCP relay against an already-bound [`TcpListener`].
+///
+/// This is the inner accept-loop extracted from [`serve`] so that integration
+/// tests can bind a listener on an ephemeral port and exercise the live
+/// HTTP path end-to-end. Production callers should keep using
+/// [`serve`] (which performs the bind); tests can skip the bind by handing
+/// in their own listener.
+pub async fn run_relay(
+    hub: Arc<ShareHub>,
+    listener: tokio::net::TcpListener,
+) -> Result<(), CliError> {
     loop {
         let (stream, peer) = listener
             .accept()
