@@ -116,15 +116,22 @@ fn parse_addr(host: &str, port: u16) -> Result<SocketAddr, CliError> {
 /// Run a `forge share` subcommand. The `serve` and `attach` subcommands
 /// block until the listener is closed (Ctrl-C / SIGTERM). The other
 /// subcommands return immediately with an optional stdout string.
+///
+/// The blocking subcommands detect whether a tokio runtime is already
+/// live on the calling thread (e.g. when dispatched from
+/// `helioslite`'s main `runtime.block_on(async_main())`). In that
+/// case they off-load the listen-accept loop to a freshly spawned
+/// OS thread that owns its own multi-thread runtime — `block_on` on
+/// a thread already driven by an outer runtime would otherwise panic
+/// with "Cannot start a runtime from within a runtime". When called
+/// from a sync context (a standalone script, the LSP CLI, an
+/// integration test scaffolding), `run_command` builds the runtime
+/// on the calling thread as before.
 pub fn run_command(cmd: &Command) -> Result<Option<String>, CliError> {
     match cmd {
         Command::Serve { host, port } => {
             let addr = parse_addr(host, *port)?;
-            let rt = tokio::runtime::Builder::new_multi_thread()
-                .enable_all()
-                .build()
-                .map_err(|e| CliError::Serve(format!("failed to build runtime: {e}")))?;
-            rt.block_on(serve(addr))?;
+            run_serve_blocking(addr)?;
             Ok(None)
         }
         Command::Publish { topic, payload } => {
@@ -140,24 +147,121 @@ pub fn run_command(cmd: &Command) -> Result<Option<String>, CliError> {
         Command::Attach { topic, bind, session_id } => {
             let topic = topic.clone();
             let bind = bind.clone();
-            let session_id = session_id.clone();
-            let rt = tokio::runtime::Builder::new_multi_thread()
-                .enable_all()
-                .build()
-                .map_err(|e| CliError::Serve(format!("failed to build runtime: {e}")))?;
-            rt.block_on(attach(&topic, &bind, session_id.as_deref()))?;
+            let session_id_outer = session_id;
+            run_attach_blocking(&topic, &bind, session_id_outer.as_deref())?;
             Ok(None)
         }
     }
 }
 
+/// Drive `serve(addr)` either inline (no outer runtime) or on a
+/// dedicated OS thread that owns its own multi-thread runtime
+/// (called from inside another runtime's worker — the helioslite
+/// `main` path).
+fn run_serve_blocking(addr: SocketAddr) -> Result<(), CliError> {
+    match tokio::runtime::Handle::try_current() {
+        // No outer runtime — build one on the calling thread and
+        // drive `serve` to completion.
+        Err(_) => {
+            let rt = tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()
+                .map_err(|e| CliError::Serve(format!("failed to build runtime: {e}")))?;
+            rt.block_on(serve(addr))
+        }
+        // `Handle::current()` only succeeds if the calling thread is
+        // *being driven by* a runtime, in which case `block_on` would
+        // panic. Off-load to a fresh OS thread instead. The
+        // dedicated thread owns its own runtime, so we need to move
+        // the (cheap, `Copy`) `SocketAddr` into the closure.
+        Ok(_) => {
+            let addr_owned = addr;
+            run_on_dedicated_thread(move |rt| rt.block_on(serve(addr_owned)))
+                .and_then(|inner| inner)
+        }
+    }
+}
+
+/// Mirror of [`run_serve_blocking`] for the `attach` subcommand.
+fn run_attach_blocking(
+    topic: &str,
+    bind: &str,
+    session_id: Option<&str>,
+) -> Result<(), CliError> {
+    match tokio::runtime::Handle::try_current() {
+        Err(_) => {
+            let rt = tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()
+                .map_err(|e| CliError::Serve(format!("failed to build runtime: {e}")))?;
+            rt.block_on(attach(topic, bind, session_id))
+        }
+        // `topic`/`bind`/`session_id` are short-lived borrows
+        // owned by the caller; clone them into `String`/`Option<String>`
+        // so the dedicated-thread closure can outlive this stack frame.
+        Ok(_) => {
+            let topic = topic.to_owned();
+            let bind = bind.to_owned();
+            let session_id = session_id.map(str::to_owned);
+            run_on_dedicated_thread(move |rt| {
+                rt.block_on(attach(&topic, &bind, session_id.as_deref()))
+            })
+            .and_then(|inner| inner)
+        }
+    }
+}
+
+/// Spin up a dedicated OS thread, give it its own multi-thread
+/// runtime, drive `f` to completion via `block_on` there, and return
+/// the result to the caller. The dedicated thread is *not* part of
+/// any other runtime, so `block_on` is safe even when the caller is
+/// currently inside another runtime's worker thread.
+///
+/// We deliberately use a `std::thread::spawn` instead of
+/// `Handle::spawn_blocking` because the inner future wants to
+/// *drive* the runtime (with `block_on`); spawning it onto
+/// `spawn_blocking` would deadlock that inner runtime's IO/timer
+/// drivers. Owning a dedicated runtime on a dedicated thread is the
+/// only configuration where `block_on` does not clash with a
+/// pre-existing runtime.
+fn run_on_dedicated_thread<F, T>(f: F) -> Result<T, CliError>
+where
+    F: FnOnce(&tokio::runtime::Runtime) -> T + Send + 'static,
+    T: Send + 'static,
+{
+    let (tx, rx) = std::sync::mpsc::channel::<Result<T, String>>();
+    std::thread::Builder::new()
+        .name("share-cli-runtime".into())
+        .spawn(move || {
+            let result = match tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()
+            {
+                Ok(rt) => Ok(f(&rt)),
+                Err(e) => Err(format!("failed to build runtime: {e}")),
+            };
+            let _ = tx.send(result);
+        })
+        .map_err(|e| CliError::Serve(format!("failed to spawn dedicated runtime thread: {e}")))?;
+    rx.recv()
+        .map_err(|e| CliError::Serve(format!("dedicated runtime thread disconnected: {e}")))?
+        .map_err(CliError::Serve)
+}
+
 async fn serve(addr: SocketAddr) -> Result<(), CliError> {
+    eprintln!("[share-serve-debug] entering serve({addr})");
     let hub = Arc::new(ShareHub::new());
-    let listener = tokio::net::TcpListener::bind(addr)
-        .await
-        .map_err(|e| CliError::Serve(format!("bind {addr}: {e}")))?;
-    tracing::info!(%addr, "forge share: listening (SSE + WS)");
-    run_relay(hub, listener).await
+    match tokio::net::TcpListener::bind(addr).await {
+        Ok(listener) => {
+            eprintln!("[share-serve-debug] bound {addr}");
+            tracing::info!(%addr, "forge share: listening (SSE + WS)");
+            run_relay(hub, listener).await
+        }
+        Err(e) => {
+            eprintln!("[share-serve-debug] bind failed for {addr}: {e}");
+            Err(CliError::Serve(format!("bind {addr}: {e}")))
+        }
+    }
 }
 
 /// Drive the `forge share` TCP relay against an already-bound [`TcpListener`].
