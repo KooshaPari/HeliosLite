@@ -5727,6 +5727,10 @@ impl<A: API + ConsoleWriter + 'static, F: Fn(ForgeConfig) -> A + Send + Sync> UI
             crate::cli::ConfigCommand::Migrate => {
                 self.handle_config_migrate()?;
             }
+            crate::cli::ConfigCommand::Schema => {
+                let surface = forge_config::schema();
+                self.writeln(surface.render_table())?;
+            }
         }
         Ok(())
     }
