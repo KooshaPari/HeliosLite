@@ -32,6 +32,7 @@
 //! A 30-second wall-clock budget caps the round-trip test so a hung
 //! `rust-analyzer` surfaces as a clean failure rather than stalling CI.
 
+use bstr::ByteSlice;
 use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
@@ -69,10 +70,10 @@ fn helioslite_lsp_help_enumerates_capabilities() {
         output.status.success(),
         "helioslite lsp --help exited non-zero: status={:?}\nstderr:\n{}",
         output.status,
-        String::from_utf8_lossy(&output.stderr)
+        output.stderr.as_slice().to_str_lossy()
     );
 
-    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stdout = output.stdout.as_slice().to_str_lossy();
 
     // The CLI parser must surface every LSP capability the facade
     // implements. Missing entries here would mean the binary was built
@@ -123,7 +124,7 @@ fn helioslite_lsp_definition_rejects_nonexistent_path_with_clean_error() {
         .output()
         .expect("spawn `helioslite lsp definition` with missing path");
 
-    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stderr = output.stderr.as_slice().to_str_lossy();
 
     // Must exit non-zero — a successful call would mean the CLI
     // silently swallowed a bad path, which would be a regression.
@@ -182,7 +183,7 @@ fn helioslite_lsp_hover_rejects_nonexistent_path_with_clean_error() {
         .output()
         .expect("spawn `helioslite lsp hover` with missing path");
 
-    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stderr = output.stderr.as_slice().to_str_lossy();
 
     assert!(
         !output.status.success(),
@@ -337,7 +338,7 @@ fn find_rust_analyzer() -> Option<PathBuf> {
     if !output.status.success() {
         return None;
     }
-    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stdout = output.stdout.as_slice().to_str_lossy();
     let candidate = stdout
         .lines()
         .map(str::trim)
