@@ -318,16 +318,16 @@ impl<S: Services + EnvironmentInfra<Config = forge_config::ForgeConfig>> ForgeAp
             .into_owned();
         let recalled = recall_workspace_episodic_context(&self.services, &query_text).await;
         let mut custom_instructions = custom_instructions;
-        if let Some(recall) = recalled {
-            if !recall.is_empty() {
-                let combined = if custom_instructions.is_empty() {
-                    recall
-                } else {
-                    let existing = custom_instructions.join("\n\n");
-                    format!("{}\n\n{}", existing, recall)
-                };
-                custom_instructions = vec![combined];
-            }
+        if let Some(recall) = recalled
+            && !recall.is_empty()
+        {
+            let combined = if custom_instructions.is_empty() {
+                recall
+            } else {
+                let existing = custom_instructions.join("\n\n");
+                format!("{}\n\n{}", existing, recall)
+            };
+            custom_instructions = vec![combined];
         }
 
         // Prepare agents with user configuration
