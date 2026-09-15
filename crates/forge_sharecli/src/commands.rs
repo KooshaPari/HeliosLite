@@ -183,11 +183,7 @@ fn run_serve_blocking(addr: SocketAddr) -> Result<(), CliError> {
 }
 
 /// Mirror of [`run_serve_blocking`] for the `attach` subcommand.
-fn run_attach_blocking(
-    topic: &str,
-    bind: &str,
-    session_id: Option<&str>,
-) -> Result<(), CliError> {
+fn run_attach_blocking(topic: &str, bind: &str, session_id: Option<&str>) -> Result<(), CliError> {
     match tokio::runtime::Handle::try_current() {
         Err(_) => {
             let rt = tokio::runtime::Builder::new_multi_thread()
