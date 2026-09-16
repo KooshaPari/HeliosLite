@@ -1,0 +1,5 @@
+# Use git CLI for fetching instead of libgit2 — needed because
+# PhenoShared has 100+ submodules (many broken/deleted) and
+# libgit2 tries to fetch them all.
+[net]
+git-fetch-with-cli = true
