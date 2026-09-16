@@ -98,8 +98,11 @@ jobs:
         shell: bash
         env:
           RUSTFLAGS: "-D warnings"
-          CARGO_HOME: "/home/runner/.cargo"
         run: |
           set -euo pipefail
-          export PATH="$HOME/.cargo/bin:$PATH"
-          cargo nextest run --all-features --workspace
+          # rustup toolchain bin dir (contains rustc, cargo, etc.)
+          RUSTUP_BIN="$(dirname "$(command -v rustc)")"
+          export PATH="$RUSTUP_BIN:$HOME/.cargo/bin:$PATH"
+          # cargo-nextest is at ~/.cargo/bin; invoke directly to bypass
+          # cargo's subcommand lookup which fails when CARGO_HOME is overridden.
+          exec "$HOME/.cargo/bin/cargo-nextest" nextest run --all-features --workspace
