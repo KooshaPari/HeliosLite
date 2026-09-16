@@ -273,10 +273,10 @@ forge_paste = { path = "crates/forge_paste" }
 forge_pheno_shell = { path = "crates/forge_pheno_shell" }
 forge_render = { path = "crates/forge_render" }
 
-# ── PhenoShared cross-consumption (local path) ──────────────────
-phenotype-health = { path = "/Users/kooshapari/CodeProjects/Phenotype/repos/phenoAI/crates/phenotype-health" }
-phenotype-observability = { path = "/Users/kooshapari/CodeProjects/Phenotype/repos/phenoAI/crates/phenotype-observability" }
-phenotype-telemetry = { path = "/Users/kooshapari/CodeProjects/Phenotype/repos/phenoAI/crates/phenotype-telemetry" }
+# ── PhenoShared cross-consumption (pinned) ──────────────────────
+phenotype-health = { git = "https://github.com/KooshaPari/PhenoShared.git", rev = "82d7f473" }
+phenotype-observability = { git = "https://github.com/KooshaPari/PhenoShared.git", rev = "82d7f473" }
+phenotype-telemetry = { git = "https://github.com/KooshaPari/PhenoShared.git", rev = "82d7f473" }
 
 [workspace.dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }
