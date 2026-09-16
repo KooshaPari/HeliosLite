@@ -53,6 +53,9 @@ google-cloud-auth.workspace = true
 open.workspace = true
 aws-config.workspace = true
 aws-credential-types.workspace = true
+phenotype-health.workspace = true
+phenotype-observability.workspace = true
+phenotype-telemetry.workspace = true
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt", "time", "test-util"] }
