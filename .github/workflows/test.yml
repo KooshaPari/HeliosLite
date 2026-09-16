@@ -97,4 +97,6 @@ jobs:
       - name: cargo nextest run
         env:
           RUSTFLAGS: "-D warnings"
-        run: cargo nextest run --all-features --workspace
+        run: |
+          export PATH="$HOME/.cargo/bin:$PATH"
+          cargo nextest run --all-features --workspace

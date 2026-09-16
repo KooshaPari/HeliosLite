@@ -49,7 +49,7 @@ jobs:
       - name: Verify rev pin or path consistency
         run: |
           if grep -q 'PhenoShared.git' Cargo.toml; then
-            EXPECTED="82d7f473"
+            EXPECTED="68beca26"
             ACTUAL=$(grep -A1 'PhenoShared.git' Cargo.toml | grep rev | sed 's/.*rev = "\(.*\)".*/\1/')
             if [ "$ACTUAL" != "$EXPECTED" ]; then
               echo "✗ Rev mismatch: expected $EXPECTED, got $ACTUAL"
