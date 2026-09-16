@@ -100,12 +100,16 @@ jobs:
           RUSTFLAGS: "-D warnings"
         run: |
           set -euo pipefail
-          # Resolve CARGO_HOME to locate the cargo-nextest binary
-          # installed by taiki-e/install-action in a prior step.
-          CARGO_BIN="${CARGO_HOME:-$HOME/.cargo}/bin"
-          NEXTEST="$CARGO_BIN/cargo-nextest"
-          if [ ! -x "$NEXTEST" ]; then
-            echo "::error::cargo-nextest not found at $NEXTEST" >&2
-            exit 1
-          fi
-          "$NEXTEST" nextest run --all-features --workspace
+          # Find cargo-nextest. taiki-e/install-action installs to the
+          # default CARGO_HOME (~/.cargo/bin), but actions-rust-lang/setup-rust-toolchain
+          # may override CARGO_HOME for the cargo binary itself.
+          # Check both locations.
+          for dir in "${CARGO_HOME:-$HOME/.cargo}/bin" "$HOME/.cargo/bin"; do
+            if [ -x "$dir/cargo-nextest" ]; then
+              echo "Found cargo-nextest at $dir/cargo-nextest"
+              "$dir/cargo-nextest" nextest run --all-features --workspace
+              exit 0
+            fi
+          done
+          echo "::error::cargo-nextest not found" >&2
+          exit 1
