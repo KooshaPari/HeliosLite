@@ -398,7 +398,7 @@ fn build_commit_command(message: &str, flags: &str, use_forge_committer: bool) -
     let escaped_message = message.replace('\'', r"'\''");
     if use_forge_committer {
         format!(
-            "GIT_COMMITTER_NAME='ForgeCode' GIT_COMMITTER_EMAIL='noreply@forgecode.dev' git commit {flags} -m '{escaped_message}'"
+            "GIT_COMMITTER_NAME='HeliosLite' GIT_COMMITTER_EMAIL='noreply@helioslite.dev' git commit {flags} -m '{escaped_message}'"
         )
     } else {
         format!("git commit {flags} -m '{escaped_message}'")
@@ -414,14 +414,14 @@ mod tests {
     #[test]
     fn test_build_commit_command_with_forge_committer_staged() {
         let actual = build_commit_command("feat: add feature", "", true);
-        let expected = "GIT_COMMITTER_NAME='ForgeCode' GIT_COMMITTER_EMAIL='noreply@forgecode.dev' git commit  -m 'feat: add feature'";
+        let expected = "GIT_COMMITTER_NAME='HeliosLite' GIT_COMMITTER_EMAIL='noreply@helioslite.dev' git commit  -m 'feat: add feature'";
         assert_eq!(actual, expected);
     }
 
     #[test]
     fn test_build_commit_command_with_forge_committer_unstaged() {
         let actual = build_commit_command("fix: bug", " -a", true);
-        let expected = "GIT_COMMITTER_NAME='ForgeCode' GIT_COMMITTER_EMAIL='noreply@forgecode.dev' git commit  -a -m 'fix: bug'";
+        let expected = "GIT_COMMITTER_NAME='HeliosLite' GIT_COMMITTER_EMAIL='noreply@helioslite.dev' git commit  -a -m 'fix: bug'";
         assert_eq!(actual, expected);
     }
 
@@ -442,7 +442,7 @@ mod tests {
     #[test]
     fn test_build_commit_command_escapes_single_quotes() {
         let actual = build_commit_command("feat: it's done", "", true);
-        let expected = "GIT_COMMITTER_NAME='ForgeCode' GIT_COMMITTER_EMAIL='noreply@forgecode.dev' git commit  -m 'feat: it'\\''s done'";
+        let expected = "GIT_COMMITTER_NAME='HeliosLite' GIT_COMMITTER_EMAIL='noreply@helioslite.dev' git commit  -m 'feat: it'\\''s done'";
         assert_eq!(actual, expected);
     }
 }

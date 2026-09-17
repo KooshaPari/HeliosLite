@@ -198,7 +198,7 @@ impl<F: forge_app::FileWriterInfra + 'static> ForgeHttpInfra<F> {
         );
         headers.insert(
             "HTTP-Referer",
-            HeaderValue::from_static("https://forgecode.dev"),
+            HeaderValue::from_static("https://helioslite.dev"),
         );
         headers.insert(
             reqwest::header::CONNECTION,
