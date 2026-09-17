@@ -1328,9 +1328,7 @@ impl<A: API + ConsoleWriter + 'static, F: Fn(ForgeConfig) -> A + Send + Sync> UI
                         line.push_str(&format!("\nlegacy_db={}", legacy.display()));
                     }
                     // Gate 7: Rename channel indicator
-                    let rename_channel = if is_helioslite_binary_name(
-                        &info.binary_stem,
-                    ) {
+                    let rename_channel = if is_helioslite_binary_name(&info.binary_stem) {
                         "helioslite"
                     } else {
                         "forge-deprecated"
