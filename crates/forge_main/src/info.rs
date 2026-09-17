@@ -643,7 +643,7 @@ impl From<&UserUsage> for Info {
             info = info.add_key_value(
                 "Subscription",
                 format!(
-                    "{} [Upgrade https://app.forgecode.dev/app/billing]",
+                    "{} [Upgrade https://app.helioslite.dev/app/billing]",
                     plan.r#type.to_uppercase()
                 ),
             );

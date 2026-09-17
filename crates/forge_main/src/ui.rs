@@ -639,6 +639,30 @@ impl<A: API + ConsoleWriter + 'static, F: Fn(ForgeConfig) -> A + Send + Sync> UI
     }
 
     async fn run_inner(&mut self) -> Result<()> {
+        // Gate 7: Legacy deprecation tombstone. When invoked as `forge` or
+        // `forge-dev`, warn the user that these binary names are deprecated
+        // and will be removed in a future release.
+        if !is_helioslite_binary_name(
+            &std::env::args_os()
+                .next()
+                .and_then(|arg| {
+                    std::path::Path::new(&arg)
+                        .file_stem()
+                        .map(|stem| stem.to_string_lossy().into_owned())
+                })
+                .unwrap_or_default(),
+        ) {
+            eprintln!(
+                "{}",
+                TitleFormat::warning(
+                    "\"forge\" and \"forge-dev\" are deprecated. \
+                     Use the \"helioslite\" binary instead. \
+                     This binary will be removed in a future release."
+                )
+                .display()
+            );
+        }
+
         if let Some(cmd) = self.cli.subcommands.clone() {
             return self.handle_subcommands(cmd).await;
         }
@@ -1303,13 +1327,25 @@ impl<A: API + ConsoleWriter + 'static, F: Fn(ForgeConfig) -> A + Send + Sync> UI
                     if let Some(legacy) = info.legacy_db_path.as_ref() {
                         line.push_str(&format!("\nlegacy_db={}", legacy.display()));
                     }
+                    // Gate 7: Rename channel indicator
+                    let rename_channel = if is_helioslite_binary_name(&info.binary_stem) {
+                        "helioslite"
+                    } else {
+                        "forge-deprecated"
+                    };
+                    line.push_str(&format!("\nrename_channel={rename_channel}"));
                     line.push('\n');
                     self.writeln(line)?;
                 } else {
                     self.writeln(format!(
-                        "heliosLite/forge diagnostics\n  version            : {}\n  binary identity    : {}\n  config source      : {}\n  base path          : {}\n  db path            : {}\n  updater repo       : {}\n  updater binary tag : {}\n",
+                        "heliosLite/forge diagnostics\n  version            : {}\n  binary identity    : {}\n  rename channel     : {}\n  config source      : {}\n  base path          : {}\n  db path            : {}\n  updater repo       : {}\n  updater binary tag : {}\n",
                         info.version,
                         info.binary_stem,
+                        if is_helioslite_binary_name(&info.binary_stem) {
+                            "helioslite (active)"
+                        } else {
+                            "forge-deprecated (migrate to helioslite)"
+                        },
                         info.config_source,
                         info.base_path.display(),
                         info.db_path.display(),
@@ -6456,7 +6492,7 @@ impl<A: API + ConsoleWriter + 'static, F: Fn(ForgeConfig) -> A + Send + Sync> UI
         if let Some(result) = result {
             self.writeln_title(
                 TitleFormat::warning("Forge no longer reads API keys from environment variables.")
-                    .sub_title("Learn more: https://forgecode.dev/docs/custom-providers/"),
+                    .sub_title("Learn more: https://helioslite.dev/docs/custom-providers/"),
             )?;
 
             let count = result.migrated_providers.len();

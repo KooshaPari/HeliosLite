@@ -199,7 +199,7 @@ pub struct ForgeConfig {
     /// Base URL of the Forge services API used for semantic search and
     /// indexing.
     #[serde(default)]
-    #[dummy(expr = "\"https://api.forgecode.dev/api\".to_string()")]
+    #[dummy(expr = "\"https://api.helioslite.dev/api\".to_string()")]
     pub services_url: String,
     /// Maximum number of file extensions included in the agent system prompt.
     #[serde(default)]

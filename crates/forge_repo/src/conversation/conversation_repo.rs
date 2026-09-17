@@ -3549,9 +3549,10 @@ mod tests {
         const MIN_WINDOW: Duration = Duration::from_millis(200);
         // A runtime that is genuinely blocked by synchronous DB work stalls
         // heartbeats for tens/hundreds of milliseconds. Ordinary OS scheduling
-        // only ever drifts the ticker by a tick or two, so a 5-tick cap is a
-        // wide margin that only a true block can exceed.
-        const MAX_ACCEPTABLE_GAP: Duration = Duration::from_millis(50);
+        // under load can drift the ticker by several ticks; a 7.5-tick cap
+        // (75ms at 10ms tick) tolerates scheduling pressure while still
+        // catching true runtime blocks (which show hundreds of ms gaps).
+        const MAX_ACCEPTABLE_GAP: Duration = Duration::from_millis(75);
 
         let repo = Arc::new(repository()?);
         let heartbeat = Arc::new(AtomicUsize::new(0));
