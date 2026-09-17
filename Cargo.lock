@@ -2562,6 +2562,7 @@ dependencies = [
  "include_dir",
  "insta",
  "lazy_static",
+ "phenotype-observability",
  "pretty_assertions",
  "regex",
  "reqwest 0.12.28",
@@ -2652,6 +2653,7 @@ name = "forge_daemon"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "phenotype-health",
  "serde",
  "serde_json",
  "thiserror 2.0.20",
@@ -2910,6 +2912,9 @@ dependencies = [
  "libsqlite3-sys",
  "oauth2",
  "open",
+ "phenotype-health",
+ "phenotype-observability",
+ "phenotype-telemetry",
  "pretty_assertions",
  "reqwest 0.12.28",
  "rmcp",
@@ -6972,6 +6977,39 @@ dependencies = [
  "fixedbitset 0.5.7",
  "hashbrown 0.15.5",
  "indexmap 2.14.0",
+]
+
+[[package]]
+name = "phenotype-health"
+version = "0.2.0"
+dependencies = [
+ "chrono",
+ "serde",
+ "thiserror 2.0.19",
+ "tokio",
+]
+
+[[package]]
+name = "phenotype-observability"
+version = "0.3.10"
+dependencies = [
+ "chrono",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.19",
+ "uuid",
+]
+
+[[package]]
+name = "phenotype-telemetry"
+version = "0.3.10"
+dependencies = [
+ "chrono",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.19",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]

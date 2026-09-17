@@ -1,0 +1,165 @@
+# CVP — Continuous Validation Pipeline for HeliosLite
+#
+# Validates cross-consumption of PhenoShared crates, full workspace
+# compilation, tests, lint, and coverage. Runs on push to main and PRs.
+
+name: cvp
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  RUSTFLAGS: "-Dwarnings"
+
+jobs:
+  # ── Gate 1: Cross-consumption validation ──────────────────────
+  cross-consumption:
+    name: "CVP: PhenoShared cross-consumption"
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: cvp-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+      - name: Verify PhenoShared deps resolve
+        run: |
+          cargo fetch 2>&1 | tee /tmp/cvp-fetch.log
+          echo "✓ Dependencies fetched"
+      - name: Check cross-consumed crates compile
+        run: |
+          cargo check -p phenotype-health -p phenotype-observability -p phenotype-telemetry 2>&1
+          echo "✓ Cross-consumed crates compile"
+      - name: Verify rev pin or path consistency
+        run: |
+          if grep -q 'PhenoShared.git' Cargo.toml; then
+            EXPECTED="68beca26"
+            ACTUAL=$(grep -A1 'PhenoShared.git' Cargo.toml | grep rev | sed 's/.*rev = "\(.*\)".*/\1/')
+            if [ "$ACTUAL" != "$EXPECTED" ]; then
+              echo "✗ Rev mismatch: expected $EXPECTED, got $ACTUAL"
+              exit 1
+            fi
+            echo "✓ Rev pin consistent: $ACTUAL"
+          else
+            echo "✓ Using local path deps (CI should switch to git rev pin)"
+          fi
+
+  # ── Gate 2: Full workspace build ─────────────────────────────
+  build:
+    name: "CVP: Full workspace build"
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: cvp-build-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+      - name: cargo check --workspace
+        run: cargo check --workspace 2>&1
+
+  # ── Gate 3: Tests ────────────────────────────────────────────
+  test:
+    name: "CVP: Workspace tests"
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    needs: [build]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: cvp-test-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+      - name: Run workspace tests
+        run: cargo test --workspace 2>&1
+
+  # ── Gate 4: Lint ─────────────────────────────────────────────
+  lint:
+    name: "CVP: Clippy + format"
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: cvp-lint-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+      - name: Format check
+        run: cargo fmt --all -- --check 2>&1
+      - name: Clippy
+        run: cargo clippy --workspace -- -D warnings 2>&1
+
+  # ── Gate 5: Coverage ─────────────────────────────────────────
+  coverage:
+    name: "CVP: Coverage"
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    needs: [build, test]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Install cargo-llvm-cov
+        run: cargo install cargo-llvm-cov
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: cvp-cov-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+      - name: Generate coverage
+        run: |
+          cargo llvm-cov --all-features --workspace --lcov --output-path lcov.info 2>&1
+          echo "✓ Coverage generated"
+      - name: Upload coverage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: lcov.info
+          retention-days: 30
