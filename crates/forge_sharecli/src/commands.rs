@@ -295,7 +295,13 @@ pub async fn run_relay(
                     Ok(Ok(n)) => n,
                     _ => 0,
                 };
-                let head = std::str::from_utf8(&buf[..n])
+                // `.get(..n)` instead of `&buf[..n]`: panicking slice indexing is
+                // denied in CI (`-D clippy::indexing_slicing`). An out-of-range
+                // `n` or invalid UTF-8 yields an empty head, exactly like the
+                // previous `from_utf8(..).unwrap_or_default()` on an error.
+                let head = buf
+                    .get(..n)
+                    .and_then(|bytes| std::str::from_utf8(bytes).ok())
                     .map(str::to_ascii_lowercase)
                     .unwrap_or_default();
                 head.contains("upgrade: websocket") || head.contains("get /ws/")

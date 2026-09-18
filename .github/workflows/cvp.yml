@@ -49,13 +49,19 @@ jobs:
       - name: Verify rev pin or path consistency
         run: |
           if grep -q 'PhenoShared.git' Cargo.toml; then
-            EXPECTED="68beca26"
-            ACTUAL=$(grep -m1 'PhenoShared.git' Cargo.toml | sed 's/.*rev = "\(.*\)".*/\1/')
-            if [ "$ACTUAL" != "$EXPECTED" ]; then
-              echo "✗ Rev mismatch: expected $EXPECTED, got $ACTUAL"
+            # The three cross-consumed deps (phenotype-health,
+            # phenotype-observability, phenotype-telemetry) must agree on a
+            # single rev. Comparing against a hard-coded rev value instead made
+            # this job fail on every legitimate repin (e.g. 68beca26 ->
+            # cf914698, which is the Windows path/invalid-char fix).
+            PINS=$(grep 'PhenoShared.git' Cargo.toml | sed -n 's/.*rev = "\([^"]*\)".*/\1/p' | sort -u)
+            TOTAL=$(grep -c 'PhenoShared.git' Cargo.toml)
+            DISTINCT=$(printf '%s\n' "$PINS" | grep -c .)
+            if [ "$DISTINCT" -ne 1 ] || [ -z "$PINS" ]; then
+              echo "✗ PhenoShared rev pins disagree or are missing: ${PINS:-<none>}"
               exit 1
             fi
-            echo "✓ Rev pin consistent: $ACTUAL"
+            echo "✓ Rev pin consistent across $TOTAL deps: $PINS"
           else
             echo "✓ Using local path deps (CI should switch to git rev pin)"
           fi
