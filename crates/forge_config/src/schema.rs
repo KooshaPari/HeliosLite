@@ -210,8 +210,8 @@ impl SchemaSurface {
         // Column widths derived from data.
         let headers = ["subcommand", "name", "env_var", "default", "description"];
         let mut widths = [0usize; 5];
-        for (i, h) in headers.iter().enumerate() {
-            widths[i] = h.len();
+        for (w, h) in widths.iter_mut().zip(headers.iter()) {
+            *w = h.len();
         }
         for entry in &self.entries {
             widths[0] = widths[0].max(entry.subcommand.as_str().len());
@@ -237,10 +237,8 @@ impl SchemaSurface {
         ));
         // Separator.
         let sep: Vec<String> = widths.iter().map(|w| "-".repeat(*w)).collect();
-        out.push_str(&format!(
-            "{}  {}  {}  {}  {}\n",
-            sep[0], sep[1], sep[2], sep[3], sep[4]
-        ));
+        out.push_str(&sep.join("  "));
+        out.push('\n');
 
         // Body rows.
         for entry in &self.entries {
