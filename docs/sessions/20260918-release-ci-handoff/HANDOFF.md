@@ -27,19 +27,19 @@ and the GitHub release gets the forge/helioslite/forge_dbd binaries for all 9 ta
 | `main` HEAD | `97bff227a` (handoff doc), code HEAD `bdb183311` |
 | Assets attached | **55 assets on h.0.2.6** (27 binaries + 27 `.sha256` + `sbom.cdx.json`) — mission met |
 
-**Final CI status on `main` @ `a90e636b8`** (verified after all fixes landed):
+**Final CI status on `main` @ `a8ad28703`** — every workflow green (verified from the public Actions UI after the GitHub API was exhausted for this host; `release.yml` refers to the h.0.2.6 release run):
 
 | Workflow | Conclusion |
 |---|---|
 | `release.yml` (Multi Channel Release, h.0.2.6) | **success — 55 assets published** |
 | `ci.yml` | success |
+| `test.yml` | success (§4.7 resolved; §4.11 for the nextest root cause) |
 | `platform-tests.yml` (macos + windows) | success |
 | `cvp.yml` | success |
 | `autofix.yml` | success |
 | `cargo-deny.yml` | success |
 | `benchmarks.yml` | success |
 | `lint.yml`, `trunk-check.yml`, `scorecard.yml`, `codeql.yml` | success |
-| `test.yml` | **success** (§4.7 resolved in `3b1ebf4e7`) |
 
 **Mission status: COMPLETE.** Run `35327228065` (h.0.2.6) concluded `completed success` with
 every job green — 9 `build-release` jobs, 4 sign jobs (2 macOS signed, 2 Windows skip-path),
@@ -336,7 +336,16 @@ slow-timeout = { period = "10s", terminate-after = 9, grace-period = "0s" }
 ```
 
 **Lesson for future CI work here: any test that spawns a language server must fit the 30s
-terminate-after, or take an explicit nextest override.** Reading run status without the API is
+terminate-after, or take an explicit nextest override.**
+
+### 4.11 Reading CI without the API (useful when rate-limited)
+
+When `gh` is rate-limited or its token is invalid, the public web UI is server-rendered and
+sufficient:
+- `github.com/<owner>/<repo>/actions/workflows/<file>` lists runs; each run row carries an
+  `aria-label` of `completed successfully` / `failed` / `cancelled` / `currently running`.
+- `github.com/<owner>/<repo>/actions/runs/<id>/job/<jobId>` exposes an **Annotations** block that
+  names the failing step and exit code (this is how the nextest exit 100 was found). Reading run status without the API is
 possible via the public web UI (`github.com/<owner>/<repo>/actions/workflows/<file>` is
 server-rendered; per-run job pages expose an Annotations block with the step and exit code).
 
