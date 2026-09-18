@@ -63,35 +63,44 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          # Install into a dedicated dir, NEVER into $HOME/.cargo/bin: on
+          # rustup-based setups `$HOME/.cargo/bin/rust-analyzer` is a symlink to
+          # the `rustup` binary, so `> "$bin"` follows it and overwrites rustup
+          # itself. Every shim (cargo, rustc, cargo-clippy, ...) then becomes the
+          # rust-analyzer binary, producing nonsense like
+          # `unexpected argument: "clippy"` (run 35336692859) and
+          # `rustc -vV` printing `rust-analyzer 0.3.3049-standalone`
+          # (run 35334658326).
+          install_dir="$RUNNER_TEMP/rust-analyzer-bin"
+          mkdir -p "$install_dir"
           case "$(uname -s)/$(uname -m)" in
-            Linux/x86_64)  asset="rust-analyzer-x86_64-unknown-linux-gnu"  bin="$HOME/.cargo/bin/rust-analyzer" ;;
-            Linux/aarch64) asset="rust-analyzer-aarch64-unknown-linux-gnu" bin="$HOME/.cargo/bin/rust-analyzer" ;;
-            Darwin/x86_64) asset="rust-analyzer-x86_64-apple-darwin"       bin="$HOME/.cargo/bin/rust-analyzer" ;;
-            Darwin/arm64)  asset="rust-analyzer-aarch64-apple-darwin"      bin="$HOME/.cargo/bin/rust-analyzer" ;;
+            Linux/x86_64)  asset="rust-analyzer-x86_64-unknown-linux-gnu"  bin="$install_dir/rust-analyzer" ;;
+            Linux/aarch64) asset="rust-analyzer-aarch64-unknown-linux-gnu" bin="$install_dir/rust-analyzer" ;;
+            Darwin/x86_64) asset="rust-analyzer-x86_64-apple-darwin"       bin="$install_dir/rust-analyzer" ;;
+            Darwin/arm64)  asset="rust-analyzer-aarch64-apple-darwin"      bin="$install_dir/rust-analyzer" ;;
             MINGW*|MSYS*|CYGWIN*|Windows_NT/x86_64)
               asset="rust-analyzer-x86_64-pc-windows-msvc"
-              bin="$HOME/.cargo/bin/rust-analyzer.exe" ;;
+              bin="$install_dir/rust-analyzer.exe" ;;
             MINGW*|MSYS*|CYGWIN*|Windows_NT/aarch64)
               asset="rust-analyzer-aarch64-pc-windows-msvc"
-              bin="$HOME/.cargo/bin/rust-analyzer.exe" ;;
+              bin="$install_dir/rust-analyzer.exe" ;;
             *) echo "::error::unsupported platform: $(uname -s)/$(uname -m)" >&2; exit 1 ;;
           esac
-          mkdir -p "$(dirname "$bin")"
           url="https://github.com/rust-lang/rust-analyzer/releases/latest/download/${asset}"
+          # rm first so a stale symlink can never be followed by the redirect.
+          rm -f "$bin"
           if [[ "$bin" == *.exe ]]; then
             tmp="$(mktemp -d)/${asset}.zip"
             curl -fsSL "${url}.zip" -o "$tmp"
-            unzip -q -o "$tmp" -d "$(dirname "$bin")"
+            unzip -q -o "$tmp" -d "$install_dir"
             rm -rf "$(dirname "$tmp")"
           else
             curl -fsSL "${url}.gz" | gunzip -c - > "$bin"
             chmod +x "$bin"
           fi
           "$bin" --version
-          # Make sure the test step's `which rust-analyzer` lookup finds the
-          # binary we just installed. $GITHUB_PATH is the canonical GH Actions
-          # mechanism for adding a directory to PATH for all subsequent steps.
-          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          # Put only the isolated dir on PATH for later steps.
+          echo "$install_dir" >> "$GITHUB_PATH"
 
       - name: cargo test (workspace)
         run: |
