@@ -261,6 +261,62 @@ Verified with a before/after on the same deterministic test (250ms delay so the 
 before `stop`): **failed in 10.29s before, all 13 watcher tests pass in 1.07s after**; `cargo test
 -p forge_lsp --lib` → 116 passed; denied-lint clippy and `cargo fmt` clean.
 
+### 4.10 The CLI integration boundary was broken too (FIXED)
+
+Exercising `forge_lsp::commands::run_command` — the entry a parent binary dispatches into, and the
+only caller of `Server::with_defaults` besides the e2e test — showed two real defects on a fresh
+file:
+
+```
+before: error: lsp definition: lsp server error: file not found: <tmp>/src/lib.rs (code -32603)
+        (the CLI never sent textDocument/didOpen, so the file was not in the server's VFS)
+after:  file:///<tmp>/src/lib.rs:0:0
+```
+
+- `Server::open_document_file(path)` added (resolves against the workspace root, reads from disk,
+  `Ok(false)` for unsupported/unreadable), and `commands::build_server` now registers the target
+  document before any file-scoped command.
+- `Command::Definition` additionally polls until it has a location or `LSP_READY_TIMEOUT` (20s),
+  because a CLI invocation owns a cold server and rust-analyzer answers while still loading the
+  project (~16s on a developer machine). Fixed in `be581d8c9`.
+- `crates/forge_lsp/tests/cli_definition.rs` guards it with one bounded call (a full retry loop
+  spawned a fresh server per attempt and was needlessly heavy for CI); local stability 3/3 pass
+  (4.96s / 3.19s / 1.65s).
+
+---
+
+## 4a. Acceptance evidence (artifacts consumed, not just CI status)
+
+Everything below was observed by consuming the published release over plain HTTPS (no token) and
+by running the project's own interfaces.
+
+| Requirement | Check actually run | Observed |
+|---|---|---|
+| Release carries platform binaries | anonymous `curl` of 6 assets from the public release URL | HTTP 200 each; 55 assets total |
+| Artifacts are intact | `shasum -a 256` vs each published `.sha256` | 5/5 match |
+| Binaries are usable | executed the published macOS arm64 binaries | `forge-aarch64-apple-darwin 2.13.21-h.0.2.6`, `helioslite-... 2.13.21-h.0.2.6`, `forge_dbd 2.13.21` |
+| macOS signing | `codesign -dv --verbose=2`, `codesign --verify --strict` | Developer ID Application: Koosha Paridehpour (GCT2BN8WLL), hardened runtime, "valid on disk", "satisfies its Designated Requirement" |
+| Cross-platform formats | `file` on the linux/windows assets | `ELF 64-bit LSB pie executable` (aarch64), `PE32+ executable (console) x86-64` |
+| SBOM | JSON parse of `sbom.cdx.json` | CycloneDX 1.6, 12 components |
+| Release workflow healthy | run `35327228065` job conclusions | 17 jobs, 0 failed |
+| LSP public facade | `cargo test -p forge_lsp --test e2e_rust_analyzer` against real rust-analyzer | passes in ~16s |
+| LSP CLI boundary | `run_command(Command::Definition{..})` against a real workspace | location in 2.7s (was `-32603`) |
+| Denied-lint gate | full-workspace clippy with the CI deny flags | exit 0 |
+
+Honest constraints:
+- Linux/Android/Windows binaries were verified by format + checksum, **not executed** (no such host
+  here). Their build jobs are what CI validates.
+- Gatekeeper reports `rejected (the code is valid but does not seem to be an app)` for a raw CLI
+  binary — expected, since notarization cannot be stapled to a bare Mach-O; the signature itself
+  verifies.
+
+**Verification gap at handoff:** commit `be581d8c9` showed `test.yml: failure` and the log could not
+be retrieved — the GitHub API rate limit for this host was exhausted and the `gh` keyring token
+went invalid (`gh auth status` → "The token in default is invalid"). The most likely cause was the
+new CLI test spawning a fresh server per retry, which `77607f74c` removes. Confirm with:
+`gh auth login -h github.com` (if needed) then `gh run list --branch main --limit 20`. A scheduled
+check for this was queued at handoff time.
+
 ## 5. Commit / ledger conventions (must follow)
 
 Every agent commit carries ledger trailers:
