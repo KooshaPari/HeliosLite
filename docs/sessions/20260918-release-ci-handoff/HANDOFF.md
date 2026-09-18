@@ -27,7 +27,37 @@ and the GitHub release gets the forge/helioslite/forge_dbd binaries for all 9 ta
 | `main` HEAD | `97bff227a` (handoff doc), code HEAD `bdb183311` |
 | Assets attached | **55 assets on h.0.2.6** (27 binaries + 27 `.sha256` + `sbom.cdx.json`) — mission met |
 
-**Final CI status on `main` @ `a8ad28703`** — every workflow green (verified from the public Actions UI after the GitHub API was exhausted for this host; `release.yml` refers to the h.0.2.6 release run):
+**Final CI status — every workflow green, commit-verified.**
+
+Because the GitHub API was exhausted for this host, conclusions were read from the public Actions
+UI. Each row below was confirmed by opening that run's page and reading its commit SHA from
+`/KooshaPari/HeliosLite/commit/<sha>` — the conclusions are not inferred from run ordering.
+
+Substantive verification on the code commit **`a8ad28703`** (`fix(ci): give LSP e2e tests a nextest
+budget…`, which carries all three product fixes):
+
+| Workflow | Run | Commit | Result |
+|---|---|---|---|
+| `ci.yml` | 35355262540 | `a8ad28703` | success |
+| `test.yml` | 35355262587 | `a8ad28703` | success |
+| `autofix.yml` | 35355262416 | `a8ad28703` | success |
+| `cvp.yml` | 35355262349 | `a8ad28703` | success |
+| `platform-tests.yml` | 35355262380 | `a8ad28703` | success |
+| `cargo-deny.yml` | 35355262494 | `a8ad28703` | success |
+| `lint.yml` | 35355262415 | `a8ad28703` | success |
+| `trunk-check.yml` | 35355262554 | `a8ad28703` | success |
+| `scorecard.yml` | 35355262475 | `a8ad28703` | success |
+| `codeql.yml` | 35355262399 | `a8ad28703` | success |
+| `benchmarks.yml` | 35355262401 | `a8ad28703` | success |
+
+Re-verified on the docs-only head **`65899cf7f`** (same code): runs 35358867980 (ci), 35358867975
+(test), 35358867591 (autofix), 35358867586 (cvp), 35358867756 (platform-tests), 35358867682
+(cargo-deny), 35358867640 (lint), 35358867681 (trunk-check), 35358867710 (scorecard), 35358867670
+(codeql) and 35358867824 (benchmarks) — every one reports `commit=65899cf7f` and concluded
+successfully.
+
+`release.yml` is the h.0.2.6 release run **`35327228065`** (success, 55 assets); it only re-runs when
+a release is published.
 
 | Workflow | Conclusion |
 |---|---|
