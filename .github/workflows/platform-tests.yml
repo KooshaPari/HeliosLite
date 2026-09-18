@@ -32,6 +32,28 @@ jobs:
     steps:
     - name: Checkout Code
       uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+    # The `phenotype-observability` git dependency (PhenoShared@pinned rev)
+    # contains tracked file paths that, combined with cargo's checkout prefix
+    # under `C:/Users/runneradmin/.cargo/git/checkouts/...`, exceed the Windows
+    # MAX_PATH limit of 260 characters (observed: 265 chars, run 35212201779:
+    # "path too long ... class=Filesystem (30)"). libgit2 honors
+    # `core.longpaths` for working-directory paths (libgit2 docs/
+    # win32-longpaths.md), so enabling it before any cargo invocation fixes
+    # the checkout. Harmless no-op on macOS/Linux.
+    - name: Enable git long paths
+      shell: bash
+      run: git config --global core.longpaths true
+    # Upstream (gfx-rs/wgpu#9543, fixed by #9544): a Rust cache restored from a
+    # different runner image version leaves `cargo` resolving to `rustup-init`,
+    # so `cargo test`/`cargo clippy` fail instantly with
+    # `unexpected argument: "test"` (observed on macos-latest, run 35212201779).
+    # Fix: include the runner image version in the rust-cache key. The
+    # `ImageVersion` env var is provided by GitHub-hosted runner images; it is
+    # exported to GITHUB_ENV here so it can be referenced as an expression in
+    # the setup-rust-toolchain `cache-key` input below.
+    - name: Export runner image version
+      shell: bash
+      run: echo "RUNNER_IMAGE_VERSION=$ImageVersion" >> "$GITHUB_ENV"
     - name: Setup Protobuf Compiler
       uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b
       with:
@@ -40,7 +62,11 @@ jobs:
       uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659
       with:
         toolchain: stable
-        targets: ${{ matrix.target }}
+        # NOTE: the input is singular `target`; a plural `targets:` input is
+        # rejected by this pinned action revision with "Unexpected input(s)
+        # 'targets'" (observed in run 35212201779 logs).
+        target: ${{ matrix.target }}
+        cache-key: ${{ env.RUNNER_IMAGE_VERSION }}
 
     # PR #308 (test(lsp): add e2e integration test against real rust-analyzer
     # binary) added `crates/forge_lsp/tests/e2e_rust_analyzer.rs`, which

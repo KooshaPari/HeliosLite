@@ -39,8 +39,20 @@ jobs:
         with:
           version: 0.16.0
 
+      # Upstream (gfx-rs/wgpu#9543, fixed by #9544): a Rust cache restored from
+      # a different runner image version leaves `cargo` resolving to
+      # `rustup-init`, so cargo subcommands fail instantly with
+      # `unexpected argument`. Include the runner image version in the
+      # rust-cache key to keep caches image-version-scoped. The `ImageVersion`
+      # env var is provided by GitHub-hosted runner images.
+      - name: Export runner image version
+        shell: bash
+        run: echo "RUNNER_IMAGE_VERSION=$ImageVersion" >> "$GITHUB_ENV"
+
       - name: Rust cache
         uses: Swatinem/rust-cache@7e35be21c2b94d972b1143087fabc27d7dc881ef
+        with:
+          key: ${{ env.RUNNER_IMAGE_VERSION }}
 
       # PR #308 (test(lsp): add e2e integration test against real rust-analyzer
       # binary) added `crates/forge_lsp/tests/e2e_rust_analyzer.rs`, which
