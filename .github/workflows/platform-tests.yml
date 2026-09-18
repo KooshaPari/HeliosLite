@@ -94,14 +94,18 @@ jobs:
         # A restored/clobbered ~/.cargo/bin can leave `rustc` pointing at a
         # non-compiler (observed: the rust-analyzer binary). Catch that here
         # instead of letting clippy/test fail with a cryptic message.
-        if ! rustc -vV | grep -q '^host: '; then
+        # NB: capture first, then match with a here-string. `rustc -vV | grep -q`
+        # fails spuriously under `set -o pipefail` because grep exits on the first
+        # match and rustc then dies of SIGPIPE.
+        rustc_vv="$(rustc -vV 2>&1 || true)"
+        if ! grep -q '^host: ' <<<"$rustc_vv"; then
           echo "::error::rustc is not a working compiler: $(command -v rustc)"
-          rustc -vV || true
+          printf '%s\n' "$rustc_vv"
           ls -la "$HOME/.cargo/bin" | head -20
           exit 1
         fi
         cargo --version
-        rustc -vV | grep -E '^(rustc|host):'
+        printf '%s\n' "$rustc_vv" | grep -E '^(rustc|host):' || true
 
     # PR #308 (test(lsp): add e2e integration test against real rust-analyzer
     # binary) added `crates/forge_lsp/tests/e2e_rust_analyzer.rs`, which

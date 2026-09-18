@@ -136,13 +136,17 @@ jobs:
           # the rust-analyzer binary, which produced
           # `unexpected flag: --color=always` and exit 2 instead of a useful
           # error (run 35334658326, job 105566604019). Fail loudly here instead.
-          if ! rustc -vV | grep -q '^host: '; then
+          # NB: capture first, then match with a here-string. `rustc -vV | grep -q`
+          # fails spuriously under `set -o pipefail` because grep exits on the first
+          # match and rustc then dies of SIGPIPE.
+          rustc_vv="$(rustc -vV 2>&1 || true)"
+          if ! grep -q '^host: ' <<<"$rustc_vv"; then
             echo "::error::rustc is not a working compiler: $(command -v rustc)"
-            rustc -vV || true
+            printf '%s\n' "$rustc_vv"
             ls -la "$HOME/.cargo/bin" | head -20
             exit 1
           fi
-          rustc -vV | grep -E '^(rustc|host):'
+          printf '%s\n' "$rustc_vv" | grep -E '^(rustc|host):' || true
 
       - name: cargo nextest run
         shell: bash
