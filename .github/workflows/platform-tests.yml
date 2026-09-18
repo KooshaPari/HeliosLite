@@ -67,6 +67,31 @@ jobs:
         # 'targets'" (observed in run 35212201779 logs).
         target: ${{ matrix.target }}
         cache-key: ${{ env.RUNNER_IMAGE_VERSION }}
+        # Do NOT restore ~/.cargo/bin from cache. An entry saved by an earlier
+        # (failed) run contains a broken `cargo`: every later run restored it
+        # over the freshly installed rustup proxies, and every cargo subcommand
+        # then died with `unexpected argument: "<subcommand>"` (exit 2).
+        # Evidence (run 35334658204, job 105566622062): `cargo --version`
+        # succeeds at 10:26:32, the cache restore completes at 10:26:33, and
+        # `cargo test` fails at 10:26:34 -- so the restored bin dir is the
+        # poison. `cache-on-failure: true` keeps re-saving that entry, so it
+        # must not be restored at all.
+        cache-bin: false
+
+    # Guard against a repeat of the poisoned-bin-dir failure above: fail loudly
+    # and print diagnostics instead of letting every later cargo invocation fail
+    # with a confusing `unexpected argument` error.
+    - name: Verify cargo toolchain
+      shell: bash
+      run: |
+        set -euo pipefail
+        if ! cargo --list >/dev/null 2>&1 || ! cargo metadata --no-deps --format-version 1 >/dev/null 2>&1; then
+          echo "::error::cargo is not a working rustup proxy: $(command -v cargo)"
+          cargo --version || true
+          ls -la "$HOME/.cargo/bin" | head -20
+          exit 1
+        fi
+        cargo --version
 
     # PR #308 (test(lsp): add e2e integration test against real rust-analyzer
     # binary) added `crates/forge_lsp/tests/e2e_rust_analyzer.rs`, which

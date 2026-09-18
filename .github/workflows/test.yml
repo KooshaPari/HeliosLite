@@ -53,6 +53,16 @@ jobs:
         uses: Swatinem/rust-cache@7e35be21c2b94d972b1143087fabc27d7dc881ef
         with:
           key: ${{ env.RUNNER_IMAGE_VERSION }}
+          # Do NOT cache/restore ~/.cargo/bin. A previously cached bin dir is
+          # corrupt and poisons every later run: on ubuntu the restored `rustc`
+          # resolved to the rust-analyzer binary, so `cargo metadata` failed
+          # with "parsing `rustc -vV` failed ... output: rust-analyzer
+          # 0.3.3049-standalone" (run 35334658326, job 105566604019), and on
+          # macos the restored `cargo` rejected every subcommand with
+          # `unexpected argument: "<subcommand>"` (run 35334658204).
+          # rust-analyzer and cargo-nextest are reinstalled on every run, so
+          # caching this directory buys nothing and breaks CI.
+          cache-bin: false
 
       # PR #308 (test(lsp): add e2e integration test against real rust-analyzer
       # binary) added `crates/forge_lsp/tests/e2e_rust_analyzer.rs`, which
