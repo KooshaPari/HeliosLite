@@ -78,16 +78,27 @@ jobs:
         run: |
           set -euo pipefail
           if [ "$PLATFORM" = windows ]; then
-            required="SIGNPATH_API_TOKEN SIGNPATH_ORGANIZATION_ID SIGNPATH_PROJECT_SLUG SIGNPATH_SIGNING_POLICY_SLUG"
+            # SIGNPATH credentials are optional: when absent, skip Windows
+            # signing and attach unsigned binaries instead of failing the
+            # whole release pipeline.
+            missing=0
+            for name in SIGNPATH_API_TOKEN SIGNPATH_ORGANIZATION_ID SIGNPATH_PROJECT_SLUG SIGNPATH_SIGNING_POLICY_SLUG; do
+              [ -z "${!name:-}" ] && missing=$((missing + 1))
+            done
+            if [ "$missing" -ne 0 ]; then
+              echo "SIGNPATH signing configuration incomplete ($missing of 4 missing)"
+              echo "Skipping Windows signing; unsigned Windows binaries will be attached"
+              echo "SKIP_WINDOWS_SIGNING=1" >> "$GITHUB_ENV"
+            fi
           else
             required="MACOS_CERTIFICATE MACOS_CERTIFICATE_PWD MACOS_SIGNING_IDENTITY"
+            for name in $required; do
+              if [ -z "${!name:-}" ]; then
+                echo "::error::Missing signing configuration: $name"
+                exit 1
+              fi
+            done
           fi
-          for name in $required; do
-            if [ -z "${!name:-}" ]; then
-              echo "::error::Missing signing configuration: $name"
-              exit 1
-            fi
-          done
           if [ "$PLATFORM" = macos ]; then
             api_present=0
             apple_present=0
@@ -192,7 +203,7 @@ jobs:
           # Raw Mach-O command-line binaries cannot be stapled; the submitted
           # ZIP receives notarization. Keep the signed raw assets unchanged.
 
-      - if: matrix.platform == 'windows'
+      - if: matrix.platform == 'windows' && env.SKIP_WINDOWS_SIGNING != '1'
         name: Upload unsigned Windows artifacts
         id: unsigned
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
@@ -201,7 +212,7 @@ jobs:
           path: binaries/*.exe
           if-no-files-found: error
 
-      - if: matrix.platform == 'windows'
+      - if: matrix.platform == 'windows' && env.SKIP_WINDOWS_SIGNING != '1'
         name: Sign Windows binaries via SignPath
         uses: signpath/github-action-submit-signing-request@c92b958760219087e01f8d67a1669ed57afe2627
         with:
@@ -213,7 +224,7 @@ jobs:
           wait-for-completion: true
           output-artifact-directory: signed
 
-      - if: matrix.platform == 'windows'
+      - if: matrix.platform == 'windows' && env.SKIP_WINDOWS_SIGNING != '1'
         name: Verify and replace signed Windows artifacts
         shell: pwsh
         run: |
