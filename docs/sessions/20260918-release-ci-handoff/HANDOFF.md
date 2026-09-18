@@ -159,6 +159,39 @@ that fails loudly if `cargo`/`rustc` are not real.
 rust-analyzer, and they currently pass. If one of them ever shows the same
 `unexpected argument` signature, add `cache-bin: false` there too.
 
+### 4.7 OPEN: `forge_lsp::e2e_rust_analyzer` fails once rust-analyzer really runs
+
+With the toolchain fixed (§4.6), the LSP e2e test finally executed for real and failed.
+State at handoff: **the only remaining red job** (`ci / test`, run 35340048483) — 2222 of 3871
+tests pass, 1 fails:
+
+```
+forge_lsp::e2e_rust_analyzer e2e_definition_round_trip_against_real_rust_analyzer
+panicked at crates/forge_lsp/tests/e2e_rust_analyzer.rs:157
+definition request failed: lsp server error: file not found: <tmp>/src/lib.rs (code -32603)
+```
+
+Reproduced locally on macOS with the same rust-analyzer build (0.3.3049-standalone), so this is
+real and not runner-specific. Ruled out by experiment (each change tested, then reverted):
+
+| Hypothesis | Result |
+|---|---|
+| Hidden temp dir (`TempDir` → `/tmp/.tmpXXXXXX`) is excluded by rust-analyzer | **disproven** — still fails with a visible `forge-lsp-e2e-*` dir |
+| No `Cargo.toml`, so rust-analyzer has no project | **disproven** — still fails with a minimal manifest added |
+| Missing `typescript-language-server` | was a real, separate gap — fixed in CI (§ below) |
+
+Most likely cause: the test never sends `textDocument/didOpen`, so the file is not in
+rust-analyzer's VFS when `textDocument/definition` arrives; `ProcessLspClient` has no
+`did_open` API (`initialize` writes the `initialized` notification inline in
+`crates/forge_lsp/src/lsp_client.rs`). Proper fix = add a `didOpen` (or generic notification)
+method to the client and open the document before requesting a definition. This touches product
+code, so it was left for the owning session rather than guessed at.
+
+CI side (already pushed): `test.yml` and `platform-tests.yml` now `npm install -g
+typescript-language-server typescript`, because `Server::with_defaults` deliberately spawns both
+servers and the test exercises that production path. Before this, the test only ever "passed"
+by taking its documented skip path.
+
 ## 5. Commit / ledger conventions (must follow)
 
 Every agent commit carries ledger trailers:
