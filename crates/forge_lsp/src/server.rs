@@ -223,6 +223,32 @@ impl Server {
         client.did_open(&uri, language_id, text)
     }
 
+    /// Register `path` (resolved against the workspace root when relative) as an
+    /// open document, reading its contents from disk.
+    ///
+    /// Returns `Ok(false)` for unsupported languages or when the file cannot be
+    /// read, so callers can decide whether that is fatal. Headless callers
+    /// (the CLI in [`crate::commands`]) need this: without a `didOpen` the
+    /// server answers every file-scoped request with
+    /// `-32603 file not found`.
+    pub fn open_document_file(&self, path: &Path) -> Result<bool, String> {
+        if matches!(classify_language(path), Language::Unsupported) {
+            return Ok(false);
+        }
+        let abs = if path.is_absolute() {
+            path.to_path_buf()
+        } else {
+            self.workspace_root.join(path)
+        };
+        match std::fs::read_to_string(&abs) {
+            Ok(text) => {
+                self.open_document(path, &text)?;
+                Ok(true)
+            }
+            Err(_) => Ok(false),
+        }
+    }
+
     /// Diagnostics pass (P2.3).
     pub fn diagnostics_for_path(&self, path: &Path) -> Vec<Diagnostic> {
         self.diagnostics

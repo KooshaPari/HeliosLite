@@ -159,12 +159,29 @@ fn format_locations(capability: &str, locs: &[Location]) -> String {
     out
 }
 
+/// How long a cold language server may take to load the workspace before a
+/// file-scoped query reports an empty result. rust-analyzer answers requests
+/// while it is still loading, so an empty answer is not yet authoritative.
+const LSP_READY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20);
+
+/// Delay between readiness polls (see [`LSP_READY_TIMEOUT`]).
+const LSP_READY_POLL: std::time::Duration = std::time::Duration::from_millis(250);
+
 fn pos(line: u32, col: u32) -> Position {
     Position { line, character: col }
 }
 
-fn build_server(workspace: &Path) -> Result<Server, CliError> {
-    Server::with_defaults(workspace).map_err(CliError::Server)
+/// Build a server and register `path` as an open document.
+///
+/// Language servers only answer requests for documents they know about, so a
+/// headless caller must send `textDocument/didOpen` first. Without this every
+/// file-scoped command failed on a cold server with
+/// `lsp server error: file not found: <path> (code -32603)`, because the file
+/// existed on disk but was never in the server's VFS.
+fn build_server(workspace: &Path, path: &Path) -> Result<Server, CliError> {
+    let server = Server::with_defaults(workspace).map_err(CliError::Server)?;
+    server.open_document_file(path).map_err(CliError::Server)?;
+    Ok(server)
 }
 
 /// Run a single subcommand by reference (mirrors the `agileplus`
@@ -173,7 +190,7 @@ fn build_server(workspace: &Path) -> Result<Server, CliError> {
 pub fn run_command(cmd: &Command) -> Result<Option<String>, CliError> {
     match cmd {
         Command::Diagnose { workspace, path } => {
-            let server = build_server(workspace)?;
+            let server = build_server(workspace, path)?;
             let diags = server.diagnostics_for_path(path);
             if diags.is_empty() {
                 return Ok(Some("diagnose: no diagnostics".to_string()));
@@ -194,7 +211,7 @@ pub fn run_command(cmd: &Command) -> Result<Option<String>, CliError> {
             Ok(Some(out))
         }
         Command::Hover { workspace, path, line, col } => {
-            let server = build_server(workspace)?;
+            let server = build_server(workspace, path)?;
             match server.hover(path, pos(*line, *col)) {
                 Ok(Some(hover)) => Ok(Some(hover.contents)),
                 Ok(None) => Ok(Some("hover: no content".to_string())),
@@ -202,14 +219,26 @@ pub fn run_command(cmd: &Command) -> Result<Option<String>, CliError> {
             }
         }
         Command::Definition { workspace, path, line, col } => {
-            let server = build_server(workspace)?;
-            server
-                .definition(path, pos(*line, *col))
-                .map(|locs| Some(format_locations("definition", &locs)))
-                .map_err(|e| CliError::Capability { capability: "definition", source: Box::new(e) })
+            let server = build_server(workspace, path)?;
+            // A CLI invocation owns a cold server: rust-analyzer returns an
+            // empty list until it has finished loading the project (~16s on a
+            // warm developer machine). Definition on a symbol that exists in
+            // the file must resolve, so an empty answer means "not ready yet"
+            // rather than "no definition" — poll briefly instead of reporting
+            // `definition: no locations` for a server that is still loading.
+            let deadline = std::time::Instant::now() + LSP_READY_TIMEOUT;
+            loop {
+                let locations = server.definition(path, pos(*line, *col)).map_err(|e| {
+                    CliError::Capability { capability: "definition", source: Box::new(e) }
+                })?;
+                if !locations.is_empty() || std::time::Instant::now() >= deadline {
+                    return Ok(Some(format_locations("definition", &locations)));
+                }
+                std::thread::sleep(LSP_READY_POLL);
+            }
         }
         Command::Implementations { workspace, path, line, col } => {
-            let server = build_server(workspace)?;
+            let server = build_server(workspace, path)?;
             server
                 .implementation(path, pos(*line, *col))
                 .map(|locs| Some(format_locations("implementation", &locs)))
@@ -219,14 +248,14 @@ pub fn run_command(cmd: &Command) -> Result<Option<String>, CliError> {
                 })
         }
         Command::References { workspace, path, line, col } => {
-            let server = build_server(workspace)?;
+            let server = build_server(workspace, path)?;
             server
                 .references(path, pos(*line, *col), Default::default())
                 .map(|locs| Some(format_locations("references", &locs)))
                 .map_err(|e| CliError::Capability { capability: "references", source: Box::new(e) })
         }
         Command::TypeDefinition { workspace, path, line, col } => {
-            let server = build_server(workspace)?;
+            let server = build_server(workspace, path)?;
             server
                 .type_definition(path, pos(*line, *col))
                 .map(|locs| Some(format_locations("typeDefinition", &locs)))
@@ -241,7 +270,7 @@ pub fn run_command(cmd: &Command) -> Result<Option<String>, CliError> {
                     "rename: empty target name rejected".to_string(),
                 ));
             }
-            let server = build_server(workspace)?;
+            let server = build_server(workspace, path)?;
             match server.rename(path, pos(*line, *col), new_name) {
                 Ok(Some(edit)) => {
                     let mut out = String::new();
