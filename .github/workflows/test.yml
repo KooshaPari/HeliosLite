@@ -29,6 +29,20 @@ jobs:
       - name: Install system deps
         run: sudo apt-get update -q && sudo apt-get install -y libsqlite3-dev protobuf-compiler
 
+      - name: Install typescript-language-server
+        shell: bash
+        run: |
+          set -euo pipefail
+          # forge_lsp::Server::with_defaults spawns BOTH rust-analyzer and
+          # typescript-language-server, and crates/forge_lsp/tests/
+          # e2e_rust_analyzer.rs exercises that production path whenever
+          # rust-analyzer is available. Without the TS server the test panics
+          # with `failed to spawn "typescript-language-server"` (run
+          # 35339166638, ubuntu). Installing it keeps the e2e test real instead
+          # of weakening it.
+          npm install -g typescript-language-server typescript
+          typescript-language-server --version
+
       - name: Setup Rust toolchain (stable)
         uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659
         with:

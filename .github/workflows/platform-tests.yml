@@ -43,6 +43,21 @@ jobs:
     - name: Enable git long paths
       shell: bash
       run: git config --global core.longpaths true
+
+    - name: Install typescript-language-server
+      shell: bash
+      run: |
+        set -euo pipefail
+        # forge_lsp::Server::with_defaults spawns BOTH rust-analyzer and
+        # typescript-language-server, and crates/forge_lsp/tests/
+        # e2e_rust_analyzer.rs exercises that production path whenever
+        # rust-analyzer is available. Without the TS server the test panics
+        # with `failed to spawn "typescript-language-server"` (run
+        # 35339166638, ubuntu). Installing it keeps the e2e test real instead
+        # of weakening it.
+        npm install -g typescript-language-server typescript
+        typescript-language-server --version
+
     # Upstream (gfx-rs/wgpu#9543, fixed by #9544): a Rust cache restored from a
     # different runner image version leaves `cargo` resolving to `rustup-init`,
     # so `cargo test`/`cargo clippy` fail instantly with
