@@ -27,7 +27,14 @@ and the GitHub release gets the forge/helioslite/forge_dbd binaries for all 9 ta
 | `main` HEAD | `97bff227a` (handoff doc), code HEAD `bdb183311` |
 | Assets attached | **55 assets on h.0.2.6** (27 binaries + 27 `.sha256` + `sbom.cdx.json`) — mission met |
 
-**Final CI status — every workflow green, commit-verified.**
+**Final CI status — every workflow green, commit-verified, and re-confirmed via the API.**
+
+Re-confirmed with the API once the unauthenticated rate limit reset (a token is not required for
+read-only calls on a public repo; the hourly budget is 60 requests, so batch queries). For the
+current head `3e0809bef`, `gh api .../actions/runs?branch=main` reports `success` for every workflow
+file that runs on main: `ci.yml`, `test.yml`, `autofix.yml`, `cvp.yml`, `platform-tests.yml`,
+`cargo-deny.yml`, `lint.yml`, `trunk-check.yml`, `scorecard.yml`, `codeql.yml`, `benchmarks.yml`,
+plus the housekeeping workflows `labels.yml`, `stale.yml`, `release-drafter.yml`, `trufflehog.yml`.
 
 Because the GitHub API was exhausted for this host, conclusions were read from the public Actions
 UI. Each row below was confirmed by opening that run's page and reading its commit SHA from
@@ -58,6 +65,9 @@ successfully.
 
 `release.yml` is the h.0.2.6 release run **`35327228065`** (success, 55 assets); it only re-runs when
 a release is published.
+
+Docs-only pushes after `a8ad28703` (`65899cf7f`, `3e0809bef`) re-ran the same jobs on identical code
+and came back green, so the verification above is not a one-off.
 
 | Workflow | Conclusion |
 |---|---|
