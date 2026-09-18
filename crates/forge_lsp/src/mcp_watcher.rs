@@ -464,9 +464,22 @@ mod tests {
             .with_path(&target)
             .with_debounce(Duration::from_millis(50));
         let handle = McpWatcher::new(cfg, cb).spawn().unwrap();
+        // `stop` returns as soon as the shutdown notification arrives, or when
+        // `timeout` elapses (it discards the timeout result). Asserting a tight
+        // wall-clock bound therefore races with shutdown latency: this suite
+        // also runs under `cargo llvm-cov` on shared CI runners, where a 2s
+        // budget is not reliable — run 35341880585 failed here while the same
+        // suite passed on the three preceding commits. The invariant worth
+        // asserting is "shutdown completes instead of hanging until the
+        // budget"; keep generous headroom so the test still fails on a hang.
+        let budget = Duration::from_secs(10);
         let start = std::time::Instant::now();
-        handle.stop(Duration::from_secs(2)).await;
-        assert!(start.elapsed() < Duration::from_secs(2));
+        handle.stop(budget).await;
+        let elapsed = start.elapsed();
+        assert!(
+            elapsed < budget,
+            "watcher shutdown consumed the whole {budget:?} budget (elapsed {elapsed:?})"
+        );
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
