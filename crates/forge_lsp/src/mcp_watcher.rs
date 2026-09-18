@@ -114,6 +114,11 @@ pub struct McpWatcherHandle {
     /// Notified when the background task has fully exited (so callers
     /// can join deterministically in tests).
     done: Arc<Notify>,
+    /// Wakes the background task out of its `rx.recv()` await. Without
+    /// this, a handle parked waiting for the next filesystem event never
+    /// observes the stop flag, so shutdown would block until an unrelated
+    /// event arrived (or the caller's timeout expired).
+    shutdown: Arc<Notify>,
 }
 
 impl std::fmt::Debug for McpWatcherHandle {
@@ -126,13 +131,21 @@ impl McpWatcherHandle {
     /// Stop the watcher and wait (up to `timeout`) for the background
     /// task to exit.
     pub async fn stop(self, timeout: Duration) {
-        self.stop.store(true, Ordering::SeqCst);
+        // A disabled/no-op handle owns no task, so there is nothing to join.
+        if self.stop.swap(true, Ordering::SeqCst) {
+            return;
+        }
+        // `notify_one` stores a permit when no waiter is registered yet, so a
+        // shutdown request cannot be lost between the flag check in the task
+        // and its `select!`.
+        self.shutdown.notify_one();
         let _ = tokio::time::timeout(timeout, self.done.notified()).await;
     }
 
     /// Signal shutdown without waiting.
     pub fn signal_stop(&self) {
         self.stop.store(true, Ordering::SeqCst);
+        self.shutdown.notify_one();
     }
 }
 
@@ -207,8 +220,10 @@ impl McpWatcher {
 
         let stop = Arc::new(AtomicBool::new(false));
         let done = Arc::new(Notify::new());
+        let shutdown = Arc::new(Notify::new());
         let stop_bg = Arc::clone(&stop);
         let done_bg = Arc::clone(&done);
+        let shutdown_for_task = Arc::clone(&shutdown);
 
         // Channel between the synchronous notify thread and the async
         // tokio task that owns the debounce timer.
@@ -242,19 +257,32 @@ impl McpWatcher {
 
             // Use the *longest* debounce window seen since the last
             // reload: this collapses bursts of editor-save events into
-            // a single reload.
-            while !stop_for_task.load(Ordering::SeqCst) {
+            // a single reload. Every wait below is interruptible by the
+            // shutdown notification so `stop` never waits on the
+            // filesystem.
+            'watch: while !stop_for_task.load(Ordering::SeqCst) {
                 // Wait for the first event.
-                if rx.recv().await.is_none() {
-                    break;
+                tokio::select! {
+                    biased;
+                    _ = shutdown_for_task.notified() => break 'watch,
+                    maybe = rx.recv() => {
+                        if maybe.is_none() {
+                            break 'watch;
+                        }
+                    }
                 }
                 // Drain any further events that arrive within the
                 // debounce window.
                 loop {
-                    match tokio::time::timeout(debounce, rx.recv()).await {
-                        Ok(Some(())) => continue,
-                        Ok(None) => break,
-                        Err(_) => break, // elapsed — time to fire
+                    tokio::select! {
+                        biased;
+                        _ = shutdown_for_task.notified() => break 'watch,
+                        res = tokio::time::timeout(debounce, rx.recv()) => {
+                            match res {
+                                Ok(Some(())) => continue,
+                                Ok(None) | Err(_) => break, // closed or elapsed — time to fire
+                            }
+                        }
                     }
                 }
                 if stop_for_task.load(Ordering::SeqCst) {
@@ -262,10 +290,12 @@ impl McpWatcher {
                 }
                 (reload_for_task)();
             }
-            done_for_task.notify_waiters();
+            // `notify_one` stores a permit, so a caller that reaches
+            // `done.notified()` after the task exited still observes it.
+            done_for_task.notify_one();
         });
 
-        Ok(McpWatcherHandle { stop, done })
+        Ok(McpWatcherHandle { stop, done, shutdown })
     }
 }
 
@@ -275,6 +305,7 @@ impl McpWatcherHandle {
         Self {
             stop: Arc::new(AtomicBool::new(true)),
             done: Arc::new(Notify::new()),
+            shutdown: Arc::new(Notify::new()),
         }
     }
 
@@ -464,14 +495,15 @@ mod tests {
             .with_path(&target)
             .with_debounce(Duration::from_millis(50));
         let handle = McpWatcher::new(cfg, cb).spawn().unwrap();
-        // `stop` returns as soon as the shutdown notification arrives, or when
-        // `timeout` elapses (it discards the timeout result). Asserting a tight
-        // wall-clock bound therefore races with shutdown latency: this suite
-        // also runs under `cargo llvm-cov` on shared CI runners, where a 2s
-        // budget is not reliable — run 35341880585 failed here while the same
-        // suite passed on the three preceding commits. The invariant worth
-        // asserting is "shutdown completes instead of hanging until the
-        // budget"; keep generous headroom so the test still fails on a hang.
+        // Let the initial "file created" event be delivered and drained, so the
+        // background task is parked in `rx.recv()` when `stop` is called. That
+        // is the state in which shutdown must remain prompt; without this sleep
+        // the test only passes when that first event happens to arrive after
+        // `stop` (which is why it passed locally and flaked on CI).
+        tokio::time::sleep(Duration::from_millis(250)).await;
+        // `stop` must not have to wait for an unrelated filesystem event. The
+        // budget is deliberately generous so the suite stays reliable under
+        // `cargo llvm-cov` on shared runners, while a true hang still fails.
         let budget = Duration::from_secs(10);
         let start = std::time::Instant::now();
         handle.stop(budget).await;
