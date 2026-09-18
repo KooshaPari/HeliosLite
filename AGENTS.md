@@ -2,6 +2,34 @@
 
 This document contains guidelines and best practices for AI agents working with this codebase.
 
+## Current State & Handoff (HeliosLite fork — read this first)
+
+This repository is the **HeliosLite** fork of `tailcallhq/forgecode` (remote `fork` ->
+`git@github.com:KooshaPari/HeliosLite.git`; `origin`/`upstream` = tailcallhq).
+
+**Before making changes, read `docs/sessions/20260918-release-ci-handoff/HANDOFF.md`.** It is the
+full handoff for whoever owns this repo next: every fix with its evidence, the commit/ledger
+conventions, a CI diagnostic playbook, environment quirks, and known constraints.
+
+Verified status as of 2026-09-18:
+
+- Every workflow on `main` is green: `ci`, `test`, `autofix`, `cvp`, `platform-tests`,
+  `cargo-deny`, `lint`, `trunk-check`, `scorecard`, `codeql`, `benchmarks`, plus housekeeping.
+- Release `v2.13.21-h.0.2.6` published 55 assets (all 9 targets; macOS signed + notarized;
+  Windows unsigned until `SIGNPATH_*` credentials are configured — the workflow skips signing
+  rather than failing when they are absent).
+- Fork release tags follow `v2.13.21-h.0.X.Y`.
+- Commit with ledger trailers (`tx-agent`, `tx-validated`, `tx-task`, `tx-scope`, `tx-intent`) and
+  `git -c commit.gpgsign=false` (GPG signing is not configured here and will hang).
+
+CI lessons that cost real time (details in the handoff):
+
+- `.config/nextest.toml` terminates any test after ~30s; tests that spawn a language server need an
+  explicit override.
+- Never install tooling into `$HOME/.cargo/bin`: `rust-analyzer` there is a symlink to `rustup`, so
+  writing through it overwrites `rustup` and breaks every cargo shim.
+- Pushing to `main` cancels in-flight runs; batch commits before pushing.
+
 ## Error Management
 
 - Use `anyhow::Result` for error handling in services and repositories.

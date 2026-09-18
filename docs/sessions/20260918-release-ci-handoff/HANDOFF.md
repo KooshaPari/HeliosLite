@@ -115,8 +115,11 @@ Remotes:     fork     git@github.com:KooshaPari/HeliosLite.git     <- push here
 GitHub:      KooshaPari/HeliosLite        (releases + CI live here)
              KooshaPari/PhenoShared       (git dependency of HeliosLite)
 Host:        Kooshas-Laptop.local  /  user kooshapari  /  192.168.1.23 (en0)
-SSH:         sshd is NOT running and Remote Login is OFF (needs sudo + GUI/`sudo systemsetup -setremotelogin on`).
-             If the new session must reach this machine, ask the operator to enable Remote Login first.
+SSH:         OpenSSH 10.3 is listening on port 22 and is reachable on the LAN:
+             `ssh kooshapari@192.168.1.23` (or `kooshapari@Kooshas-Laptop.local`).
+             (Earlier in this session sshd was NOT running; Remote Login has since been enabled, so the
+             previous "ask the operator to enable it" note is obsolete.) If it is ever off again:
+             System Settings -> General -> Sharing -> Remote Login, or `sudo systemsetup -setremotelogin on`.
 gh auth:     authenticated (scopes: gist, read:org, repo, workflow) via keyring
 Model pref:  subagents -> opencode-go deepseek-v4.1-flash (see ~/.jcode/config.toml [agents] swarm_model)
 ```
