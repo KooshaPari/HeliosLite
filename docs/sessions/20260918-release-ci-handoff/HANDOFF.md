@@ -192,6 +192,22 @@ typescript-language-server typescript`, because `Server::with_defaults` delibera
 servers and the test exercises that production path. Before this, the test only ever "passed"
 by taking its documented skip path.
 
+### 4.8 Other workflows closed in this pass
+
+- **cvp.yml** — the `Verify rev pin or path consistency` gate hard-coded
+  `EXPECTED="68beca26"`, so any legitimate PhenoShared repin failed with
+  `✗ Rev mismatch: expected 68beca26, got <new>` (run 35339166530). Now asserts that the three
+  cross-consumed deps agree on one rev (portable shell, no bash-4 `mapfile`, since macOS `bash`
+  is 3.2). Fixed in `677b78ecd`.
+- **autofix.ci** — fails on the repo's own denied-lint gate
+  (`cargo clippy --all-features --workspace -- -D clippy::string_slice -D clippy::indexing_slicing
+  -D clippy::disallowed_methods`; note: no `--all-targets`, so lib/bin targets only).
+  `crates/forge_sharecli/src/commands.rs` used `&buf[..n]` → now `buf.get(..n)` with the same
+  empty-head fallback. **The same gate has more violations in other crates (e.g. `forge_config`)** —
+  a full inventory is being produced with `--keep-going`; expect more fix commits.
+  Repro locally: `cargo clippy --all-features --workspace --keep-going -- -D clippy::string_slice
+  -D clippy::indexing_slicing -D clippy::disallowed_methods`.
+
 ## 5. Commit / ledger conventions (must follow)
 
 Every agent commit carries ledger trailers:
