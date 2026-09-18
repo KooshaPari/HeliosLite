@@ -132,6 +132,33 @@ fix adds `RUNNER_IMAGE_VERSION` from `$ImageVersion` to the rust-cache key in
 
 ---
 
+### 4.6 CI cargo breakage: rust-analyzer install clobbered the rustup binary (FIXED)
+
+Three workflows installed the prebuilt rust-analyzer into `$HOME/.cargo/bin/rust-analyzer`
+via `curl ... .gz | gunzip -c - > "$bin"`. That path is a **symlink to the `rustup`
+binary** on rustup-based runners, so the redirect followed the symlink and overwrote
+`rustup` itself. Every rustup shim then resolved to the rust-analyzer binary:
+
+| Symptom | Where |
+|---|---|
+| `cargo clippy` → `unexpected argument: "clippy"` (exit 2) | platform-tests, macos-latest (run 35336692859) |
+| `cargo test` → `unexpected argument: "test"` (masked by `continue-on-error: true`) | platform-tests, macos-latest |
+| `rustc -vV` → `rust-analyzer 0.3.3049-standalone`, `unexpected flag: --color=always` → `cargo metadata` exit 2 | test.yml, ubuntu (run 35334658326) |
+
+`unexpected argument: "X"` / `unexpected flag: \`--color=always\`` are rust-analyzer's own
+`xflags` parser errors, which is what identified the culprit. Locally confirmed:
+`ls -la ~/.cargo/bin/rust-analyzer` → `rust-analyzer -> rustup`.
+
+Fix (`3fc98eb0c`): install into `$RUNNER_TEMP/rust-analyzer-bin` (with `rm -f "$bin"` before
+the write so a stale symlink can never be followed) in `test.yml`, `platform-tests.yml`,
+`helios-lite-nightly.yml`; plus `cache-bin: false` on the Rust caches in the first two, since
+earlier runs cached the clobbered `~/.cargo/bin` and would restore it; plus a guard step
+that fails loudly if `cargo`/`rustc` are not real.
+
+**Note:** `ci.yml`, `lint.yml`, `trunk-check.yml` also cache `~/.cargo/bin` but do not install
+rust-analyzer, and they currently pass. If one of them ever shows the same
+`unexpected argument` signature, add `cache-bin: false` there too.
+
 ## 5. Commit / ledger conventions (must follow)
 
 Every agent commit carries ledger trailers:
