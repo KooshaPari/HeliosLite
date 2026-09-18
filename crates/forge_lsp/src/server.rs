@@ -18,6 +18,7 @@
 //! `Server` is cheap-cloneable via `SharedServer`.
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use crate::completion::{CompletionItem, CompletionProvider, CompletionResult};
 use crate::definition::{DefinitionProvider, DefinitionResult, Location};
@@ -56,6 +57,10 @@ pub type SharedServer = std::sync::Arc<Server>;
 pub struct Server {
     workspace_root: PathBuf,
     diagnostics: DiagnosticsService,
+    /// Clients kept for document lifecycle (`textDocument/didOpen`); the
+    /// per-operation routers own clones of the same subprocesses.
+    rust_client: Arc<ProcessLspClient>,
+    ts_client: Arc<ProcessLspClient>,
     hover: HoverRouter,
     definition: DefinitionRouter,
     completion: CompletionRouter,
@@ -141,14 +146,16 @@ impl Server {
             ImplementationProvider::new(rust_arc.clone()),
             ReferencesProvider::new(rust_arc.clone()),
             TypeDefinitionProvider::new(rust_arc.clone()),
-            RenameProvider::new(rust_arc),
+            RenameProvider::new(rust_arc.clone()),
             HoverProvider::new(ts_arc.clone()),
             DefinitionProvider::new(ts_arc.clone()),
             CompletionProvider::new(ts_arc.clone()),
             ImplementationProvider::new(ts_arc.clone()),
             ReferencesProvider::new(ts_arc.clone()),
             TypeDefinitionProvider::new(ts_arc.clone()),
-            RenameProvider::new(ts_arc),
+            RenameProvider::new(ts_arc.clone()),
+            rust_arc,
+            ts_arc,
         ))
     }
 
@@ -177,10 +184,14 @@ impl Server {
         references_ts: ReferencesProvider<ProcessLspClient>,
         type_definition_ts: TypeDefinitionProvider<ProcessLspClient>,
         rename_ts: RenameProvider<ProcessLspClient>,
+        rust_client: Arc<ProcessLspClient>,
+        ts_client: Arc<ProcessLspClient>,
     ) -> Self {
         Self {
             workspace_root: workspace_root.to_path_buf(),
             diagnostics,
+            rust_client,
+            ts_client,
             hover: HoverRouter::new(hover_rust, hover_ts),
             definition: DefinitionRouter::new(definition_rust, definition_ts),
             completion: CompletionRouter::new(completion_rust, completion_ts),
@@ -194,6 +205,22 @@ impl Server {
     /// Workspace root this server was bound to.
     pub fn workspace_root(&self) -> &Path {
         &self.workspace_root
+    }
+
+    /// Register `path` with `text` as an open document on the language server
+    /// for its language (no-op for unsupported extensions).
+    ///
+    /// Language servers only answer requests for documents they know about, so
+    /// callers that drive the server directly (tests, headless tooling) must
+    /// open the document before asking for `hover` / `definition` / etc.
+    pub fn open_document(&self, path: &Path, text: &str) -> Result<(), String> {
+        let (client, language_id) = match classify_language(path) {
+            Language::Unsupported => return Ok(()),
+            Language::Rust => (&self.rust_client, "rust"),
+            Language::TypeScript => (&self.ts_client, "typescript"),
+        };
+        let uri = path_to_uri(path, &self.workspace_root);
+        client.did_open(&uri, language_id, text)
     }
 
     /// Diagnostics pass (P2.3).

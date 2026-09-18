@@ -37,10 +37,12 @@ use tokio::time::timeout;
 /// to point back into `src/lib.rs` (the same file we just opened).
 const TRIVIAL_LIB_RS: &str = "pub fn add(a: i32, b: i32) -> i32 { a + b }\n";
 
-/// 30-second budget for the entire LSP round-trip — initialize +
-/// definition. Generous enough that a slow CI box still passes;
-/// tight enough that a hung `rust-analyzer` doesn't stall CI.
-const E2E_BUDGET: Duration = Duration::from_secs(30);
+// The round-trip includes rust-analyzer loading the project (it runs
+// `cargo metadata` and builds the crate graph), which takes ~16s on a warm
+// developer machine and longer on a loaded CI runner. The budget is generous
+// so a slow runner does not look like a hang; a genuinely stuck server still
+// trips it.
+const E2E_BUDGET: Duration = Duration::from_secs(90);
 
 /// Locate a working `rust-analyzer` on the current host. Returns the
 /// binary's path on success, `None` otherwise.
@@ -107,6 +109,24 @@ async fn e2e_definition_round_trip_against_real_rust_analyzer() {
     let src_dir = workspace_root.join("src");
     std::fs::create_dir_all(&src_dir).expect("create src dir");
     std::fs::write(src_dir.join("lib.rs"), TRIVIAL_LIB_RS).expect("write src/lib.rs");
+    // rust-analyzer resolves semantic information for files that belong to a
+    // loaded project. A bare directory is treated as an empty project and the
+    // definition request returns no locations even after `didOpen`, so give it
+    // a minimal dependency-free manifest. The temp workspace has no parent
+    // `rust-toolchain.toml`, so the default toolchain applies.
+    std::fs::write(
+        workspace_root.join("Cargo.toml"),
+        concat!(
+            "[package]\n",
+            "name = \"forge-lsp-e2e\"\n",
+            "version = \"0.0.0\"\n",
+            "edition = \"2021\"\n\n",
+            "[lib]\n",
+            "path = \"src/lib.rs\"\n\n",
+            "[dependencies]\n",
+        ),
+    )
+    .expect("write Cargo.toml");
 
     // The position to query — line 0, column 7 — lands on the `add`
     // identifier in `pub fn add(...)`. We request goto-definition on
@@ -132,12 +152,32 @@ async fn e2e_definition_round_trip_against_real_rust_analyzer() {
             // exists to catch exactly that.
             let server = Server::with_defaults(&workspace_for_blocking)
                 .map_err(|e| format!("Server::with_defaults failed: {e}"))?;
+            // Language servers only serve requests for documents they know
+            // about. Without `textDocument/didOpen`, rust-analyzer answered the
+            // definition request below with
+            // `lsp server error: file not found: <tmp>/src/lib.rs` (code -32603)
+            // because the file was not in its VFS.
+            server
+                .open_document(Path::new("src/lib.rs"), TRIVIAL_LIB_RS)
+                .map_err(|e| format!("didOpen failed: {e}"))?;
 
             // Drive the real LSP pipeline: textDocument/definition
             // over the subprocess stdio. No mocks involved.
-            let locations = server
-                .definition(Path::new("src/lib.rs"), query_position)
-                .map_err(|e| format!("definition request failed: {e}"))?;
+            //
+            // rust-analyzer answers requests while the project is still
+            // loading, returning an empty definition list until analysis is
+            // ready, so poll until it produces a result (bounded by the
+            // deadline below and by E2E_BUDGET around the whole block).
+            let deadline = std::time::Instant::now() + Duration::from_secs(20);
+            let locations = loop {
+                let locations = server
+                    .definition(Path::new("src/lib.rs"), query_position.clone())
+                    .map_err(|e| format!("definition request failed: {e}"))?;
+                if !locations.is_empty() || std::time::Instant::now() >= deadline {
+                    break locations;
+                }
+                std::thread::sleep(Duration::from_millis(250));
+            };
             Ok(locations)
         })
         .await

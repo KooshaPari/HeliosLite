@@ -313,6 +313,42 @@ impl ProcessLspClient {
         })
     }
 
+    /// Notify the server that `uri` is open with `text`.
+    ///
+    /// Language servers only serve requests for documents they know about:
+    /// `textDocument/didOpen` is how a client registers a buffer. Without it,
+    /// `rust-analyzer` answers `textDocument/definition` with
+    /// `-32603 file not found` for a file that exists on disk but is not part
+    /// of a loaded project (observed in the `e2e_rust_analyzer` test before
+    /// this call existed).
+    ///
+    /// `language_id` follows the LSP convention, e.g. `rust` or `typescript`.
+    pub fn did_open(&self, uri: &str, language_id: &str, text: &str) -> Result<(), String> {
+        let notification = json!({
+            "jsonrpc": "2.0",
+            "method": "textDocument/didOpen",
+            "params": {
+                "textDocument": {
+                    "uri": uri,
+                    "languageId": language_id,
+                    "version": 1,
+                    "text": text
+                }
+            }
+        });
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|e| format!("state mutex poisoned: {e}"))?;
+        let io = state
+            .io
+            .as_mut()
+            .ok_or_else(|| "io unavailable".to_string())?;
+        let body =
+            serde_json::to_string(&notification).map_err(|e| format!("serialize didOpen: {e}"))?;
+        write_framed(&mut io.stdin, &body)
+    }
+
     /// Cheap-clone the [`ProcessLspClient`] as a [`WeakProcessClient`]
     /// handle that participates in lifecycle but doesn't keep the
     /// subprocess alive on its own.
