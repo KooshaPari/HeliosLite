@@ -39,7 +39,7 @@ and the GitHub release gets the forge/helioslite/forge_dbd binaries for all 9 ta
 | `cargo-deny.yml` | success |
 | `benchmarks.yml` | success |
 | `lint.yml`, `trunk-check.yml`, `scorecard.yml`, `codeql.yml` | success |
-| `test.yml` | **failure — one test**, see §4.7 (needs a `didOpen` client API) |
+| `test.yml` | **success** (§4.7 resolved in `3b1ebf4e7`) |
 
 **Mission status: COMPLETE.** Run `35327228065` (h.0.2.6) concluded `completed success` with
 every job green — 9 `build-release` jobs, 4 sign jobs (2 macOS signed, 2 Windows skip-path),
@@ -173,7 +173,7 @@ that fails loudly if `cargo`/`rustc` are not real.
 rust-analyzer, and they currently pass. If one of them ever shows the same
 `unexpected argument` signature, add `cache-bin: false` there too.
 
-### 4.7 OPEN: `forge_lsp::e2e_rust_analyzer` fails once rust-analyzer really runs
+### 4.7 FIXED: `forge_lsp::e2e_rust_analyzer` now performs a real round trip
 
 With the toolchain fixed (§4.6), the LSP e2e test finally executed for real and failed.
 State at handoff: **the only remaining red job** (`ci / test`, run 35340048483) — 2222 of 3871
@@ -201,10 +201,29 @@ rust-analyzer's VFS when `textDocument/definition` arrives; `ProcessLspClient` h
 method to the client and open the document before requesting a definition. This touches product
 code, so it was left for the owning session rather than guessed at.
 
-CI side (already pushed): `test.yml` and `platform-tests.yml` now `npm install -g
-typescript-language-server typescript`, because `Server::with_defaults` deliberately spawns both
-servers and the test exercises that production path. Before this, the test only ever "passed"
-by taking its documented skip path.
+CI side: `test.yml` and `platform-tests.yml` now `npm install -g typescript-language-server
+typescript`, because `Server::with_defaults` deliberately spawns both servers and the test
+exercises that production path. Before this, the test only ever "passed" by taking its documented
+skip path.
+
+**Resolved in `3b1ebf4e7`** (test.yml green afterwards):
+
+1. `ProcessLspClient::did_open(uri, language_id, text)` — a real `textDocument/didOpen`
+   notification using the same stdio framing as `initialize`.
+2. `Server::open_document(path, text)` — routes to the right client by extension (no-op for
+   unsupported languages); `Server` now keeps both clients for document lifecycle.
+3. The test writes a minimal `Cargo.toml` (rust-analyzer needs a project to analyse), opens the
+   document, then **polls** the definition request until analysis produces a result, since
+   rust-analyzer answers requests while still loading. Outer budget 30s -> 90s for project loading
+   on a loaded runner.
+
+Verified locally before pushing (rust-analyzer 0.3.3049-standalone + typescript-language-server
+6.0.0): `file not found` -> `ok` in 16s; `cargo test -p forge_lsp --lib` 116 passed; fmt clean;
+`clippy -D warnings` clean. CI confirmed: `test.yml` and `ci.yml` both success on `3b1ebf4e7`.
+
+Note for future reference: `cargo clippy -p forge_lsp --all-targets -- -D clippy::indexing_slicing`
+still flags pre-existing **test-only** sites in `references.rs` and `rename.rs`. CI's deny gate runs
+without `--all-targets`, so those do not fail the build.
 
 ### 4.8 Other workflows closed in this pass
 
@@ -345,8 +364,8 @@ Multiple jcode sessions work in these repos at once. Observed in this window:
 ## 9. Remaining / follow-up work (for the new owner)
 
 1. ~~Confirm h.0.2.6 published assets~~ — **DONE**: run `35327228065` green, 55 assets attached.
-   The only red workflow left is `test.yml` (§4.7).
-2. ~~Audit the other workflows~~ — **DONE**: all are green except `test.yml` (§4.7). The
+   Every workflow is now green, including `test.yml` (§4.7).
+2. ~~Audit the other workflows~~ — **DONE**: every workflow is green (§4.7 included). The
    inventory+triage that produced the lint fixes was done by worker sessions (`bear` read-only
    inventory with `--keep-going`, `crab` fixed `forge_config`); the first inventory worker on
    `deepseek-v4.1-flash` died with a provider error and was replaced on `mimo-v2.5-pro`.
