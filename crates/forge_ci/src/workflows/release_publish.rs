@@ -128,9 +128,12 @@ fn release_workflow() -> Workflow {
             .secret("SIGNPATH_API_TOKEN")
             .secret("SIGNPATH_ORGANIZATION_ID")
             .needs("build_release")
+            // The reusable sign job (sign-release.yml) writes back signed
+            // assets, so the caller must grant contents:write: reusable
+            // workflows cannot elevate permissions beyond the caller grant.
             .permissions(
                 Permissions::default()
-                    .contents(Level::Read)
+                    .contents(Level::Write)
                     .actions(Level::Read),
             ),
         )

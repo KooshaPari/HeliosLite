@@ -181,7 +181,7 @@ jobs:
       tag: ${{ github.event.release.tag_name }}
     needs: build_release
     permissions:
-      contents: read
+      contents: write
       actions: read
   sbom_release_assets:
     name: Generate release SBOM
