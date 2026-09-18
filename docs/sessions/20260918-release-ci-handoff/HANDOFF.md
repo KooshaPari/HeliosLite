@@ -23,20 +23,31 @@ and the GitHub release gets the forge/helioslite/forge_dbd binaries for all 9 ta
 | All 9 platform builds | **PASS** (Windows included, since PhenoShared `cf914698`) |
 | macOS sign + notarize | **PASS** |
 | Windows SignPath signing | **MADE OPTIONAL** — repo has no SIGNPATH credentials; unsigned Windows binaries now flow through (see §4.4) |
-| Release `v2.13.21-h.0.2.6` | Tag pushed, release created, run `35327228065` **in progress** at handoff time |
-| `main` HEAD | `bdb183311` |
-| Assets attached | **0 so far** on all h.0.2.x releases; expected to be non-zero for h.0.2.6 |
+| Release `v2.13.21-h.0.2.6` | **COMPLETE — run `35327228065` finished `completed success`, 0 failed jobs** |
+| `main` HEAD | `97bff227a` (handoff doc), code HEAD `bdb183311` |
+| Assets attached | **55 assets on h.0.2.6** (27 binaries + 27 `.sha256` + `sbom.cdx.json`) — mission met |
 
-**The immediate next check** (verify before doing anything else):
+**Mission status: COMPLETE.** Run `35327228065` (h.0.2.6) concluded `completed success` with
+every job green — 9 `build-release` jobs, 4 sign jobs (2 macOS signed, 2 Windows skip-path),
+SBOM, attest, publish. 55 assets published:
+
+```
+forge-{aarch64,x86_64}-{apple-darwin,pc-windows-msvc.exe,unknown-linux-gnu,unknown-linux-musl}
+forge-aarch64-linux-android
+helioslite-<same 9 targets>       forge_dbd-<same 9 targets>
++ .sha256 for each                + sbom.cdx.json
+```
+
+Reproduce the check:
 
 ```bash
 cd ~/CodeProjects/Phenotype/repos/forgecode
 gh run view 35327228065 --repo KooshaPari/HeliosLite --json status,conclusion
-gh api repos/KooshaPari/HeliosLite/releases/tags/v2.13.21-h.0.2.6 --jq '.assets | length'
+gh api repos/KooshaPari/HeliosLite/releases/tags/v2.13.21-h.0.2.6 --jq '.assets | length'   # -> 55
 ```
 
-If the run succeeded and assets > 0, the mission is complete. If assets are still 0,
-read the failed job logs (§6) and continue.
+Note: Windows binaries in this release are **unsigned** (no SIGNPATH credentials, §4.4) while
+macOS binaries are signed + notarized.
 
 ---
 
@@ -223,8 +234,10 @@ Multiple jcode sessions work in these repos at once. Observed in this window:
 
 ## 9. Remaining / follow-up work (for the new owner)
 
-1. **Confirm h.0.2.6 published assets** (§2 command). If green, close the release-CI task.
-2. **Audit the other workflows** still failing/unknown from the h.0.2.2 cycle:
+1. ~~Confirm h.0.2.6 published assets~~ — **DONE**: run `35327228065` green, 55 assets attached.
+2. **Audit the other workflows** still failing/unknown from the h.0.2.2 cycle (re-dispatch a
+   worker on the fallback model — the first `deepseek-v4.1-flash` worker died with a provider
+   error, `microbe` session):
    `ci.yml`, `autofix.yml`, `cvp.yml`, `benchmarks.yml` (Performance Benchmarks),
    `platform-tests.yml`, `cargo-deny.yml`. `cargo-deny` should now pass with rustls 0.23.45.
    A subagent audit of these 9 workflows was dispatched in the final minutes of this session —
