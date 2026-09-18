@@ -27,6 +27,20 @@ and the GitHub release gets the forge/helioslite/forge_dbd binaries for all 9 ta
 | `main` HEAD | `97bff227a` (handoff doc), code HEAD `bdb183311` |
 | Assets attached | **55 assets on h.0.2.6** (27 binaries + 27 `.sha256` + `sbom.cdx.json`) — mission met |
 
+**Final CI status on `main` @ `a90e636b8`** (verified after all fixes landed):
+
+| Workflow | Conclusion |
+|---|---|
+| `release.yml` (Multi Channel Release, h.0.2.6) | **success — 55 assets published** |
+| `ci.yml` | success |
+| `platform-tests.yml` (macos + windows) | success |
+| `cvp.yml` | success |
+| `autofix.yml` | success |
+| `cargo-deny.yml` | success |
+| `benchmarks.yml` | success |
+| `lint.yml`, `trunk-check.yml`, `scorecard.yml`, `codeql.yml` | success |
+| `test.yml` | **failure — one test**, see §4.7 (needs a `didOpen` client API) |
+
 **Mission status: COMPLETE.** Run `35327228065` (h.0.2.6) concluded `completed success` with
 every job green — 9 `build-release` jobs, 4 sign jobs (2 macOS signed, 2 Windows skip-path),
 SBOM, attest, publish. 55 assets published:
@@ -331,9 +345,12 @@ Multiple jcode sessions work in these repos at once. Observed in this window:
 ## 9. Remaining / follow-up work (for the new owner)
 
 1. ~~Confirm h.0.2.6 published assets~~ — **DONE**: run `35327228065` green, 55 assets attached.
-2. **Audit the other workflows** still failing/unknown from the h.0.2.2 cycle (re-dispatch a
-   worker on the fallback model — the first `deepseek-v4.1-flash` worker died with a provider
-   error, `microbe` session):
+   The only red workflow left is `test.yml` (§4.7).
+2. ~~Audit the other workflows~~ — **DONE**: all are green except `test.yml` (§4.7). The
+   inventory+triage that produced the lint fixes was done by worker sessions (`bear` read-only
+   inventory with `--keep-going`, `crab` fixed `forge_config`); the first inventory worker on
+   `deepseek-v4.1-flash` died with a provider error and was replaced on `mimo-v2.5-pro`.
+   Any further failures to triage:
    `ci.yml`, `autofix.yml`, `cvp.yml`, `benchmarks.yml` (Performance Benchmarks),
    `platform-tests.yml`, `cargo-deny.yml`. `cargo-deny` should now pass with rustls 0.23.45.
    A subagent audit of these 9 workflows was dispatched in the final minutes of this session —
