@@ -208,6 +208,26 @@ by taking its documented skip path.
   Repro locally: `cargo clippy --all-features --workspace --keep-going -- -D clippy::string_slice
   -D clippy::indexing_slicing -D clippy::disallowed_methods`.
 
+### 4.9 Real product bug found via a CI flake: `McpWatcherHandle::stop` could hang
+
+`ci.yml` first showed `forge_lsp::mcp_watcher::tests::watcher_stop_completes_quickly` failing
+(run 35341880585). It looked like a load-sensitive wall-clock flake, but raising the budget to 10s
+reproduced it as a hard hang: `elapsed 10.001418841s` (run 35342979239). The test was right.
+
+Root cause (`crates/forge_lsp/src/mcp_watcher.rs`): the background task parks in `rx.recv()`
+waiting for the next filesystem event, and `stop()` only set an `AtomicBool` and awaited `done`.
+Whenever the last event had already been drained, shutdown blocked until an unrelated file event
+arrived or the caller's timeout expired. The test passed only when the initial "file created"
+event happened to arrive *after* `stop()`.
+
+Fix (`d9a5871a9`): a `shutdown: Arc<Notify>` on the handle, `select!` against it in both the event
+wait and the debounce drain, `notify_one` (permit-storing) so a request cannot be lost, `notify_one`
+for `done` likewise, and the no-op handle returns immediately (it owns no task).
+
+Verified with a before/after on the same deterministic test (250ms delay so the task is parked
+before `stop`): **failed in 10.29s before, all 13 watcher tests pass in 1.07s after**; `cargo test
+-p forge_lsp --lib` → 116 passed; denied-lint clippy and `cargo fmt` clean.
+
 ## 5. Commit / ledger conventions (must follow)
 
 Every agent commit carries ledger trailers:
