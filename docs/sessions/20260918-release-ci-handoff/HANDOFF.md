@@ -310,12 +310,35 @@ Honest constraints:
   binary — expected, since notarization cannot be stapled to a bare Mach-O; the signature itself
   verifies.
 
-**Verification gap at handoff:** commit `be581d8c9` showed `test.yml: failure` and the log could not
-be retrieved — the GitHub API rate limit for this host was exhausted and the `gh` keyring token
-went invalid (`gh auth status` → "The token in default is invalid"). The most likely cause was the
-new CLI test spawning a fresh server per retry, which `77607f74c` removes. Confirm with:
-`gh auth login -h github.com` (if needed) then `gh run list --branch main --limit 20`. A scheduled
-check for this was queued at handoff time.
+### RESOLVED: why `test.yml` failed at `be581d8c9` (run `35352867362`)
+
+The log was unretrievable (GitHub API rate limit + invalid `gh` keyring token), but the public job
+page's **Annotations** gave it away:
+
+```
+Annotations: 3 errors, 1 warning, 1 notice
+cargo nextest run -> Process completed with exit code 100.
+```
+
+Exit 100 is a nextest test failure, and `.config/nextest.toml` sets
+`slow-timeout = { period = "1s", terminate-after = 30 }` — **any test is killed after ~30s**.
+The first version of `tests/cli_definition.rs` retried `run_command()` in a loop, and each call
+builds a *fresh* server (two language-server subprocesses plus a `cargo metadata` load) with the
+command's own 20s readiness poll, so the test blew past the 30s terminate-after and was killed.
+
+Fixes: `77607f74c` reduced the test to a single bounded call; the follow-up adds a nextest override
+so the two LSP e2e binaries get a budget matching their own 90s timeouts:
+
+```toml
+[[profile.default.overrides]]
+filter = 'binary(cli_definition) | binary(e2e_rust_analyzer)'
+slow-timeout = { period = "10s", terminate-after = 9, grace-period = "0s" }
+```
+
+**Lesson for future CI work here: any test that spawns a language server must fit the 30s
+terminate-after, or take an explicit nextest override.** Reading run status without the API is
+possible via the public web UI (`github.com/<owner>/<repo>/actions/workflows/<file>` is
+server-rendered; per-run job pages expose an Annotations block with the step and exit code).
 
 ## 5. Commit / ledger conventions (must follow)
 

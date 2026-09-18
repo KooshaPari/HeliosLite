@@ -8,3 +8,14 @@ status-level = "fail"
 
 # Show only failed tests in the final summary
 final-status-level = "fail"
+
+# The LSP end-to-end tests spawn real language servers (`rust-analyzer`,
+# `typescript-language-server`) and wait for rust-analyzer to finish loading the
+# project (`cargo metadata` + indexing) before a definition request resolves.
+# That legitimately exceeds the 30s default `terminate-after`: run 35352867362
+# failed with "cargo nextest run / Process completed with exit code 100" because
+# the test was killed mid-load. Give these two binaries a budget that matches
+# their own timeouts (90s) instead.
+[[profile.default.overrides]]
+filter = 'binary(cli_definition) | binary(e2e_rust_analyzer)'
+slow-timeout = { period = "10s", terminate-after = 9, grace-period = "0s" }
