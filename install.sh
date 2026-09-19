@@ -13,16 +13,17 @@
 #   # Override automatic Linux GNU/musl detection (useful in CI):
 #   HELIOSLITE_TARGET=x86_64-unknown-linux-musl ./install.sh
 #
-# Installs the HeliosLite CLI as a single-binary `helioslite` on PATH,
-# Existing `forge` and `forge-dev` commands are preserved.
-# On Linux/macOS we download the matching raw `forge-*` release binary from
-# GitHub Releases and install it as `helioslite`.
+# Installs `helioslite` on PATH, the legacy `forge` alias, and — when the
+# release carries it — the `forge_dbd` storage daemon. On Linux/macOS the
+# release publishes one binary under two asset names; `forge-<target>` is the
+# asset fetched here and it is installed under both command names. Every
+# binary is verified against the published `.sha256` sidecar before it
+# replaces anything on disk.
 
 set -euo pipefail
 
 VERSION=""
 LOCAL=0
-SKIP_UPDATE_CHECK=0
 REPO="${HELIOSLITE_RELEASE_REPO:-KooshaPari/forgecode}"
 TARGET_OVERRIDE="${HELIOSLITE_TARGET:-}"
 
@@ -39,9 +40,9 @@ for arg in "$@"; do
     case "$arg" in
         --local)             LOCAL=1 ;;
         --skip-forge)        : ;; # Deprecated compatibility no-op; only helioslite is installed.
-        --skip-update-check) SKIP_UPDATE_CHECK=1 ;;
+        --skip-update-check) : ;; # Deprecated compatibility no-op; the binary checks for updates itself.
         --help|-h)
-            sed -n '2,12p' "$0"
+            sed -n '2,10p' "$0"
             exit 0
             ;;
         -*) echo "Unknown flag: $arg" >&2; exit 1 ;;
@@ -114,6 +115,87 @@ detect_target() {
     esac
 }
 
+# Fetch one release asset into $INSTALL_DIR, verifying its published digest.
+#
+#   fetch_asset <asset-name> <destination-filename> <required: 1|0>
+#
+# The verified bytes are staged beside the destination and then moved over it,
+# so a failed or interrupted run leaves the previously installed binary intact
+# rather than a truncated one. Optional assets skip with a warning; required
+# assets exit non-zero, because a partial install that silently omits the
+# canonical binary is worse than a loud failure.
+fetch_asset() {
+    local asset="$1" dest="$2" required="$3"
+    local url="https://github.com/$REPO/releases/download/v$VERSION/$asset"
+    local staged="$TMP/$asset" expected actual incoming
+
+    # These use explicit `if !` blocks rather than `cmd || handler`. Under
+    # `set -e` the final command of an `||` list is not protected, so a
+    # handler that returned non-zero for an optional asset would abort the
+    # whole install instead of skipping it.
+    if ! curl -fsSL "$url" -o "$staged"; then
+        if [ "$required" = "1" ]; then
+            echo -e "  ✖ \033[31mDownload failed: $asset\033[0m" >&2
+            exit 1
+        fi
+        echo -e "  ! \033[33mSkipping optional asset $asset — download failed\033[0m" >&2
+        return 1
+    fi
+    if ! curl -fsSL "$url.sha256" -o "$staged.sha256"; then
+        if [ "$required" = "1" ]; then
+            echo -e "  ✖ \033[31mRelease checksum is unavailable; refusing an unverified binary\033[0m" >&2
+            exit 1
+        fi
+        echo -e "  ! \033[33mSkipping optional asset $asset — no published checksum\033[0m" >&2
+        return 1
+    fi
+
+    expected="$(awk 'NF { print $1; exit }' "$staged.sha256")"
+    case "$expected" in
+        (''|*[!0123456789abcdefABCDEF]*)
+            echo -e "  ✖ \033[31mInvalid SHA-256 checksum format for $asset\033[0m" >&2
+            exit 1
+            ;;
+    esac
+    if [ "${#expected}" -ne 64 ]; then
+        echo -e "  ✖ \033[31mInvalid SHA-256 checksum length for $asset\033[0m" >&2
+        exit 1
+    fi
+
+    if command -v sha256sum >/dev/null 2>&1; then
+        actual="$(sha256sum "$staged" | awk '{print $1}')"
+    elif command -v shasum >/dev/null 2>&1; then
+        actual="$(shasum -a 256 "$staged" | awk '{print $1}')"
+    else
+        echo -e "  ✖ \033[31mNo SHA-256 utility found; refusing an unverified binary\033[0m" >&2
+        exit 1
+    fi
+
+    if [ "$(printf '%s' "$expected" | tr '[:upper:]' '[:lower:]')" \
+        != "$(printf '%s' "$actual" | tr '[:upper:]' '[:lower:]')" ]; then
+        echo -e "  ✖ \033[31mSHA-256 verification failed for $asset\033[0m" >&2
+        exit 1
+    fi
+
+    incoming="$INSTALL_DIR/.$dest.tmp.$$"
+    cp "$staged" "$incoming"
+    chmod +x "$incoming"
+    mv -f "$incoming" "$INSTALL_DIR/$dest"
+    echo -e "  ✓ \033[32m$asset — SHA-256 verified\033[0m"
+    return 0
+}
+
+# Link a command name to an already-installed sibling binary. A symlink keeps
+# the alias and the canonical name from drifting apart across upgrades; a copy
+# is used only if the filesystem refuses symlinks.
+link_alias() {
+    local alias="$1" target="$2"
+    [ "$alias" = "$target" ] && return 0
+    ln -sfn "$target" "$INSTALL_DIR/$alias" 2>/dev/null \
+        || cp -f "$INSTALL_DIR/$target" "$INSTALL_DIR/$alias"
+    chmod +x "$INSTALL_DIR/$alias"
+}
+
 if [ "$LOCAL" = "1" ]; then
     if ! command -v cargo >/dev/null 2>&1; then
         echo -e "  ✖ \033[31mcargo not on PATH — install rustup: https://rustup.rs/\033[0m"
@@ -121,57 +203,24 @@ if [ "$LOCAL" = "1" ]; then
     fi
     echo -e "  → \033[36mLocal install — building from source...\033[0m"
     pushd "$(cd "$(dirname "$0")" && pwd)" >/dev/null
-    cargo build --release --bin helioslite
-    cp "target/release/helioslite" "$INSTALL_DIR/helioslite"
-    chmod +x "$INSTALL_DIR/helioslite"
+    cargo build --release --bin helioslite --bin forge --bin forge_dbd
+    install -m 0755 "target/release/helioslite" "$INSTALL_DIR/helioslite"
+    link_alias "forge" "helioslite"
+    if [ -f "target/release/forge_dbd" ]; then
+        install -m 0755 "target/release/forge_dbd" "$INSTALL_DIR/forge_dbd"
+    else
+        echo -e "  ! \033[33mforge_dbd was not built; skipping\033[0m" >&2
+    fi
     popd >/dev/null
 else
     TARGET="$(detect_target)"
-    ASSET="forge-${TARGET}"
-    URL="https://github.com/$REPO/releases/download/v$VERSION/$ASSET"
     TMP="$(mktemp -d -t helioslite-install-XXXXXX)"
     trap 'rm -rf "$TMP"' EXIT INT TERM
 
-    echo -e "  → \033[36mDownloading $URL\033[0m"
-    if ! curl -fsSL "$URL" -o "$TMP/helioslite"; then
-        echo -e "  ✖ \033[31mDownload failed\033[0m"
-        exit 1
-    fi
-    CHECKSUM_URL="$URL.sha256"
-    if ! curl -fsSL "$CHECKSUM_URL" -o "$TMP/helioslite.sha256"; then
-        echo -e "  ✖ \033[31mRelease checksum is unavailable; refusing an unverified binary\033[0m" >&2
-        exit 1
-    fi
-    EXPECTED_SHA="$(awk 'NF { print $1; exit }' "$TMP/helioslite.sha256")"
-    case "$EXPECTED_SHA" in
-        (''|*[!0123456789abcdefABCDEF]*)
-            echo -e "  ✖ \033[31mInvalid SHA-256 checksum format\033[0m" >&2
-            exit 1
-            ;;
-    esac
-    if [ "${#EXPECTED_SHA}" -ne 64 ]; then
-        echo -e "  ✖ \033[31mInvalid SHA-256 checksum length\033[0m" >&2
-        exit 1
-    fi
-    if command -v sha256sum >/dev/null 2>&1; then
-        ACTUAL_SHA="$(sha256sum "$TMP/helioslite" | awk '{print $1}')"
-    elif command -v shasum >/dev/null 2>&1; then
-        ACTUAL_SHA="$(shasum -a 256 "$TMP/helioslite" | awk '{print $1}')"
-    else
-        echo -e "  ✖ \033[31mNo SHA-256 utility found; refusing an unverified binary\033[0m" >&2
-        exit 1
-    fi
-    EXPECTED_SHA_NORMALIZED="$(printf '%s' "$EXPECTED_SHA" | tr '[:upper:]' '[:lower:]')"
-    ACTUAL_SHA_NORMALIZED="$(printf '%s' "$ACTUAL_SHA" | tr '[:upper:]' '[:lower:]')"
-    if [ "$EXPECTED_SHA_NORMALIZED" != "$ACTUAL_SHA_NORMALIZED" ]; then
-        echo -e "  ✖ \033[31mSHA-256 verification failed\033[0m" >&2
-        exit 1
-    fi
-    echo -e "  ✓ \033[32mSHA-256 verified\033[0m"
-    STAGED="$INSTALL_DIR/.helioslite.tmp.$$"
-    cp "$TMP/helioslite" "$STAGED"
-    chmod +x "$STAGED"
-    mv -f "$STAGED" "$INSTALL_DIR/helioslite"
+    fetch_asset "forge-${TARGET}" "helioslite" 1
+    link_alias "forge" "helioslite"
+    fetch_asset "forge_dbd-${TARGET}" "forge_dbd" 0 || true
+
     trap - EXIT INT TERM
     rm -rf "$TMP"
 fi
@@ -196,24 +245,51 @@ add_to_path() {
 }
 add_to_path "$INSTALL_DIR"
 
-# 5) Verify
-VER_OUTPUT="$("$INSTALL_DIR/helioslite" --version 2>&1 | head -n 1 || true)"
-if [ -z "$VER_OUTPUT" ]; then
-    echo -e "  ✖ \033[31mhelioslite --version returned no output; refusing an unverified install\033[0m" >&2
-    exit 1
-fi
-validate_reported_version "$VER_OUTPUT"
+# 5) Verify every command that was installed actually runs and reports the
+#    requested version. A binary that exists but cannot execute is not a
+#    successful install.
 if [ "$LOCAL" = "0" ]; then
     EXPECTED_VERSION_PATTERN="${VERSION//./\\.}"
-    if ! printf '%s\n' "$VER_OUTPUT" | grep -Eq "(^|[[:space:]])v?${EXPECTED_VERSION_PATTERN}([[:space:]]|$)"; then
-        echo -e "  ✖ \033[31mInstalled binary version does not match requested version $VERSION\033[0m" >&2
+else
+    EXPECTED_VERSION_PATTERN="[0-9]+\\.[0-9]+\\.[0-9]+"
+fi
+
+#   verify_command <command> <strict: 1|0>
+#
+# `helioslite` and `forge` are the same binary and must report exactly the
+# requested release version. `forge_dbd` lives in its own crate and is
+# versioned independently of the workspace, so it is only required to be
+# executable and to report some semantic version — demanding the release tag
+# from it would reject every legitimate build.
+verify_command() {
+    local name="$1" strict="$2" output
+    if [ ! -x "$INSTALL_DIR/$name" ]; then
+        echo -e "  ✖ \033[31m$name was not installed\033[0m" >&2
         exit 1
     fi
+    output="$("$INSTALL_DIR/$name" --version 2>&1 | head -n 1 || true)"
+    if [ -z "$output" ]; then
+        echo -e "  ✖ \033[31m$name --version returned no output; refusing an unverified install\033[0m" >&2
+        exit 1
+    fi
+    validate_reported_version "$output"
+    if [ "$strict" = "1" ] \
+        && ! printf '%s\n' "$output" | grep -Eq "(^|[[:space:]])v?${EXPECTED_VERSION_PATTERN}([[:space:]]|$)"; then
+        echo -e "  ✖ \033[31m$name reports a version that does not match the requested ${VERSION:-build}\033[0m" >&2
+        exit 1
+    fi
+    echo -e "  ✓ \033[32m$name reports: $output\033[0m"
+}
+
+verify_command "helioslite" 1
+verify_command "forge" 1
+# forge_dbd is optional, so it is verified only when it is present.
+if [ -x "$INSTALL_DIR/forge_dbd" ]; then
+    verify_command "forge_dbd" 0
 fi
-echo -e "  ✓ \033[32mhelioslite reports: $VER_OUTPUT\033[0m"
 
 echo ""
 echo -e "  🎉 \033[32mHeliosLite installed.\033[0m"
+echo -e "     Commands: helioslite (canonical), forge (legacy alias), forge_dbd (storage daemon)"
 echo -e "     Try:  helioslite --help"
 echo -e "     Docs: https://helioslite.phenotype.space"
-echo "     Existing forge / forge-dev commands are unchanged."

@@ -26,7 +26,7 @@ class Forge < Formula
 
   def install
     bin.install Dir["forge*"].first => "forge"
-    bot.install Dir["forge_dbd*"].first => "forge_dbd" if Dir["forge_dbd*"].any?
+    bin.install Dir["forge_dbd*"].first => "forge_dbd" if Dir["forge_dbd*"].any?
   end
 
   test do
