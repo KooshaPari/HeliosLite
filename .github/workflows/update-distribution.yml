@@ -21,15 +21,25 @@ jobs:
         TAG="${{ github.event.release.tag_name }}"
         mkdir -p checksums
         
-        # Download all SHA256 files
+        # Download all SHA256 files. The release workflow attaches assets
+        # concurrently with this run (both trigger on release: published), so a
+        # checksum can legitimately be missing for the first minutes. Retry for
+        # up to 5 minutes before failing; a genuinely absent asset still exits 1.
         for asset in forge-x86_64-apple-darwin forge-aarch64-apple-darwin \
                      forge-x86_64-unknown-linux-gnu forge-aarch64-unknown-linux-gnu \
                      forge-x86_64-pc-windows-msvc.exe forge-aarch64-pc-windows-msvc.exe; do
-          gh release download "$TAG" \
-            --repo "${{ github.repository }}" \
-            --pattern "${asset}.sha256" \
-            --dir checksums \
-            || { echo "::error::Could not download ${asset}.sha256"; exit 1; }
+          ok=0
+          for attempt in 1 2 3 4 5 6; do
+            if gh release download "$TAG" \
+              --repo "${{ github.repository }}" \
+              --pattern "${asset}.sha256" \
+              --dir checksums; then
+              ok=1
+              break
+            fi
+            [ "$attempt" -lt 6 ] && sleep 60
+          done
+          [ "$ok" -eq 1 ] || { echo "::error::Could not download ${asset}.sha256 after 6 attempts over ~5 minutes"; exit 1; }
         done
       env:
         GH_TOKEN: ${{ github.token }}
