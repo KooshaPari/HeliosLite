@@ -3,6 +3,15 @@ on:
   release:
     types:
     - published
+  # Manual trigger: lets the workflow run against an already-published release
+  # (all assets attached) without cutting a new release cycle. Required input
+  # `tag` supplies the tag name that the release event would carry.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to update manifests for (e.g. v2.13.21-h.0.2.8)
+        required: true
+        type: string
 permissions:
   contents: read
 jobs:
@@ -18,20 +27,23 @@ jobs:
     - name: Download SHA256 checksums
       run: |
         set -euo pipefail
-        TAG="${{ github.event.release.tag_name }}"
+        TAG="${{ inputs.tag || github.event.release.tag_name }}"
         mkdir -p checksums
         
         # Download all SHA256 files. The release workflow attaches assets
         # concurrently with this run (both trigger on release: published), so a
-        # checksum can legitimately be missing for the first minutes. Retry for
-        # up to 5 minutes before failing; a genuinely absent asset still exits 1.
+        # checksum can legitimately be missing for the first tens of minutes.
+        # Observed Multi Channel Release attach times: 27m21s, 33m29s, and a
+        # 15s lucky win. Retry for up to 45 minutes before failing; a
+        # genuinely absent asset still exits 1.
+        deadline=$(( SECONDS + 2700 ))
         for asset in forge-x86_64-apple-darwin forge-aarch64-apple-darwin \
                      forge-x86_64-unknown-linux-gnu forge-aarch64-unknown-linux-gnu \
                      forge-x86_64-pc-windows-msvc.exe forge-aarch64-pc-windows-msvc.exe \
                      forge_dbd-x86_64-apple-darwin forge_dbd-aarch64-apple-darwin \
                      forge_dbd-x86_64-unknown-linux-gnu forge_dbd-aarch64-unknown-linux-gnu; do
           ok=0
-          for attempt in 1 2 3 4 5 6; do
+          while :; do
             if gh release download "$TAG" \
               --repo "${{ github.repository }}" \
               --pattern "${asset}.sha256" \
@@ -39,9 +51,9 @@ jobs:
               ok=1
               break
             fi
-            [ "$attempt" -lt 6 ] && sleep 60
+            [ "$SECONDS" -lt "$deadline" ] && sleep 30 || break
           done
-          [ "$ok" -eq 1 ] || { echo "::error::Could not download ${asset}.sha256 after 6 attempts over ~5 minutes"; exit 1; }
+          [ "$ok" -eq 1 ] || { echo "::error::Could not download ${asset}.sha256 after ~45 minutes of retries"; exit 1; }
         done
       env:
         GH_TOKEN: ${{ github.token }}
@@ -85,7 +97,7 @@ jobs:
     - name: Update Homebrew formula
       run: |
         set -euo pipefail
-        TAG="${{ github.event.release.tag_name }}"
+        TAG="${{ inputs.tag || github.event.release.tag_name }}"
         VERSION="${TAG#v}"
         
         cat > distribution/homebrew/forge.rb << EOF
@@ -128,7 +140,7 @@ jobs:
     - name: Update packaging Homebrew formula
       run: |
         set -euo pipefail
-        TAG="${{ github.event.release.tag_name }}"
+        TAG="${{ inputs.tag || github.event.release.tag_name }}"
         VERSION="${TAG#v}"
 
         # packaging/homebrew/helioslite.rb is the canonical `helioslite`
@@ -240,7 +252,7 @@ jobs:
     - name: Update Scoop manifest
       run: |
         set -euo pipefail
-        TAG="${{ github.event.release.tag_name }}"
+        TAG="${{ inputs.tag || github.event.release.tag_name }}"
         VERSION="${TAG#v}"
         
         cat > distribution/scoop/forge.json << EOF
@@ -288,13 +300,13 @@ jobs:
           echo "No distribution changes to commit"
           exit 0
         fi
-        BRANCH="chore/distribution-${{ github.event.release.tag_name }}"
+        BRANCH="chore/distribution-${{ inputs.tag || github.event.release.tag_name }}"
         git checkout -b "$BRANCH"
-        git commit -m "chore(distribution): update Homebrew, Scoop, and packaging manifests for ${{ github.event.release.tag_name }}"
+        git commit -m "chore(distribution): update Homebrew, Scoop, and packaging manifests for ${{ inputs.tag || github.event.release.tag_name }}"
         git push origin "$BRANCH"
         gh pr create \
-          --title "chore(distribution): update manifests for ${{ github.event.release.tag_name }}" \
-          --body "Auto-generated distribution manifest updates for release ${{ github.event.release.tag_name }}." \
+          --title "chore(distribution): update manifests for ${{ inputs.tag || github.event.release.tag_name }}" \
+          --body "Auto-generated distribution manifest updates for release ${{ inputs.tag || github.event.release.tag_name }}." \
           --base main \
           --head "$BRANCH" || echo "PR already exists or creation failed"
       env:
