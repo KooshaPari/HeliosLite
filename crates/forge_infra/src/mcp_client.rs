@@ -12,7 +12,7 @@ use forge_domain::{
     Environment, Image, McpHttpServer, McpServerConfig, ToolDefinition, ToolName, ToolOutput,
 };
 use http::{HeaderName, HeaderValue};
-use rmcp::model::{CallToolRequestParams, ClientInfo, Implementation, InitializeRequestParams};
+use rmcp::model::{CallToolRequestParams, ClientConfig, Implementation, InitializeRequestParams};
 use rmcp::service::RunningService;
 use rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig;
 use rmcp::transport::{StreamableHttpClientTransport, TokioChildProcess};
@@ -125,8 +125,8 @@ impl ForgeMcpClient {
             .map_err(|e| anyhow::anyhow!("{e}"))
     }
 
-    fn client_info(&self) -> ClientInfo {
-        ClientInfo::new(Default::default(), Implementation::new("Forge", VERSION))
+    fn client_info(&self) -> ClientConfig {
+        ClientConfig::new(Default::default(), Implementation::new("Forge", VERSION))
     }
 
     /// Connects to the MCP server, returning an existing connection when one
@@ -333,12 +333,15 @@ impl ForgeMcpClient {
             .clone()
             .unwrap_or_else(|| "http://127.0.0.1:8765/callback".to_string());
 
-        let scopes: Vec<&str> = oauth_config.scopes.iter().map(|s| s.as_str()).collect();
-
         // start_authorization discovers metadata, registers client, generates PKCE +
-        // CSRF state
+        // CSRF state. rmcp 3.x takes a single AuthorizationRequest; when scopes
+        // are empty the SDK selects them from the server's challenge or metadata.
         oauth_state
-            .start_authorization(&scopes, &redirect_uri, Some("Forge"))
+            .start_authorization(
+                rmcp::transport::AuthorizationRequest::new(redirect_uri.clone())
+                    .with_scopes(oauth_config.scopes.clone())
+                    .with_client_name("Forge"),
+            )
             .await
             .map_err(|e| anyhow::anyhow!("OAuth authorization flow failed: {}", e))?;
 
@@ -543,22 +546,26 @@ impl ForgeMcpClient {
         let tool_contents: Vec<ToolOutput> = result
             .content
             .into_iter()
-            .map(|content| match content.raw {
-                rmcp::model::RawContent::Text(raw_text_content) => {
+            // rmcp 3.x replaced RawContent/RawContent variants with the unified
+            // ContentBlock union; match it directly.
+            .map(|content| match content {
+                rmcp::model::ContentBlock::Text(raw_text_content) => {
                     Ok(ToolOutput::text(raw_text_content.text))
                 }
-                rmcp::model::RawContent::Image(raw_image_content) => Ok(ToolOutput::image(
+                rmcp::model::ContentBlock::Image(raw_image_content) => Ok(ToolOutput::image(
                     Image::new_base64(raw_image_content.data, raw_image_content.mime_type.as_str()),
                 )),
-                rmcp::model::RawContent::Resource(_) => {
+                rmcp::model::ContentBlock::Resource(_) => {
                     Err(Error::UnsupportedMcpResponse("Resource").into())
                 }
-                rmcp::model::RawContent::ResourceLink(_) => {
+                rmcp::model::ContentBlock::ResourceLink(_) => {
                     Err(Error::UnsupportedMcpResponse("ResourceLink").into())
                 }
-                rmcp::model::RawContent::Audio(_) => {
+                rmcp::model::ContentBlock::Audio(_) => {
                     Err(Error::UnsupportedMcpResponse("Audio").into())
                 }
+                // ContentBlock is #[non_exhaustive]; forward-compat arm.
+                other => Err(Error::UnsupportedMcpResponse(unsupported_block_name(&other)).into()),
             })
             .collect::<anyhow::Result<Vec<ToolOutput>>>()?;
 
@@ -648,6 +655,21 @@ impl McpClientInfra for ForgeMcpClient {
     }
 }
 
+/// Names a [`rmcp::model::ContentBlock`] variant that this client does not
+/// support. `ContentBlock` is `#[non_exhaustive]`, so newer SDK releases can
+/// add variants; this keeps the catch-all arm reporting which one arrived
+/// instead of a generic message.
+fn unsupported_block_name(block: &rmcp::model::ContentBlock) -> &'static str {
+    match block {
+        rmcp::model::ContentBlock::Text(_) => "Text",
+        rmcp::model::ContentBlock::Image(_) => "Image",
+        rmcp::model::ContentBlock::Audio(_) => "Audio",
+        rmcp::model::ContentBlock::Resource(_) => "Resource",
+        rmcp::model::ContentBlock::ResourceLink(_) => "ResourceLink",
+        _ => "Unknown",
+    }
+}
+
 /// Resolves mustache templates in McpHttpServer headers using Handlebars
 /// and provided environment variables
 fn resolve_http_templates(
@@ -704,7 +726,9 @@ pub async fn mcp_auth(server_url: &str, env: &Environment) -> anyhow::Result<()>
     let redirect_uri = "http://127.0.0.1:8765/callback";
 
     oauth_state
-        .start_authorization(&[], redirect_uri, Some("Forge"))
+        .start_authorization(rmcp::transport::AuthorizationRequest::new(
+            redirect_uri.to_string(),
+        ))
         .await
         .map_err(|e| anyhow::anyhow!("OAuth authorization flow failed: {}", e))?;
 

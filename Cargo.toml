@@ -197,7 +197,7 @@ uuid = { version = "1.23.0", features = [
 whoami = "2.1.0"
 fnv = "1.0.7"
 hex = "0.4.3"
-rmcp = { version = "1.0.0", features = [
+rmcp = { version = "3.4.0", features = [
     "client",
     "transport-child-process",
     "transport-streamable-http-client-reqwest",
