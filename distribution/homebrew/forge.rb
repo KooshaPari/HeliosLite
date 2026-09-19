@@ -1,26 +1,26 @@
 class Forge < Formula
   desc "Fastest AI coding agent — 40+ models, local-first, zero data exfiltration"
   homepage "https://github.com/KooshaPari/forgecode"
-  version "2.13.21-h.0.2.8"
+  version "2.13.21-h.0.2.9"
   license "MIT"
 
   on_macos do
     if Hardware::CPU.intel?
       url "https://github.com/KooshaPari/forgecode/releases/download/v#{version}/forge-x86_64-apple-darwin"
-      sha256 "38c44310b96db7662535a1cca459a4f9ea0854d6b8c48a3e21ecbd76ee23571f"
+      sha256 "7edf53e0ba2115ec16ecf6ffe9c317366438e9791037e087ff78681bbe26da20"
     else
       url "https://github.com/KooshaPari/forgecode/releases/download/v#{version}/forge-aarch64-apple-darwin"
-      sha256 "9814d4c3933681bf04a6abcf6c2f8086c88882f07644eb8c841cd05483c61cec"
+      sha256 "4d1a9cf563bd062671795dded063e3ee452daab29f24c89db44e908d684972d1"
     end
   end
 
   on_linux do
     if Hardware::CPU.intel?
       url "https://github.com/KooshaPari/forgecode/releases/download/v#{version}/forge-x86_64-unknown-linux-gnu"
-      sha256 "84c5b8de6c5fa4feb786979f50778ad43a01b291985573d36dfa4ce6aed19a7f"
+      sha256 "4f937cf3a34f623a6bd2f6c169acf2a5606e3bce5924c75b1dbe602f43c7c334"
     else
       url "https://github.com/KooshaPari/forgecode/releases/download/v#{version}/forge-aarch64-unknown-linux-gnu"
-      sha256 "eee360f9af23c93a083c464db315c21e9c39759663ca970317ef06f8aadac128"
+      sha256 "3e4a3a4fd001465489906934df948c06b4c68a987df07baa50711f4dac2ebf77"
     end
   end
 
