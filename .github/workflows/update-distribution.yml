@@ -29,31 +29,43 @@ jobs:
             --repo "${{ github.repository }}" \
             --pattern "${asset}.sha256" \
             --dir checksums \
-            || echo "Warning: Could not download ${asset}.sha256"
+            || { echo "::error::Could not download ${asset}.sha256"; exit 1; }
         done
       env:
         GH_TOKEN: ${{ github.token }}
     - name: Extract SHA256 values
       run: |
         set -euo pipefail
-        
-        # Extract SHA256 from each file (format: "hash  filename")
-        extract_sha() {
-          local file="$1"
-          if [ -f "checksums/${file}.sha256" ]; then
-            awk '{print $1}' "checksums/${file}.sha256"
-          else
-            echo "MISSING"
+
+        # A missing checksum must fail the run. This previously emitted the
+        # literal "MISSING", which was then committed as `sha256 "MISSING"` /
+        # `"hash": "MISSING"` — an uninstallable formula/manifest published
+        # silently. Fail loudly instead.
+        #
+        # NB: this is a function, not a command substitution, so `exit 1`
+        # terminates the step. A subshell would swallow the status.
+        emit_sha() {
+          local var="$1" file="$2" value
+          if [ ! -f "checksums/${file}.sha256" ]; then
+            echo "::error::missing checksum asset: checksums/${file}.sha256" >&2
+            exit 1
           fi
+          # Extract SHA256 from each file (format: "hash  filename")
+          value="$(awk '{print $1}' "checksums/${file}.sha256")"
+          if [ -z "$value" ]; then
+            echo "::error::empty checksum in checksums/${file}.sha256" >&2
+            exit 1
+          fi
+          echo "${var}=${value}" >> "$GITHUB_ENV"
         }
-        
+
         # Store in environment
-        echo "SHA_X86_64_MACOS=$(extract_sha forge-x86_64-apple-darwin)" >> $GITHUB_ENV
-        echo "SHA_AARCH64_MACOS=$(extract_sha forge-aarch64-apple-darwin)" >> $GITHUB_ENV
-        echo "SHA_X86_64_LINUX=$(extract_sha forge-x86_64-unknown-linux-gnu)" >> $GITHUB_ENV
-        echo "SHA_AARCH64_LINUX=$(extract_sha forge-aarch64-unknown-linux-gnu)" >> $GITHUB_ENV
-        echo "SHA_X86_64_WINDOWS=$(extract_sha forge-x86_64-pc-windows-msvc.exe)" >> $GITHUB_ENV
-        echo "SHA_AARCH64_WINDOWS=$(extract_sha forge-aarch64-pc-windows-msvc.exe)" >> $GITHUB_ENV
+        emit_sha SHA_X86_64_MACOS forge-x86_64-apple-darwin
+        emit_sha SHA_AARCH64_MACOS forge-aarch64-apple-darwin
+        emit_sha SHA_X86_64_LINUX forge-x86_64-unknown-linux-gnu
+        emit_sha SHA_AARCH64_LINUX forge-aarch64-unknown-linux-gnu
+        emit_sha SHA_X86_64_WINDOWS forge-x86_64-pc-windows-msvc.exe
+        emit_sha SHA_AARCH64_WINDOWS forge-aarch64-pc-windows-msvc.exe
     - name: Update Homebrew formula
       run: |
         set -euo pipefail

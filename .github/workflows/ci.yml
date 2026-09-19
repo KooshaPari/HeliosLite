@@ -28,7 +28,6 @@ permissions:
   contents: read
 env:
   RUSTFLAGS: -Dwarnings
-  OPENROUTER_API_KEY: ${{secrets.OPENROUTER_API_KEY}}
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false

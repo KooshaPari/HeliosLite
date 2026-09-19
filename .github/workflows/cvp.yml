@@ -40,6 +40,7 @@ jobs:
           key: cvp-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
       - name: Verify PhenoShared deps resolve
         run: |
+          set -euo pipefail
           cargo fetch 2>&1 | tee /tmp/cvp-fetch.log
           echo "✓ Dependencies fetched"
       - name: Check cross-consumed crates compile

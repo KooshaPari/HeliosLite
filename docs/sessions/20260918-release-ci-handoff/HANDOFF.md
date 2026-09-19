@@ -439,6 +439,27 @@ the guard had failed.
 conclusions, annotations, or local validation. (Job *conclusions* and run *conclusions* are readable
 via the API and the public web UI.)
 
+## 4d. Audit of every workflow: 18 confirmed findings, 7 fixed, the rest listed
+
+A read-only worker audit of all 24 workflow files plus build configs is committed alongside this
+handoff as **`workflow-audit-2026-09-19.md`**. It reports 18 CONFIRMED / 7 SPECULATIVE findings and,
+usefully, a coverage table of the 17 checks it ran plus the gaps it did not close.
+
+Seven are fixed and verified (table in that file): the Scoop `checkver` regex that truncated the
+fork version, version-pinned `integration/forgecode-h0.1.7` triggers that silently stop matching,
+a `cargo fetch | tee` that hid failure, `cargo deny check` never running `bans` (making all of
+`[bans]` dead config), a missing checksum committed as `sha256 "MISSING"`, a command-injection
+surface in `helios-bot.yml` where payload values were interpolated into the script body with a
+token in scope, and a workflow-level API key exported to every step.
+
+The open ones are listed with severity and rationale in that file. Two deserve attention first:
+
+- **C1** — `platform-tests.yml` is the only workflow that tests macOS and Windows, and its test step
+  is `continue-on-error: true`, so cross-platform regressions are invisible. This is the same hole
+  that hid the failures in 4.6 and 4.7. Removing it needs a green baseline on those platforms.
+- **A1** — the fork release version is a hand-bumped literal in three places; the last two releases
+  each needed exactly such a commit.
+
 ## 5. Commit / ledger conventions (must follow)
 
 Every agent commit carries ledger trailers:
