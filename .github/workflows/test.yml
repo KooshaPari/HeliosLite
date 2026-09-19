@@ -7,11 +7,11 @@ on:
     types: [opened, synchronize, reopened]
     branches:
       - main
-      - integration/forgecode-h0.1.7
+      - integration/**
   push:
     branches:
       - main
-      - integration/forgecode-h0.1.7
+      - integration/**
 
 concurrency:
   group: test-${{ github.ref }}

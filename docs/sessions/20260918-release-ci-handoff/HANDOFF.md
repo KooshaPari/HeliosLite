@@ -414,6 +414,31 @@ h.0.2.1-h.0.2.3 tags are in exactly that state). After publishing, expect 55 ass
 27 `.sha256` + `sbom.cdx.json`); verify as 4a describes — download anonymously, compare checksums,
 execute the macOS binaries, `codesign --verify --strict`.
 
+## 4c. The cargo-bin invariant is now enforced, not just documented
+
+The `$HOME/.cargo/bin` clobber (§4.6) was fixed by moving the rust-analyzer install into
+`$RUNNER_TEMP`, but nothing stopped it coming back. `cvp.yml` now fails the build if any workflow
+reintroduces an install target inside that directory:
+
+```bash
+if grep -rnE '(bin|dest|target|out)="\$HOME/\.cargo/bin/|> *"\$HOME/\.cargo/bin/' .github/workflows/*.yml; then
+  echo "::error::a workflow installs into \$HOME/.cargo/bin; use \$RUNNER_TEMP (HANDOFF.md 4.6)"
+  exit 1
+fi
+```
+
+Validated as a test, not a hopeful grep: it passes on the current tree, and the identical pattern
+matches the offending lines at `3fc98eb0c^` (the revision that broke macOS and ubuntu), so it would
+have caught the original bug. It runs on pushes and pull requests, so a regression cannot reach
+`main` silently. Confirmed in CI: run `35410003618` (cvp on `4d78a0c80`) concluded success and the
+owning job — `CVP: PhenoShared cross-consumption` — is `completed/success`, which it could not be if
+the guard had failed.
+
+**Reading job logs needs auth.** With the invalid token, `gh run view --job <id> --log` returns
+`HTTP 403: Must have admin rights to Repository`, so step-level evidence must come from job
+conclusions, annotations, or local validation. (Job *conclusions* and run *conclusions* are readable
+via the API and the public web UI.)
+
 ## 5. Commit / ledger conventions (must follow)
 
 Every agent commit carries ledger trailers:
