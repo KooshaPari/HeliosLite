@@ -166,9 +166,16 @@ async fn e2e_definition_round_trip_against_real_rust_analyzer() {
             //
             // rust-analyzer answers requests while the project is still
             // loading, returning an empty definition list until analysis is
-            // ready, so poll until it produces a result (bounded by the
-            // deadline below and by E2E_BUDGET around the whole block).
-            let deadline = std::time::Instant::now() + Duration::from_secs(20);
+            // ready, so poll until it produces a result. Poll for as long as
+            // the outer budget allows, minus a margin, so a genuine
+            // "never answers" case reports through the assertion below rather
+            // than as an outer timeout. A fixed 20s deadline used to cut this
+            // short: rust-analyzer's first answer on a cold, loaded CI runner
+            // can take far longer, and giving up early turned runner load into
+            // a red test (nextest exit 100 across ci.yml, test.yml and cvp.yml
+            // with no code change).
+            let deadline =
+                std::time::Instant::now() + E2E_BUDGET.saturating_sub(Duration::from_secs(10));
             let locations = loop {
                 let locations = server
                     .definition(Path::new("src/lib.rs"), query_position.clone())

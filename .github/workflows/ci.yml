@@ -28,6 +28,13 @@ permissions:
   contents: read
 env:
   RUSTFLAGS: -Dwarnings
+  # NOTE: kept at workflow level to match the generator
+  # (crates/forge_ci/src/workflows/ci.rs:78). Provider code reads this env var
+  # by name (crates/forge_repo/src/provider/provider_repo.rs:822), so removing it
+  # needs a test run to prove no provider test depends on it; it is also
+  # inherited by every third-party action in this workflow, which is worth fixing
+  # properly in the generator rather than by hand here.
+  OPENROUTER_API_KEY: ${{secrets.OPENROUTER_API_KEY}}
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false

@@ -18,4 +18,4 @@ final-status-level = "fail"
 # their own timeouts (90s) instead.
 [[profile.default.overrides]]
 filter = 'binary(cli_definition) | binary(e2e_rust_analyzer)'
-slow-timeout = { period = "10s", terminate-after = 9, grace-period = "0s" }
+slow-timeout = { period = "10s", terminate-after = 12, grace-period = "0s" }
