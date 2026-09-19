@@ -392,6 +392,28 @@ sufficient:
 possible via the public web UI (`github.com/<owner>/<repo>/actions/workflows/<file>` is
 server-rendered; per-run job pages expose an Annotations block with the step and exit code).
 
+## 4b. OPEN (blocked on a credential): ship the product fixes as a release
+
+The three product fixes are on `main`, and each is a direct or transitive dependency of the released
+`forge` target (`crates/forge_main/Cargo.toml:109` links `forge_lsp`; `forge_main` builds `forge`),
+but the newest published release — **v2.13.21-h.0.2.6** — was cut *before* them. The code is fixed
+from the repo's point of view, not yet from a user's.
+
+Blocked because publishing a release needs an authenticated API call, and this host's `gh` token is
+invalid (`gh auth status` -> "The token in default is invalid"; no `GH_TOKEN`/`GITHUB_TOKEN` in the
+environment, no `~/.netrc`, and `~/.config/gh/hosts.yml` carries no token). Read-only unauthenticated
+API calls still work at 60 requests/hour; **writes do not**.
+
+To ship, see `docs/sessions/20260918-release-ci-handoff/SHIP-v2.13.21-h.0.2.7.sh` — the notes are
+already written alongside it in `RELEASE-NOTES-v2.13.21-h.0.2.7.md`, so it is two commands after
+authenticating.
+
+`release.yml` only runs on `release: published`, so a tag on its own publishes nothing: do not create
+the tag without creating the release, or it will look shipped while carrying no assets (the
+h.0.2.1-h.0.2.3 tags are in exactly that state). After publishing, expect 55 assets (27 binaries +
+27 `.sha256` + `sbom.cdx.json`); verify as 4a describes — download anonymously, compare checksums,
+execute the macOS binaries, `codesign --verify --strict`.
+
 ## 5. Commit / ledger conventions (must follow)
 
 Every agent commit carries ledger trailers:
