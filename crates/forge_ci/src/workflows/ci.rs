@@ -71,7 +71,7 @@ fn ci_workflow() -> Workflow {
         .push(Push::default().add_branch("main").add_tag("v*"))
         .pull_request(
             ["opened", "synchronize", "reopened", "labeled", "unlabeled"],
-            ["main", "integration/forgecode-h0.1.7"],
+            ["main", "integration/**"],
         );
     Workflow::new("ci")
         .env("RUSTFLAGS", "-Dwarnings")
@@ -135,7 +135,7 @@ mod tests {
         );
         let expected = (
             serde_yaml_ng::from_str::<Value>(
-                "push:\n  branches: [main]\n  tags: ['v*']\npull_request:\n  types: [opened, synchronize, reopened, labeled, unlabeled]\n  branches: [main, integration/forgecode-h0.1.7]\n",
+                "push:\n  branches: [main]\n  tags: ['v*']\npull_request:\n  types: [opened, synchronize, reopened, labeled, unlabeled]\n  branches: [main, integration/**]\n",
             )
             .unwrap(),
             Value::from("ubuntu-latest"),
