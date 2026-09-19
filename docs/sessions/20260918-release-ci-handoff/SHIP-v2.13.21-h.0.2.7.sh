@@ -17,7 +17,7 @@ set -euo pipefail
 
 REPO="KooshaPari/HeliosLite"
 TAG="v2.13.21-h.0.2.7"
-SHA="aaef98bf0"
+SHA="db571577d"
 
 # repo root = three levels up from docs/sessions/<session>/
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

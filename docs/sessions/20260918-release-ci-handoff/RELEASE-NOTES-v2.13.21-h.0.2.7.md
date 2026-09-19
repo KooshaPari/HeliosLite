@@ -1,6 +1,6 @@
 ## HeliosLite v2.13.21-h.0.2.7 — ships the language-server fixes
 
-Cut from `aaef98bf0` (every workflow green; code that matters: `a8ad28703`).
+Cut from `db571577d` (all 14 workflows green; code that matters: `a8ad28703`, plus the PhenoShared duplicate-key manifest repair `b2d06d53` now consumed by this pin and the forge_ci generator alignment `db571577d`).
 
 ### Fixes shipped since v2.13.21-h.0.2.6
 
