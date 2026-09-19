@@ -65,6 +65,23 @@ jobs:
           else
             echo "✓ Using local path deps (CI should switch to git rev pin)"
           fi
+      - name: Guard - no workflow may install into $HOME/.cargo/bin
+        run: |
+          set -euo pipefail
+          # On rustup-based runners `$HOME/.cargo/bin/rust-analyzer` is a SYMLINK
+          # to the rustup binary, so a redirect such as `> "$bin"` follows it and
+          # overwrites rustup itself. Every shim (cargo, rustc, cargo-clippy, ...)
+          # then becomes the rust-analyzer binary: `cargo clippy` answers
+          # `unexpected argument: "clippy"` and `rustc -vV` prints
+          # `rust-analyzer 0.3.3049-standalone`. Diagnosing that cost hours, and
+          # the fix is easy to undo by accident, so it is enforced here.
+          # Install tooling into $RUNNER_TEMP instead.
+          # See docs/sessions/20260918-release-ci-handoff/HANDOFF.md section 4.6.
+          if grep -rnE '(bin|dest|target|out)="\$HOME/\.cargo/bin/|> *"\$HOME/\.cargo/bin/' .github/workflows/*.yml; then
+            echo "::error::a workflow installs into \$HOME/.cargo/bin; use \$RUNNER_TEMP (HANDOFF.md 4.6)"
+            exit 1
+          fi
+          echo "✓ No workflow writes into \$HOME/.cargo/bin"
 
   # ── Gate 2: Full workspace build ─────────────────────────────
   build:
