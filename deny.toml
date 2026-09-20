@@ -28,14 +28,7 @@ ignore = [
     # Pre-existing fork-specific ignores inherited from tailcallhq/forgecode upstream.
     # Tracked for resolution when upstream bumps affected transitive deps.
     # Tracking: https://github.com/KooshaPari/forgecode/issues — upstream-dependency-advisories label.
-    { id = "RUSTSEC-2026-0118", reason = "Transitive dep from upstream forgecode workspace; no direct use in Phenotype additions; pending upstream resolution." },
-    { id = "RUSTSEC-2026-0119", reason = "Transitive dep from upstream forgecode workspace; no direct use in Phenotype additions; pending upstream resolution." },
-    # Unmaintained-transitive advisories surfaced via upstream forgecode workspace
-    # deps (no direct use in Phenotype additions). All have "no safe upgrade"
-    # per RustSec; resolution depends on upstream tailcallhq/forgecode bumps.
-    { id = "RUSTSEC-2025-0141", reason = "bincode 1.x unmaintained; transitive via upstream workspace deps; bincode 2.x migration is upstream-owned." },
     { id = "RUSTSEC-2024-0436", reason = "paste unmaintained; transitive via proc-macro deps; paste! macro not invoked directly in Phenotype additions." },
-    { id = "RUSTSEC-2025-0134", reason = "rustls-pemfile unmaintained (folded into rustls-pki-types); transitive via upstream rustls stack; pending upstream bump." },
     # h2 0.3.x empty-DATA-frames (low severity). No fix exists in the 0.3 line
     # (latest is 0.3.27; RustSec patched only 0.4.16), and the 0.3 instance is
     # pinned by the dev-only chain rocket 0.5.1 -> rocket_http -> hyper 0.14
