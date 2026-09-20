@@ -400,8 +400,8 @@ impl<S: Services + EnvironmentInfra<Config = forge_config::ForgeConfig>> ForgeAp
         let tracing_handler = TracingHandler::new();
         let title_handler = TitleGenerationHandler::new(services.clone());
 
-        // Build the on_end hook, conditionally adding PendingTodosHandler based on
-        // config
+        // Build the on_end hook, conditionally adding PendingTodosHandler based
+        // on config
         let on_end_hook = if forge_config.verify_todos {
             tracing_handler
                 .clone()
@@ -458,7 +458,8 @@ impl<S: Services + EnvironmentInfra<Config = forge_config::ForgeConfig>> ForgeAp
                     // logged and never break the chat-completion path.
                     store_conversation_in_semantic_memory(&services, &conversation).await;
 
-                    // Send any error to the stream (prioritize dispatch error over save error)
+                    // Send any error to the stream (prioritize dispatch error
+                    // over save error)
                     #[allow(clippy::collapsible_if)]
                     if let Some(err) = dispatch_result.err().or(save_result.err()) {
                         if let Err(e) = tx.send(Err(err)).await {
@@ -576,7 +577,8 @@ impl<S: Services + EnvironmentInfra<Config = forge_config::ForgeConfig>> ForgeAp
     pub async fn get_all_provider_models(&self) -> Result<Vec<ProviderModels>> {
         let all_providers = self.services.get_all_providers().await?;
 
-        // Build one future per configured provider, preserving the error on failure.
+        // Build one future per configured provider, preserving the error on
+        // failure.
         let futures: Vec<_> = all_providers
             .into_iter()
             .filter_map(|any_provider| any_provider.into_configured())
