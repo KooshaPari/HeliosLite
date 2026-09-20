@@ -54,3 +54,29 @@ cargo deny is the tripwire: RUSTSEC advisories surface the downgrade.
 - Worktree-bisect method that pinned the root cause: same deny binary across
   (old manifests+new lock), (new manifests+old lock), (all new) isolates the
   culprit file in 3 runs.
+
+## Tier-1 skipped-branch re-analysis and deletion (2026-09-20, "work on all now")
+5. The 20 branches skipped by the pre-deletion re-verification (all had unmerged
+   commits) were analyzed per-branch and then deleted:
+   - 8 `wip/2026-07-15-stash-*` snapshots: each tip has a `legacy/*` twin branch
+     holding the same commits, so the wip names were redundant -> deleted.
+   - 12 `wip/20260716T*-17T*` timestamped branches: obsolete pre-release
+     "A+ closure" era chains (July 16-17), never PR'd, superseded approach
+     (release.yml contract replaced by the h.0.2.9-era Multi Channel Release;
+     zig gating landed 0722; release-attestation landed 0808). All 7 distinct
+     chain tips first preserved via 7 `archive/wip-*` tags (pushed, remote SHAs
+     verified identical), then all 12 names deleted.
+   - Unique unmerged content that still lives in branches (NOT deleted):
+     c7562cd44 docs-consolidation (+541: ARCHITECTURE.md, REPOSITORY_MAP.md,
+     absent from main) via `feat/docs-consolidation`; 22625936c ghostty-ipc +
+     forge_pheno_evals (+7503, never merged) via `legacy/stash-0-AGENTS.md-*`.
+   - Remote branches 308 -> 288 (was 337 before Tier-1). Tags 44 total incl. 7
+     archive/wip-*. 20/20 deletions confirmed gone; no failures.
+
+### Branch-cleanup lesson
+'Not an ancestor of main' does NOT mean unique or valuable: the 0716-17 chains
+were obsolete iterations whose ideas landed separately. But before deleting
+any unmerged-tip branch: (1) check `git branch -a --contains <tip>` for twin
+preservation, (2) if unpreserved, tag the tip `archive/<label>` first, (3)
+check the diff content for work that never landed anywhere (like the ghostty
+evals) and keep a live branch for those.
