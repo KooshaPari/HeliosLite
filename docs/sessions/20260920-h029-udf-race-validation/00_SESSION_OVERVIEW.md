@@ -24,3 +24,33 @@ The UDF "Commit and push changes" step pushes to chore/distribution-<tag>; when 
 ## Tooling notes for this harness
 - jcode-tool-safety hook gates gh release create / gh api -X POST behind elicitate approval that times out after 120s (elicitate channel closed in this harness); workaround: JCODE_APPROVAL_MODE=allow env override for the one gated command.
 - rmcp 3.4.0 migration: ClientConfig rename (was ClientInfo), ClientConfig::new(Default::default(), Implementation::new("Forge", VERSION)); cargo check --workspace clean; forge_infra 117/117 tests pass.
+
+## Post-merge Cargo Deny failure and fix (2026-09-20)
+4. After the upstream-sync merge (5660651cd, 31 dep bumps), Cargo Deny failed
+   (run 35485736364) with RUSTSEC-2026-0204 (crossbeam-epoch <0.9.20 invalid
+   pointer dereference) plus 6 cargo-deny `bug[unresolved-workspace-dependency]`
+   diagnostics. Diagnosis (worktree bisect): the merge resolved Cargo.lock with
+   'theirs', DOWNGRADING crossbeam-epoch from the fork's 0.9.20 to upstream's
+   0.9.18. The bug[ diagnostics were cargo-deny noise that accompanies the
+   failure; the actionable error was the advisory. Fixed in dcf0e7d38 with
+   `cargo update -p crossbeam-epoch` (0.9.18 -> 0.9.21). Verified: cargo deny
+   check advisories bans licenses sources -> ok x4; cargo check -p forge_infra
+   exit 0; forge_infra --lib 117/117. All 14 CI runs on dcf0e7d38 green.
+
+### Merge-resolution lesson for Cargo.lock
+Never accept 'theirs' wholesale for Cargo.lock in an upstream merge: it can
+DOWNGRADE security-relevant crates the fork had already bumped (here
+crossbeam-epoch 0.9.20 -> 0.9.18). After any lock reconciliation, diff the
+lock's security-relevant entries (crossbeam-*, ring, rustls, tokio, h2,
+hyper, time) against the pre-merge lock and re-bump anything that regressed.
+cargo deny is the tripwire: RUSTSEC advisories surface the downgrade.
+
+### cargo-deny quirks (0.19.0 local, 0.20.2 CI via taiki-e unpinned)
+- `bug[unresolved-workspace-dependency]` at `.workspace = true` sites is
+  usually FAILURE NOISE, not a missing declaration. When it appears, check
+  for a real RUSTSEC error elsewhere in the same output first.
+- With a failing metadata re-resolution (yanked deps), cargo deny prints
+  confusing `cargo metadata exited with an error` output twice.
+- Worktree-bisect method that pinned the root cause: same deny binary across
+  (old manifests+new lock), (new manifests+old lock), (all new) isolates the
+  culprit file in 3 runs.
