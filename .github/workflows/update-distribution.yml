@@ -303,6 +303,12 @@ jobs:
         BRANCH="chore/distribution-${{ inputs.tag || github.event.release.tag_name }}"
         git checkout -b "$BRANCH"
         git commit -m "chore(distribution): update Homebrew, Scoop, and packaging manifests for ${{ inputs.tag || github.event.release.tag_name }}"
+        # Re-runs (workflow_dispatch) fail non-fast-forward if the branch from a
+        # prior run still exists. This branch is auto-generated from main, so
+        # delete-and-recreate is safe; gh pr create below handles the PR.
+        if git ls-remote --exit-code origin "refs/heads/$BRANCH" >/dev/null 2>&1; then
+          git push origin --delete "$BRANCH" || echo "stale branch delete failed; continuing"
+        fi
         git push origin "$BRANCH"
         gh pr create \
           --title "chore(distribution): update manifests for ${{ inputs.tag || github.event.release.tag_name }}" \
