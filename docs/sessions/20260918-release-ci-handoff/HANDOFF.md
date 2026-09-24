@@ -603,3 +603,29 @@ This host (if you need it): kooshapari@192.168.1.23 (Kooshas-Laptop.local), sshd
 
 > Snapshot values are point-in-time; re-derive with `git log --oneline -1` rather than trusting them
 > blindly, especially if other sessions have pushed.
+
+
+---
+
+## Addendum — 2026-09-24 (roadmap P1-P4 + nightly execution)
+
+**Supersedes the "Current state" table above where they disagree.**
+
+| Item | State (2026-09-24) |
+|---|---|
+| `main` HEAD | `6fe40455e` (all 6 roadmap commits pushed) |
+| Latest release | `v2.13.21-h.0.2.9` (fork scheme `v2.13.21-h.0.X.Y` unchanged) |
+| Upstream drift | **0** — origin/main fully merged (last: f11c1bcc7 dirs 7.0.0) |
+| Dependabot alerts | **1 open of 4** (rand #7, low; last scanned 09-20T03:07Z BEFORE the fix; vulnerable `=0.10.0` confirmed absent from lock — resolves on next scan. quinn-proto/serde_with/cmov CLOSED) |
+| cargo deny | ok x4 with only 2 advisory ignores (paste, h2-via-rocket); 6 stale ignores removed |
+| Remote branches | 287 (`feat/docs-consolidation` merged+deleted); 7 `archive/wip-*` tags preserve deleted tips |
+| Nightly (`helios-lite-nightly`) | FAILED 10 straight days (09-14..23) on `failed to spawn "typescript-language-server"`; **fixed in `31896cb56`** (mirrors test.yml's npm install step). Pre-verified: exact test passes locally with servers installed (1 passed, 21.13s), fmt gate green, test.yml 3/3 green with identical step. Live confirmation pending: scheduled 2026-09-25 06:30 UTC run (verify task `sched_5c849ce6` at 08:00 UTC) or the deferred manual dispatch |
+| `update-distribution.yml` | Re-run non-fast-forward failure (run 35478220664, tag h.0.2.9, `! [rejected] ... fetch first`) **fixed in `ba7187320`** — stale `chore/distribution-<tag>` branch deleted before push. Real-path re-dispatch deferred to approval inbox (`hook-d6499f54f23912e9849be7938d9a3618`) |
+| LSP e2e test locally | Requires `typescript-language-server` (npm -g) + `rust-analyzer` (rustup component for pinned 1.98 toolchain); both installed 2026-09-24 on this host |
+| Open inbox approvals | 3: nightly dispatch, windows Platform-Tests rerun 35980044869 (transient setup-protoc socket flake), distribution re-dispatch |
+
+**New lessons since 2026-09-18** (details in `docs/sessions/20260920-h029-udf-race-validation/00_SESSION_OVERVIEW.md`):
+- Never resolve Cargo.lock merges with 'theirs' — diff security entries (crossbeam-*, ring, rustls, tokio, h2) vs pre-merge lock; cargo deny is the tripwire (crossbeam-epoch 0.9.21 regression bit h.0.2.9).
+- `bug[unresolved-workspace-dependency]` in cargo-deny output is usually failure noise — look for a real RUSTSEC error in the same output first.
+- Interrupted merges leave MERGE_HEAD+UU; verify docs-merge resolutions with `git diff parent..HEAD --stat` (expect pure additions for additive merges) before committing — a half-applied python fix truncated AGENTS.md 309->143 lines once.
+- When a test gains a binary prerequisite, grep ALL workflows running it: test.yml installed typescript-language-server, the nightly did not, and failed 10 days.
