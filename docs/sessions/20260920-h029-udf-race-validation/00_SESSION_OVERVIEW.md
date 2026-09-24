@@ -80,3 +80,57 @@ any unmerged-tip branch: (1) check `git branch -a --contains <tip>` for twin
 preservation, (2) if unpreserved, tag the tip `archive/<label>` first, (3)
 check the diff content for work that never landed anywhere (like the ghostty
 evals) and keep a live branch for those.
+
+## Roadmap execution P1-P4 + nightly fix (2026-09-20 / 2026-09-24, "proc")
+
+Executed the deep-roadmap batch in priority order. All commits pushed to fork main:
+
+- **P1 security + hygiene — `498d276e4`, 14/14 CI green.** Fixed 3 real
+  dependabot alerts via lock updates (quinn-proto 0.11.14->0.11.18 HIGH,
+  serde_with 3.18.0->3.23.0, cmov 0.5.3->0.5.4); cleared the stale rand alert
+  by bumping `forge_spinner` manifest `rand = "0.10.0"` -> `"0.10.2"`
+  (dependabot scans the manifest STRING, not the lock resolution); unyanked
+  spin 0.9.8->0.9.9 and chacha20 0.10.0->0.10.2; removed 6 stale deny.toml
+  advisory ignores (0118, 0119, 0141-bincode, 0436-paste, 0134-rustls-pemfile
+  all either not-encountered or gone from the lock entirely — bincode is no
+  longer in Cargo.lock at all). Validated: cargo check, forge_infra 117/117,
+  deny advisories/bans/licenses/sources ok.
+- **P2 upstream sync — `f8705ceef`.** Merged origin/main f11c1bcc7 (dirs
+  6.0.0->7.0.0, MAJOR). Lock diff was dirs-only + a gix-chain hashbrown
+  0.16.1->0.17.1 re-resolution; crossbeam-epoch 0.9.21 and quinn-proto
+  0.11.18 survived (no 'theirs' regression). forge_repo (gix consumer) and
+  the 7 other dirs crates check clean; deny clean; forge_infra 117/117.
+- **P3 docs merge — `4e5380479`.** Merged `feat/docs-consolidation`
+  (+541: AGENTS.md +76, ARCHITECTURE.md +233, REPOSITORY_MAP.md +232).
+  AGENTS.md conflicted; the pre-reload session had left the resolution
+  CORRUPTED (main's 309-line file clobbered to 143 lines with mixed branch
+  content). Rebuilt from git objects: main's full file with the branch's two
+  new sections (Custom Commands, Resilience & Stability) inserted before
+  `## Error Management`; verified 385 = 309 + 76, purely additive, 0
+  deletions. Branch deleted after merge (content fully absorbed).
+- **P4 UDF/distribution re-run fix — `ba7187320`, all green.**
+  `update-distribution.yml` failed non-fast-forward when re-run via
+  workflow_dispatch while the prior run's `chore/distribution-<tag>` branch
+  existed. Now deletes the stale branch first (auto-generated, safe to
+  recreate; the PR-create step tolerates an existing PR). YAML validated.
+- **Bonus: helios-lite-nightly fix — `31896cb56`.** The nightly had failed
+  10 consecutive days (2026-09-14..23): `cli_definition` LSP cold-server
+  test spawns `typescript-language-server`, which only `test.yml` installs.
+  Added the same npm install step to the nightly workflow (mirrors the
+  existing rust-analyzer install rationale). Manual dispatch + failed-job
+  rerun for a windows setup-protoc "socket hang up" flake were both DEFERRED
+  to the approval inbox; the next scheduled nightly (06:30 UTC) will also
+  exercise the fix.
+- **Dependabot end-state: 4 -> 1 open.** Alert 7 (rand, low) last evaluated
+  2026-09-20T03:07Z, i.e. BEFORE P1 landed; vulnerable `rand = 0.10.0` no
+  longer exists in the lock (0.8.5/0.9.4/0.10.2 only) -> resolves on next
+  scan. quinn-proto/serde_with/cmov alerts closed.
+
+### Lessons
+- An interrupted merge leaves MERGE_HEAD + `UU` state; a half-applied python
+  conflict fix can silently truncate a 309-line file to 143. Always diff the
+  resolution against BOTH parents (insertion/deletion counts) before
+  committing a docs merge: `git diff parent..HEAD --stat` + grep for `^-`.
+- Workflow steps must be kept in sync across workflows: when a test gains a
+  new binary prerequisite (typescript-language-server), grep ALL workflows
+  that run that test, not just the default CI one.
