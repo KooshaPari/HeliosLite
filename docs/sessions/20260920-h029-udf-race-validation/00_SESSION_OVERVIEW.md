@@ -134,3 +134,20 @@ Executed the deep-roadmap batch in priority order. All commits pushed to fork ma
 - Workflow steps must be kept in sync across workflows: when a test gains a
   new binary prerequisite (typescript-language-server), grep ALL workflows
   that run that test, not just the default CI one.
+
+## Feedback-loop closure observations (2026-09-24 12:00Z)
+
+- **Windows Platform-Tests flake: RESOLVED by superseding real runs.** The
+  31896cb56 windows failure (run 35980044869, setup-protoc `socket hang up`)
+  was followed by `Test (windows-latest)` **success on both later commits**:
+  run 35984484944 (6fe40455e) and run 35992570037 (01f31585f) — same job,
+  same code, green twice after the flake. The deferred rerun (hook-eeeaa6fb)
+  is therefore moot: if approved it will almost certainly pass; no action
+  needed either way.
+- **Handoff**: HANDOFF.md 2026-09-24 addendum observed at remote HEAD
+  (01f31585f), CI 14/14 success on that commit.
+- **Dependabot**: 9 closed / 1 open observed via API (was 4 open); rand #7
+  frozen at pre-fix scan time 09-20T03:07Z, resolves on next external scan.
+- **Still genuinely gated (observers scheduled)**: nightly run (sched_5c849ce6,
+  09-25 08:00Z) and distribution re-dispatch tag=h.0.2.9 (sched_c64a87ac,
+  09-25 08:30Z; request hook-d6499f54).
