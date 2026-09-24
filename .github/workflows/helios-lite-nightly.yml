@@ -102,6 +102,18 @@ jobs:
           # Put only the isolated dir on PATH for later steps.
           echo "$install_dir" >> "$GITHUB_PATH"
 
+      - name: Install typescript-language-server
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Same requirement as test.yml: forge_lsp::Server::with_defaults
+          # spawns BOTH rust-analyzer and typescript-language-server; without
+          # the TS server, cli_definition.rs panics with
+          # `failed to spawn "typescript-language-server"` (nightly failing
+          # since 2026-09-14; test.yml installs it but nightly did not).
+          npm install -g typescript-language-server typescript
+          typescript-language-server --version
+
       - name: cargo test (workspace)
         run: |
           cargo test --workspace --all-features --quiet
