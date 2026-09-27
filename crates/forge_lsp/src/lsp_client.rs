@@ -455,8 +455,9 @@ pub struct TextDocumentIdentifier {
     pub uri: String,
 }
 
-/// LSP `Position` — 0-based line and UTF-16 column.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+/// LSP `Position` — 0-based line and UTF-16 column. `Copy`: an 8-byte
+/// value type that retry loops re-send by value.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Position {
     pub line: u32,
     pub character: u32,

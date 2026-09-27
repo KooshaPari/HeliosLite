@@ -183,7 +183,7 @@ async fn e2e_definition_round_trip_against_real_rust_analyzer() {
             let deadline =
                 std::time::Instant::now() + E2E_BUDGET.saturating_sub(Duration::from_secs(10));
             let locations = loop {
-                let attempt = server.definition(Path::new("src/lib.rs"), query_position.clone());
+                let attempt = server.definition(Path::new("src/lib.rs"), query_position);
                 match attempt {
                     Ok(locs) => {
                         if !locs.is_empty() || std::time::Instant::now() >= deadline {

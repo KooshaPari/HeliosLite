@@ -13,10 +13,29 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+use std::time::Duration;
 
 use crate::lsp_client::{
-    LspClient, LspRequest, Position, Range, TextDocumentIdentifier, TextDocumentPositionParams,
+    LspClient, LspRequest, LspResponse, Position, Range, TextDocumentIdentifier,
+    TextDocumentPositionParams,
 };
+
+// ---------------------------------------------------------------------------
+// Domain types
+// ---------------------------------------------------------------------------
+
+/// LSP 3.17 response error code for `ContentModified`: the server dropped
+/// the result and the spec instructs the *client* to re-issue later.
+const CONTENT_MODIFIED: i64 = -32801;
+
+/// Cold-server retry budget for [`DefinitionProvider::definition`]:
+/// 20 attempts spaced 400ms apart ≈ 7.6s worst case, only ever paid when
+/// the server explicitly reports `ContentModified` (a cold rust-analyzer
+/// under CI load can stay in VFS churn for several seconds after
+/// `didOpen`; nightly runs 36132727849 / 36318434190 failed for exactly
+/// this reason before the retry existed).
+const MAX_ATTEMPTS: u32 = 20;
+const RETRY_DELAY: Duration = Duration::from_millis(400);
 
 // ---------------------------------------------------------------------------
 // Domain types
@@ -88,7 +107,54 @@ impl<C: LspClient + ?Sized> DefinitionProvider<C> {
     }
 
     /// Run `textDocument/definition` for `uri` at `position`.
+    ///
+    /// Transient `ContentModified` (-32801) responses are re-issued on the
+    /// same warm session (see [`CONTENT_MODIFIED`]) before surfacing an
+    /// error, per LSP 3.17 §response error codes.
     pub fn definition(&self, uri: &str, position: Position) -> DefinitionResult {
+        self.definition_with_retry(uri, position, MAX_ATTEMPTS, RETRY_DELAY)
+    }
+
+    /// Policy-parameterised core of [`Self::definition`] so tests can drive
+    /// the retry loop with a short delay and a small attempt cap.
+    fn definition_with_retry(
+        &self,
+        uri: &str,
+        position: Position,
+        max_attempts: u32,
+        delay: Duration,
+    ) -> DefinitionResult {
+        let mut attempt = 1u32;
+        loop {
+            // IO / serialize failures surface immediately — only a server
+            // `ContentModified` response is treated as transient here.
+            let response = self.send_definition(uri, position)?;
+            if let Some(err) = response.error.as_ref() {
+                if err.code == CONTENT_MODIFIED && attempt < max_attempts {
+                    attempt += 1;
+                    std::thread::sleep(delay);
+                    continue;
+                }
+                return Err(DefinitionError::ServerError(format!(
+                    "{} (code {})",
+                    err.message, err.code
+                )));
+            }
+            return match response.result {
+                None => Ok(Vec::new()),
+                Some(ref raw) if raw.is_null() => Ok(Vec::new()),
+                Some(ref raw) => parse_locations(raw),
+            };
+        }
+    }
+
+    /// Single `textDocument/definition` round trip (no retry): returns the
+    /// raw response so the caller can inspect the error code.
+    fn send_definition(
+        &self,
+        uri: &str,
+        position: Position,
+    ) -> Result<LspResponse, DefinitionError> {
         let params = TextDocumentPositionParams {
             text_document: TextDocumentIdentifier { uri: uri.to_string() },
             position,
@@ -99,21 +165,9 @@ impl<C: LspClient + ?Sized> DefinitionProvider<C> {
             serde_json::to_value(&params)
                 .map_err(|e| DefinitionError::InvalidResponse(format!("serialize params: {e}")))?,
         );
-        let response = self
-            .client
+        self.client
             .send(request)
-            .map_err(DefinitionError::ServerError)?;
-        if let Some(err) = response.error {
-            return Err(DefinitionError::ServerError(format!(
-                "{} (code {})",
-                err.message, err.code
-            )));
-        }
-        match response.result {
-            None => Ok(Vec::new()),
-            Some(ref raw) if raw.is_null() => Ok(Vec::new()),
-            Some(ref raw) => parse_locations(raw),
-        }
+            .map_err(DefinitionError::ServerError)
     }
 }
 
@@ -239,211 +293,4 @@ fn next_request_id() -> u64 {
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::lsp_client::LspResponse;
-    use std::sync::{Arc, Mutex};
-
-    pub struct MockLspClient {
-        pub name: &'static str,
-        pub scripted: Mutex<Option<Result<LspResponse, String>>>,
-        pub captured: Mutex<Vec<LspRequest>>,
-    }
-
-    impl MockLspClient {
-        pub fn new(name: &'static str, response: LspResponse) -> Self {
-            Self {
-                name,
-                scripted: Mutex::new(Some(Ok(response))),
-                captured: Mutex::new(Vec::new()),
-            }
-        }
-
-        pub fn failing(name: &'static str, err: &str) -> Self {
-            Self {
-                name,
-                scripted: Mutex::new(Some(Err(err.to_string()))),
-                captured: Mutex::new(Vec::new()),
-            }
-        }
-
-        pub fn last_request(&self) -> Option<LspRequest> {
-            self.captured.lock().unwrap().last().cloned()
-        }
-    }
-
-    impl crate::lsp_client::LspClient for MockLspClient {
-        fn server_name(&self) -> &'static str {
-            self.name
-        }
-
-        fn send(&self, request: LspRequest) -> Result<LspResponse, String> {
-            self.captured.lock().unwrap().push(request);
-            let next = self.scripted.lock().unwrap().take();
-            match next {
-                Some(r) => r,
-                None => Ok(LspResponse {
-                    jsonrpc: Some("2.0".into()),
-                    id: Some(0),
-                    result: Some(Value::Null),
-                    error: None,
-                }),
-            }
-        }
-    }
-
-    fn ok_response(result: Value) -> LspResponse {
-        LspResponse {
-            jsonrpc: Some("2.0".into()),
-            id: Some(1),
-            result: Some(result),
-            error: None,
-        }
-    }
-
-    fn err_response(code: i64, message: &str) -> LspResponse {
-        LspResponse {
-            jsonrpc: Some("2.0".into()),
-            id: Some(1),
-            result: None,
-            error: Some(crate::lsp_client::LspError {
-                code,
-                message: message.to_string(),
-                data: None,
-            }),
-        }
-    }
-
-    #[test]
-    fn definition_supports_common_languages() {
-        let client = Arc::new(MockLspClient::new(
-            "rust-analyzer",
-            ok_response(
-                json!({"uri":"file:///foo.rs","range":{"start":{"line":0,"character":0},"end":{"line":0,"character":3}}}),
-            ),
-        ));
-        let p = DefinitionProvider::new(client);
-        assert!(p.supports(Path::new("foo.rs")));
-        assert!(p.supports(Path::new("foo.tsx")));
-        assert!(p.supports(Path::new("foo.JS")));
-        assert!(p.supports(Path::new("foo.mts")));
-        assert!(p.supports(Path::new("foo.cts")));
-        assert!(!p.supports(Path::new("foo.py")));
-    }
-
-    #[test]
-    fn definition_returns_empty_when_server_returns_null() {
-        let client = Arc::new(MockLspClient::new(
-            "rust-analyzer",
-            ok_response(Value::Null),
-        ));
-        let p = DefinitionProvider::new(client);
-        let locs = p
-            .definition("file:///foo.rs", Position { line: 0, character: 0 })
-            .unwrap();
-        assert!(locs.is_empty());
-    }
-
-    #[test]
-    fn definition_parses_single_location() {
-        let client = Arc::new(MockLspClient::new(
-            "rust-analyzer",
-            ok_response(json!({
-                "uri": "file:///lib.rs",
-                "range": {
-                    "start": {"line": 10, "character": 0},
-                    "end":   {"line": 10, "character": 4}
-                }
-            })),
-        ));
-        let p = DefinitionProvider::new(client);
-        let locs = p
-            .definition("file:///foo.rs", Position { line: 5, character: 2 })
-            .unwrap();
-        assert_eq!(locs.len(), 1);
-        assert_eq!(locs.first().map(|x| x.uri.as_str()), Some("file:///lib.rs"));
-        assert_eq!(locs.first().map(|x| x.range.start.line), Some(10));
-        assert_eq!(locs.first().map(|x| x.range.end.character), Some(4));
-    }
-
-    #[test]
-    fn definition_parses_array_of_locations() {
-        let client = Arc::new(MockLspClient::new(
-            "tsserver",
-            ok_response(json!([
-                {"uri":"file:///a.ts","range":{"start":{"line":1,"character":0},"end":{"line":1,"character":3}}},
-                {"uri":"file:///b.ts","range":{"start":{"line":2,"character":0},"end":{"line":2,"character":3}}}
-            ])),
-        ));
-        let p = DefinitionProvider::new(client);
-        let locs = p
-            .definition("file:///foo.ts", Position { line: 9, character: 0 })
-            .unwrap();
-        assert_eq!(locs.len(), 2);
-        assert_eq!(locs.first().map(|x| x.uri.as_str()), Some("file:///a.ts"));
-        assert_eq!(locs.get(1).map(|x| x.uri.as_str()), Some("file:///b.ts"));
-    }
-
-    #[test]
-    fn definition_parses_location_link_payload() {
-        // rust-analyzer with linkSupport returns LocationLink[].
-        let client = Arc::new(MockLspClient::new(
-            "rust-analyzer",
-            ok_response(json!([
-                {
-                    "originSelectionRange": {
-                        "start": {"line": 5, "character": 4},
-                        "end":   {"line": 5, "character": 8}
-                    },
-                    "targetUri": "file:///lib.rs",
-                    "targetRange": {
-                        "start": {"line": 10, "character": 0},
-                        "end":   {"line": 10, "character": 8}
-                    },
-                    "targetSelectionRange": {
-                        "start": {"line": 10, "character": 3},
-                        "end":   {"line": 10, "character": 6}
-                    }
-                }
-            ])),
-        ));
-        let p = DefinitionProvider::new(client);
-        let locs = p
-            .definition("file:///foo.rs", Position { line: 5, character: 5 })
-            .unwrap();
-        assert_eq!(locs.len(), 1);
-        assert_eq!(locs.first().map(|x| x.uri.as_str()), Some("file:///lib.rs"));
-        assert_eq!(locs.first().map(|x| x.range.start.line), Some(10));
-        assert_eq!(locs.first().map(|x| x.range.end.character), Some(8));
-    }
-
-    #[test]
-    fn definition_propagates_server_error() {
-        let client = Arc::new(MockLspClient::new(
-            "rust-analyzer",
-            err_response(-32601, "method not found"),
-        ));
-        let p = DefinitionProvider::new(client);
-        let r = p.definition("file:///foo.rs", Position { line: 0, character: 0 });
-        assert!(matches!(r, Err(DefinitionError::ServerError(_))));
-    }
-
-    #[test]
-    fn definition_surfaces_transport_failure() {
-        let client = Arc::new(MockLspClient::failing("rust-analyzer", "io: broken pipe"));
-        let p = DefinitionProvider::new(client);
-        let r = p.definition("file:///foo.rs", Position { line: 0, character: 0 });
-        assert!(matches!(r, Err(DefinitionError::ServerError(m)) if m == "io: broken pipe"));
-    }
-
-    #[test]
-    fn definition_rejects_malformed_payload() {
-        let client = Arc::new(MockLspClient::new(
-            "rust-analyzer",
-            ok_response(json!("just a string")),
-        ));
-        let p = DefinitionProvider::new(client);
-        let r = p.definition("file:///foo.rs", Position { line: 0, character: 0 });
-        assert!(matches!(r, Err(DefinitionError::InvalidResponse(_))));
-    }
-}
+mod tests;
