@@ -5253,19 +5253,7 @@ impl<A: API + ConsoleWriter + 'static, F: Fn(ForgeConfig) -> A + Send + Sync> UI
         if !self.cli.stream_json && self.cli.stream_json_log.is_none() {
             return Ok(());
         }
-        let kind = match message {
-            ChatResponse::TaskMessage { .. } => "message",
-            ChatResponse::TaskReasoning { .. } => "reasoning",
-            ChatResponse::TaskComplete => "complete",
-            ChatResponse::ToolCallStart { .. } => "tool_start",
-            ChatResponse::ToolCallEnd(..) => "tool_end",
-            ChatResponse::RetryAttempt { .. } => "retry",
-            ChatResponse::Interrupt { .. } => "interrupt",
-        };
-        let line = serde_json::json!({
-            "type": kind,
-            "empty": message.is_empty(),
-        });
+        let line = forge_domain::ChatEvent::from(message);
         let s = serde_json::to_string(&line)?;
         if self.cli.stream_json {
             println!("{s}");
