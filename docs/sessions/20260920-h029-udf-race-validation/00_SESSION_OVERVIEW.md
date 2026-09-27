@@ -151,3 +151,75 @@ Executed the deep-roadmap batch in priority order. All commits pushed to fork ma
 - **Still genuinely gated (observers scheduled)**: nightly run (sched_5c849ce6,
   09-25 08:00Z) and distribution re-dispatch tag=h.0.2.9 (sched_c64a87ac,
   09-25 08:30Z; request hook-d6499f54).
+
+## Nightly status + content-modified fix (2026-09-27 15:30Z, sched_5c849ce6 fired)
+
+**Nightly run history (all `schedule` events ~11:38-12:16Z):**
+| Date | Run | Result | Failure class |
+|------|-----|--------|---------------|
+| 09-23 | 35857303933 | FAIL | TS-server spawn (original 10-day bug) |
+| 09-24 | 35996603815 | FAIL | `content modified` (-32801) in e2e_rust_analyzer:204 |
+| 09-25 | 36132727849 | FAIL | same e2e content-modified panic at :204 |
+| 09-26 | 36239433886 | **PASS** | — (proves the TS-server fix closed the original bug) |
+| 09-27 | 36318434190 | FAIL | cli_definition.rs:102 — retried content-modified ~6x until its 90s deadline expired |
+
+**Diagnosis:** the TS-server fix (31896cb56) worked; the residual failure is a
+load-dependent rust-analyzer `ContentModified` storm on the cold runner (the
+nightly runs the whole workspace suite in parallel). Each cli_definition retry
+owns a fresh server and re-pays full project load, so ~6 attempts burn 90s.
+09-26 green = runner had headroom. Not a product regression.
+
+**Fix (`da25401fc`, pushed):**
+1. e2e_rust_analyzer: retry transient LSP errors until the inner deadline
+   (mirrors cli_definition policy) instead of propagating the first -32801.
+2. Budgets 90s -> 150s in both tests.
+3. nextest override terminate-after 12 -> 16 (160s cap), lockstep so nextest
+   never kills what the tests now allow.
+Validated locally: fmt clean, cli_definition 1 passed (57.9s), e2e 1 passed
+(5.5s), clippy clean.
+
+**Verification state:** real-path proof = the next scheduled nightly
+(~2026-09-28 ~12:00Z) on da25401fc. CI on da25401fc watched in-session.
+
+**Approval inbox (still pending, not re-spammed):** nightly dispatch
+hook-748c5452 and distribution re-dispatch tag=h.0.2.9 hook-d6499f54 — no
+`workflow_dispatch` runs on either workflow since 09-20, so neither approval
+has been granted. sched_c64a87ac (09-25) fired but its dispatch could not
+execute without that approval. Distribution failure-mode fix (ba7187320) is
+already on main for whenever the dispatch runs.
+
+## Nightly status + content-modified fix (2026-09-27 15:30Z, sched_5c849ce6 fired)
+
+**Nightly run history (all `schedule` events ~11:38-12:16Z):**
+| Date | Run | Result | Failure class |
+|------|-----|--------|---------------|
+| 09-23 | 35857303933 | FAIL | TS-server spawn (original 10-day bug) |
+| 09-24 | 35996603815 | FAIL | `content modified` (-32801) in e2e_rust_analyzer:204 |
+| 09-25 | 36132727849 | FAIL | same e2e content-modified panic at :204 |
+| 09-26 | 36239433886 | **PASS** | proves the TS-server fix closed the original bug |
+| 09-27 | 36318434190 | FAIL | cli_definition.rs:102, retried content-modified ~6x until its 90s deadline expired |
+
+**Diagnosis:** the TS-server fix (31896cb56) worked; the residual failure is a
+load-dependent rust-analyzer `ContentModified` storm on the cold runner (the
+nightly runs the whole workspace suite in parallel). Each cli_definition retry
+owns a fresh server and re-pays full project load, so ~6 attempts burn 90s.
+09-26 green means the runner had headroom. Not a product regression.
+
+**Fix (da25401fc, pushed):**
+1. e2e_rust_analyzer: retry transient LSP errors until the inner deadline
+   (mirrors cli_definition policy) instead of propagating the first -32801.
+2. Budgets 90s to 150s in both tests.
+3. nextest override terminate-after 12 to 16 (160s cap), lockstep so nextest
+   never kills what the tests now allow.
+Validated locally: fmt clean, cli_definition 1 passed (57.9s), e2e 1 passed
+(5.5s), clippy clean.
+
+**Verification state:** real-path proof = the next scheduled nightly
+(~2026-09-28 ~12:00Z) on da25401fc. CI on da25401fc watched in-session.
+
+**Approval inbox (still pending, not re-spammed):** nightly dispatch
+hook-748c5452 and distribution re-dispatch tag=h.0.2.9 hook-d6499f54. No
+`workflow_dispatch` runs on either workflow since 09-20, so neither approval
+has been granted. sched_c64a87ac (09-25) fired but its dispatch could not
+execute without that approval. The distribution failure-mode fix (ba7187320)
+is already on main for whenever the dispatch runs.
