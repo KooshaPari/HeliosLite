@@ -244,3 +244,40 @@ Both deferred approvals remain UNGRANTED; no action taken to re-trigger them
    36329660284), so the setup-protoc `socket hang up` was a transient flake.
 
 Constraint recorded; the corresponding inbox todo stays pending.
+
+## 2026-09-27: nightly ContentModified storm — product fix + rand #7
+
+**Observed.** Nightly post-TS-fix runs: 09-25 `36132727849` FAILED at
+`e2e_rust_analyzer.rs:204` (`content modified (code -32801)`), 09-26
+`36239433886` PASSED, 09-27 `36318434190` FAILED at `cli_definition.rs:102`
+with the same `-32801` after 36 fresh-server retries inside 90s. Pattern =
+cold CPU-starved runner keeps rust-analyzer in VFS churn; not a regression
+(the 09-26 pass proves load-dependence).
+
+**Fix set (all pushed):**
+- `b30984166` (mine) — e2e test-level retry of transient `-32801` until
+  its deadline instead of propagating the first error.
+- `da25401fc` (parallel scheduled session `nightly-20260927-verify`,
+  same worktree) — e2e/cli_definition budgets 90s → 150s, nextest
+  terminate-after 12 → 16, e2e retry-policy refinement. Disjoint files
+  from mine; no clobber (verified: zero conflict markers, worktree clean).
+- `835e7b02d` (mine) — **product-level** fix: `DefinitionProvider::definition`
+  re-issues `-32801` on the same warm session up to 20×400ms (spec: client
+  re-issues ContentModified); `-32601` etc. still fail fast, IO errors
+  untouched. `Position` gains `Copy`; tests moved to
+  `src/definition/tests.rs` (definition.rs 590 → 296 lines, under the 500
+  hard limit); mock now scripts response sequences; 3 new tests (retry
+  success, budget exhaustion, no-retry for other codes).
+- `acb5c54a9` (mine) — dependabot alert #7 closed at the source: lock had
+  **rand 0.8.5** (advisory `>=0.7.0,<0.8.6`, LOW, via oauth2 → forge_infra)
+  alongside the 0.9/0.10 lines P1 covered. `cargo update -p rand@0.8.5`
+  → 0.8.8. Validated: check, deny advisories/bans/sources ok, forge_infra
+  117/117.
+
+**Validated:** fmt 0; clippy 0 (one `clone_on_copy` introduced by `Copy`
+removed in e2e); forge_lsp 119 unit + cli_definition 24.4s + e2e 3.58s all
+green AFTER the parallel session's commits.
+
+**Verification gate:** scheduled `sched_e965f791` fires 2026-09-28 12:50Z
+to read the 09-28 ~12:16Z nightly schedule run; also expect dependabot #7
+to auto-close on the post-`acb5c54a9` scan.

@@ -629,3 +629,18 @@ This host (if you need it): kooshapari@192.168.1.23 (Kooshas-Laptop.local), sshd
 - `bug[unresolved-workspace-dependency]` in cargo-deny output is usually failure noise — look for a real RUSTSEC error in the same output first.
 - Interrupted merges leave MERGE_HEAD+UU; verify docs-merge resolutions with `git diff parent..HEAD --stat` (expect pure additions for additive merges) before committing — a half-applied python fix truncated AGENTS.md 309->143 lines once.
 - When a test gains a binary prerequisite, grep ALL workflows running it: test.yml installed typescript-language-server, the nightly did not, and failed 10 days.
+
+### 2026-09-27 addendum (nightly ContentModified storm)
+
+The 09-25 nightly fix did not fully green the schedule: runs `36132727849`
+(09-25) and `36318434190` (09-27) failed on LSP `content modified (-32801)`
+while 09-26 passed — a cold-runner race, not a regression. Fix set
+`b30984166..acb5c54a9`: e2e + CLI test budgets (150s, nextest terminate 16),
+**product-level** `definition()` retry of `-32801` (20×400ms, same warm
+session; other codes fail fast), `Position: Copy`, tests split to
+`src/definition/tests.rs` (500-line limit), and rand 0.8.5 → 0.8.8 clearing
+dependabot alert #7 (LOW, `>=0.7.0,<0.8.6`, via oauth2). Validation: forge_lsp
+119 unit + both e2e green, check/deny ok, forge_infra 117/117. Verification
+gate: 09-28 ~12:16Z schedule run (watch `sched_e965f791`). Distribution
+re-dispatch (`hook-d6499f54…`) and windows rerun remain unapproved — windows
+moot (three later green runs), distribution has no run since 09-20.
