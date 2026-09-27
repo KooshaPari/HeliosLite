@@ -279,5 +279,10 @@ removed in e2e); forge_lsp 119 unit + cli_definition 24.4s + e2e 3.58s all
 green AFTER the parallel session's commits.
 
 **Verification gate:** scheduled `sched_e965f791` fires 2026-09-28 12:50Z
-to read the 09-28 ~12:16Z nightly schedule run; also expect dependabot #7
-to auto-close on the post-`acb5c54a9` scan.
+to read the 09-28 ~12:16Z nightly schedule run (two additional ambient
+watchers exist from the parallel session: `sched_3696aa9a`, `sched_889280f5` —
+redundant but read-only). Dependabot #7 closed as predicted: observed
+`state=fixed` at 16:23:30Z (3s after the push); full API count at 17:50Z =
+**0 open / 10 fixed**. CI at HEAD `4c8df606e` observed 28/28 checks
+success/skipped, including the Cargo Deny job with the pinned
+`cargo-deny@0.19.0` install visible in its log.

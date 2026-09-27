@@ -641,6 +641,9 @@ session; other codes fail fast), `Position: Copy`, tests split to
 `src/definition/tests.rs` (500-line limit), and rand 0.8.5 → 0.8.8 clearing
 dependabot alert #7 (LOW, `>=0.7.0,<0.8.6`, via oauth2). Validation: forge_lsp
 119 unit + both e2e green, check/deny ok, forge_infra 117/117. Verification
-gate: 09-28 ~12:16Z schedule run (watch `sched_e965f791`). Distribution
+gate: 09-28 ~12:16Z schedule run (watch `sched_e965f791`, plus ambient
+`sched_3696aa9a`/`sched_889280f5` from the parallel session). Dependabot: **0 open
+of 10, all `fixed`** (observed 2026-09-27T17:50Z); HEAD `4c8df606e` CI observed
+28/28 checks green including the pinned `cargo-deny@0.19.0` job. Distribution
 re-dispatch (`hook-d6499f54…`) and windows rerun remain unapproved — windows
 moot (three later green runs), distribution has no run since 09-20.
