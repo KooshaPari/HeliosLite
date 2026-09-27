@@ -21,6 +21,9 @@ jobs:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
       - uses: taiki-e/install-action@c44f6b046f1c29ae5918b1e0bfdbb2f1813836fd
         with:
-          tool: cargo-deny
+          # Pinned (2026-09-27): the action SHA above pins the installer,
+          # not the tool — without this the job floated to whatever
+          # cargo-deny latest was on the day. Bump deliberately.
+          tool: cargo-deny@0.19.0
       - name: Check (advisories + bans + licenses + sources)
         run: cargo deny --log-level error check advisories bans licenses sources

@@ -8,7 +8,9 @@
 //! This module defines:
 //!   * the JSON-RPC message envelope (request / response / notification),
 //!   * a small trait [`LspClient`] so the providers can be unit-tested
-//!     against a fake (see `tests/fixtures.rs`),
+//!     against a fake (each provider's `#[cfg(test)]` module holds its
+//!     own `MockLspClient` test double — see
+//!     `crate::definition::tests` for the scripted-sequence variant),
 //!   * a real implementation [`ProcessLspClient`] that spawns a
 //!     subprocess and reads/writes framed JSON over its stdio, used
 //!     by [`crate::hover`], [`crate::definition`], and
