@@ -223,3 +223,24 @@ hook-748c5452 and distribution re-dispatch tag=h.0.2.9 hook-d6499f54. No
 has been granted. sched_c64a87ac (09-25) fired but its dispatch could not
 execute without that approval. The distribution failure-mode fix (ba7187320)
 is already on main for whenever the dispatch runs.
+
+## Externally-gated observations (2026-09-27 15:58Z, scheduled task fired)
+
+Both deferred approvals remain UNGRANTED; no action taken to re-trigger them
+(per standing policy: dispatch/rerun approval requests are not re-spammed).
+
+1. **Distribution re-dispatch (hook-d6499f54, tag=v2.13.21-h.0.2.9): NOT
+   approved.** Listing update-distribution.yml runs shows none created after
+   2026-09-24 11:20Z; the latest remains 35478220664 (workflow_dispatch
+   2026-09-20, failure with `rejected...fetch first` on that exact tag). The
+   P4 delete-before-push fix (ba7187320, on main since 09-24) therefore
+   still awaits its real-path test — it will run on the next approved
+   dispatch.
+2. **Windows rerun (hook-eeeaa6fb, run 35980044869): NOT approved.** The run
+   still reads `conclusion=failure, attempt=1, updated=2026-09-24T09:22:31Z`
+   — no rerun was attempted. Per the 09-24 closure observations this is moot
+   anyway: windows-latest passed on both later commits (35984484944,
+   35992570037) and again on b7b09f435 (Platform Tests success,
+   36329660284), so the setup-protoc `socket hang up` was a transient flake.
+
+Constraint recorded; the corresponding inbox todo stays pending.
