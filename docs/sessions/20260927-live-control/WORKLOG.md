@@ -64,7 +64,18 @@ remain pending. Source is not installation/runtime proof.
 CVP run 36342887728 logged cargo check --workspace, clippy --workspace -- -D warnings,
 and cargo test --workspace; completed jobs successful and both new ChatEvent tests
 explicitly passed. macOS job 108686293790 / run 36342887699 reported success but its
-log contains forge_infra failure: 117 passed, two mcp_watcher timing tests failed
+log contains forge_lsp failure: 117 passed, two mcp_watcher timing tests failed
 (watcher_fires_reload_on_modify, watcher_debounces_burst_into_one_reload).
 Both new ChatEvent tests passed there. Therefore macOS full-suite status is failed,
 not green despite the job summary. These results do not validate later source.
+
+## Hosted gate repair
+
+platform-tests.yml explicitly used continue-on-error: true for cargo test; removed
+that masking. The two failures are in forge_lsp, not forge_infra (corrected above).
+Both observed zero reloads. Source path comparison was lexical; macOS /var aliases
+can differ from canonical /private/var paths in filesystem notifications. Parent
+identity now uses canonical paths while retaining filename equality, including
+remove events where the file no longer exists. A symlink-parent negative control
+covers correct target and unrelated file. Existing runtime tests remain unchanged
+pending actual hosted evidence. Split pre-existing 554-line watcher test module.
