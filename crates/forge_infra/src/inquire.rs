@@ -1,5 +1,9 @@
+use crate::inquire_live::ask;
 use anyhow::Result;
 use forge_app::UserInfra;
+use forge_domain::{
+    InteractionAnswer, InteractionContext, InteractionKind, PermissionOperation, PolicyPermission,
+};
 use forge_select::ForgeWidget;
 
 pub struct ForgeInquire;
@@ -26,7 +30,47 @@ impl ForgeInquire {
 
 #[async_trait::async_trait]
 impl UserInfra for ForgeInquire {
+    async fn confirm_permission(
+        &self,
+        message: &str,
+        operation: &PermissionOperation,
+    ) -> Result<Option<PolicyPermission>> {
+        if let Some(context) = InteractionContext::current() {
+            let options = vec![
+                PolicyPermission::Accept,
+                PolicyPermission::Reject,
+                PolicyPermission::AcceptAndRemember,
+            ];
+            let labels = options.iter().map(ToString::to_string).collect();
+            return Ok(
+                match ask(
+                    context,
+                    InteractionKind::Permission { operation: operation.clone() },
+                    message,
+                    labels,
+                )
+                .await
+                {
+                    InteractionAnswer::Choices(indices) => indices
+                        .first()
+                        .and_then(|index| options.get(*index))
+                        .cloned(),
+                    _ => None,
+                },
+            );
+        }
+        self.select_one_enum::<PolicyPermission>(message).await
+    }
+
     async fn prompt_question(&self, question: &str) -> Result<Option<String>> {
+        if let Some(context) = InteractionContext::current() {
+            return Ok(
+                match ask(context, InteractionKind::Text, question, Vec::new()).await {
+                    InteractionAnswer::Text(text) => Some(text),
+                    _ => None,
+                },
+            );
+        }
         let question = question.to_string();
         self.prompt(move || ForgeWidget::input(&question).allow_empty(true).prompt())
             .await
@@ -41,6 +85,18 @@ impl UserInfra for ForgeInquire {
             return Ok(None);
         }
 
+        if let Some(context) = InteractionContext::current() {
+            let labels = options.iter().map(ToString::to_string).collect();
+            return Ok(
+                match ask(context, InteractionKind::SingleChoice, message, labels).await {
+                    InteractionAnswer::Choices(indices) => indices
+                        .first()
+                        .and_then(|index| options.get(*index))
+                        .cloned(),
+                    _ => None,
+                },
+            );
+        }
         let message = message.to_string();
         self.prompt(move || ForgeWidget::select(&message, options).prompt())
             .await
@@ -55,6 +111,20 @@ impl UserInfra for ForgeInquire {
             return Ok(None);
         }
 
+        if let Some(context) = InteractionContext::current() {
+            let labels = options.iter().map(ToString::to_string).collect();
+            return Ok(
+                match ask(context, InteractionKind::MultipleChoice, message, labels).await {
+                    InteractionAnswer::Choices(indices) => Some(
+                        indices
+                            .into_iter()
+                            .map(|index| options[index].clone())
+                            .collect(),
+                    ),
+                    _ => None,
+                },
+            );
+        }
         let message = message.to_string();
         self.prompt(move || ForgeWidget::multi_select(&message, options).prompt())
             .await

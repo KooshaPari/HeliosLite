@@ -305,6 +305,7 @@ fn format_mcp_headers(server: &forge_domain::McpServerConfig) -> Option<String> 
 }
 
 pub struct UI<A: ConsoleWriter, F: Fn(ForgeConfig) -> A> {
+    live_sessions: std::collections::HashMap<ConversationId, crate::live_control::LiveControl>,
     markdown: MarkdownFormat,
     state: UIState,
     api: Arc<F::Output>,
@@ -542,6 +543,7 @@ impl<A: API + ConsoleWriter + 'static, F: Fn(ForgeConfig) -> A + Send + Sync> UI
         let command = Arc::new(ForgeCommandManager::default());
         let spinner = SharedSpinner::new(SpinnerManager::new(api.clone()));
         Ok(Self {
+            live_sessions: std::collections::HashMap::new(),
             state: UIState::new(env.clone()),
             api,
             new_api: Arc::new(f),
@@ -5077,6 +5079,10 @@ impl<A: API + ConsoleWriter + 'static, F: Fn(ForgeConfig) -> A + Send + Sync> UI
 
         // Always set the conversation id in state
         self.state.conversation_id = Some(id);
+        if !self.live_sessions.contains_key(&id) {
+            let control = crate::live_control::LiveControl::start(self.api.clone(), id)?;
+            self.live_sessions.insert(id, control);
+        }
 
         Ok(id)
     }
@@ -5219,12 +5225,20 @@ impl<A: API + ConsoleWriter + 'static, F: Fn(ForgeConfig) -> A + Send + Sync> UI
     }
 
     async fn on_chat(&mut self, chat: ChatRequest) -> Result<()> {
-        let mut stream = self.api.chat(chat).await?;
+        let session = chat.conversation_id;
+        if !self.live_sessions.contains_key(&session) {
+            let control = crate::live_control::LiveControl::start(self.api.clone(), session)?;
+            self.live_sessions.insert(session, control);
+        }
+        let mut stream = self.live_sessions[&session]
+            .handle
+            .local_prompt(chat)
+            .await?;
 
         // Always use streaming content writer
         let mut writer = StreamingWriter::new(self.spinner.clone(), self.api.clone());
 
-        while let Some(message) = stream.next().await {
+        while let Some(message) = stream.recv().await {
             match message {
                 Ok(message) => {
                     self.emit_stream_json(&message)?;
@@ -5260,10 +5274,14 @@ impl<A: API + ConsoleWriter + 'static, F: Fn(ForgeConfig) -> A + Send + Sync> UI
         }
         if let Some(path) = &self.cli.stream_json_log {
             use std::io::Write;
-            let mut f = std::fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(path)?;
+            let mut options = std::fs::OpenOptions::new();
+            options.create(true).append(true);
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::OpenOptionsExt;
+                options.mode(0o600);
+            }
+            let mut f = options.open(path)?;
             writeln!(f, "{s}")?;
         }
         Ok(())

@@ -8,6 +8,7 @@ mod error;
 mod highlighter;
 mod info;
 mod input;
+pub mod live_control;
 mod logs;
 mod model;
 mod oauth_callback;

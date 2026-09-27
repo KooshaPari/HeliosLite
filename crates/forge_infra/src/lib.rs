@@ -13,6 +13,7 @@ mod fs_write;
 mod grpc;
 mod http;
 mod inquire;
+mod inquire_live;
 mod kv_storage;
 mod mcp_client;
 mod mcp_server;

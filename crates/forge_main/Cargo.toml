@@ -69,7 +69,8 @@ nucleo.workspace = true
 nucleo-picker.workspace = true
 libc = "0.2"
 forge_fs.workspace = true
-tokio.workspace = true
+tokio = { workspace = true, features = ["net"] }
+uuid.workspace = true
 tokio-stream.workspace = true
 futures.workspace = true
 colored.workspace = true

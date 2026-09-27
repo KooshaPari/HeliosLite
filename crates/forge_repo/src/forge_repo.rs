@@ -643,6 +643,14 @@ impl<F> UserInfra for ForgeRepo<F>
 where
     F: UserInfra + Send + Sync,
 {
+    async fn confirm_permission(
+        &self,
+        message: &str,
+        operation: &forge_domain::PermissionOperation,
+    ) -> anyhow::Result<Option<forge_domain::PolicyPermission>> {
+        self.infra.confirm_permission(message, operation).await
+    }
+
     async fn prompt_question(&self, question: &str) -> anyhow::Result<Option<String>> {
         self.infra.prompt_question(question).await
     }

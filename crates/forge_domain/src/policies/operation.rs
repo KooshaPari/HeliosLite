@@ -1,7 +1,8 @@
 use std::path::PathBuf;
 
 /// Operations that can be performed and need policy checking
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
 pub enum PermissionOperation {
     /// Write operation to a file path
     Write {

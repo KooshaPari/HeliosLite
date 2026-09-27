@@ -197,6 +197,16 @@ pub trait CommandInfra: Send + Sync {
 
 #[async_trait::async_trait]
 pub trait UserInfra: Send + Sync {
+    /// Requests the original policy choices for an identified operation.
+    async fn confirm_permission(
+        &self,
+        message: &str,
+        _operation: &forge_domain::PermissionOperation,
+    ) -> anyhow::Result<Option<forge_domain::PolicyPermission>> {
+        self.select_one_enum::<forge_domain::PolicyPermission>(message)
+            .await
+    }
+
     /// Prompts the user with question
     /// Returns None if the user interrupts the prompt
     async fn prompt_question(&self, question: &str) -> anyhow::Result<Option<String>>;

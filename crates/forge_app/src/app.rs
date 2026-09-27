@@ -439,13 +439,28 @@ impl<S: Services + EnvironmentInfra<Config = forge_config::ForgeConfig>> ForgeAp
         .models(models)
         .hook(Arc::new(hook));
 
+        // Preserve the actor's interaction identity across the spawned stream task.
+        let interaction = forge_domain::InteractionContext::current();
         // Create and return the stream
         let stream = MpscStream::spawn(
             |tx: tokio::sync::mpsc::Sender<Result<ChatResponse, anyhow::Error>>| {
-                async move {
+                let run = async move {
                     // Execute dispatch and always save conversation afterwards
                     let mut orch = orch.sender(tx.clone());
-                    let dispatch_result = orch.run().await;
+                    let dispatch_result = if let Some(mut context) =
+                        forge_domain::InteractionContext::current()
+                    {
+                        if *context.cancel.borrow() {
+                            Err(anyhow::anyhow!("turn cancelled"))
+                        } else {
+                            tokio::select! {
+                                result = orch.run() => result,
+                                _ = context.cancel.changed() => Err(anyhow::anyhow!("turn cancelled")),
+                            }
+                        }
+                    } else {
+                        orch.run().await
+                    };
 
                     // Always save conversation using get_conversation()
                     let conversation = orch.get_conversation().clone();
@@ -465,6 +480,13 @@ impl<S: Services + EnvironmentInfra<Config = forge_config::ForgeConfig>> ForgeAp
                         if let Err(e) = tx.send(Err(err)).await {
                             tracing::error!("Failed to send error to stream: {}", e);
                         }
+                    }
+                };
+                async move {
+                    if let Some(context) = interaction {
+                        forge_domain::INTERACTION_CONTEXT.scope(context, run).await;
+                    } else {
+                        run.await;
                     }
                 }
             },
