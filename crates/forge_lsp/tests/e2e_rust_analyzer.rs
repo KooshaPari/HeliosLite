@@ -42,7 +42,13 @@ const TRIVIAL_LIB_RS: &str = "pub fn add(a: i32, b: i32) -> i32 { a + b }\n";
 // developer machine and longer on a loaded CI runner. The budget is generous
 // so a slow runner does not look like a hang; a genuinely stuck server still
 // trips it.
-const E2E_BUDGET: Duration = Duration::from_secs(90);
+// 150s in lockstep with cli_definition.rs's retry deadline and the nextest
+// override in .config/nextest.toml. A cold, CPU-starved runner (the nightly
+// runs the whole workspace suite in parallel) can keep rust-analyzer
+// answering `content modified` (-32801) past 90s — runs 35996603815 and
+// 36132727849 failed at a 90s budget; the green run 36239433886 passed only
+// when the runner had headroom.
+const E2E_BUDGET: Duration = Duration::from_secs(150);
 
 /// Locate a working `rust-analyzer` on the current host. Returns the
 /// binary's path on success, `None` otherwise.

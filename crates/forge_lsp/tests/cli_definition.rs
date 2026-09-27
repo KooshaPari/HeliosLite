@@ -87,11 +87,19 @@ fn definition_command_does_not_fail_on_a_cold_server() {
     };
 
     let started = Instant::now();
-    let deadline = started + Duration::from_secs(90);
+    // 150s: a cold, CPU-starved runner (nightly runs the whole workspace test
+    // suite in parallel) can keep rust-analyzer answering `content modified`
+    // (-32801) past 90s — run 36318434190 exhausted a 90s budget with ~6
+    // fresh-server retries. Each retry re-pays full project load, so budget
+    // must cover several cold attempts, not one. Keep in lockstep with
+    // E2E_BUDGET and the nextest override in .config/nextest.toml.
+    let deadline = started + Duration::from_secs(150);
     // A cold rust-analyzer can fail its very first handshake, and each
     // `run_command` call owns a fresh server, so retry on transient errors
-    // rather than reporting a flake. The assertion below still fails fast for
-    // the regression this guards (`file not found`).
+    // rather than reporting a flake (`content modified` is transient per the
+    // LSP spec and common while the project is still loading under load).
+    // The assertion below still fails fast for the regression this guards
+    // (`file not found`).
     let output = loop {
         match run_command(&cmd) {
             Ok(out) => break out.unwrap_or_default(),
