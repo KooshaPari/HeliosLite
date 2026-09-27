@@ -177,11 +177,27 @@ async fn e2e_definition_round_trip_against_real_rust_analyzer() {
             let deadline =
                 std::time::Instant::now() + E2E_BUDGET.saturating_sub(Duration::from_secs(10));
             let locations = loop {
-                let locations = server
-                    .definition(Path::new("src/lib.rs"), query_position.clone())
-                    .map_err(|e| format!("definition request failed: {e}"))?;
-                if !locations.is_empty() || std::time::Instant::now() >= deadline {
-                    break locations;
+                let attempt = server.definition(Path::new("src/lib.rs"), query_position.clone());
+                match attempt {
+                    Ok(locs) => {
+                        if !locs.is_empty() || std::time::Instant::now() >= deadline {
+                            break locs;
+                        }
+                    }
+                    Err(e) if std::time::Instant::now() < deadline => {
+                        // A cold rust-analyzer still loading the project can
+                        // answer with transient errors while its VFS churns —
+                        // observed as `content modified` (code -32801) on the
+                        // nightly runner (run 35996603815). The LSP spec says
+                        // the client drops and retries ContentModified, and
+                        // cli_definition.rs already retries transient CLI
+                        // errors the same way. Only a past-deadline error is
+                        // reported verbatim below.
+                        eprintln!("transient definition error ({e}); retrying");
+                    }
+                    Err(e) => {
+                        return Err(format!("definition request failed: {e}"));
+                    }
                 }
                 std::thread::sleep(Duration::from_millis(250));
             };
