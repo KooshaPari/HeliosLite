@@ -70,6 +70,11 @@ cargo deny is the tripwire: RUSTSEC advisories surface the downgrade.
      c7562cd44 docs-consolidation (+541: ARCHITECTURE.md, REPOSITORY_MAP.md,
      absent from main) via `feat/docs-consolidation`; 22625936c ghostty-ipc +
      forge_pheno_evals (+7503, never merged) via `legacy/stash-0-AGENTS.md-*`.
+     [2026-09-27 precision: the exact +7503/-21 over 51 files measures on
+     `legacy/stash-3-AGENTS.md-2026-07-15` (tip = 22625936c itself); the
+     stash-0 twins contain the same commit plus a 2026-07-16 dirty autocommit
+     (4d38841a1) whose own delta vs main is +7371/-38 over 52 files. See the
+     P5 decision-brief section below.]
    - Remote branches 308 -> 288 (was 337 before Tier-1). Tags 44 total incl. 7
      archive/wip-*. 20/20 deletions confirmed gone; no failures.
 
@@ -286,3 +291,52 @@ redundant but read-only). Dependabot #7 closed as predicted: observed
 **0 open / 10 fixed**. CI at HEAD `4c8df606e` observed 28/28 checks
 success/skipped, including the Cargo Deny job with the pinned
 `cargo-deny@0.19.0` install visible in its log.
+
+## 2026-09-27: ci/test LSP proxy observed + P5 branch located (decision brief)
+
+**Same-environment proxy for todo #7 (observed, not predicted).** The `ci / test`
+job (run 36338571833, job 108674041030, success) on `49769b34d` executed the
+full workspace under nextest: **3875 tests run, 3875 passed, 1 skipped, 0
+failed** (Summary line, 28.9s). Both LSP e2e binaries are part of that run:
+`e2e_rust_analyzer.rs` documents "not `#[ignore]`'d", the job installs
+rust-analyzer + typescript-language-server precisely to keep those tests real,
+and `.config/nextest.toml` carries the `binary(cli_definition) |
+binary(e2e_rust_analyzer)` slow-timeout override (terminate-after 16, from
+da25401fc) inside the default profile. Passing test names are absent from the
+log because the profile sets `status-level = "fail"` (only failures print).
+So the retry-hardened tests passed in real Linux CI at HEAD. The 09-28
+schedule run (~12:16Z) remains the acceptance for the cold-container
+conditions where the storm occurred; watchers `sched_e965f791` (+ two ambient
+parallel-session watchers) stay armed.
+
+**P5 located after an exhaustive search (branch name had drifted in the
+compaction summary; the session-doc 09-20 entry was the only surviving
+record).** Ground truth:
+
+- Canonical branch: `fork/legacy/stash-3-AGENTS.md-2026-07-15`, tip
+  `22625936c` (2026-06-24, "feat(forge_pheno_evals): wire eval harness
+  through thegent-memory v2 MemoryPort (ADR-097)"), delta vs main
+  **+7503/-21 over 51 files** — the exact recorded figure.
+- Twins holding the same commit: `stash-0-AGENTS.md` (tip adds a 07-16 dirty
+  autocommit `4d38841a1`, delta +7371/-38/52 files), `stash-0/1-crates-
+  forge3d-Cargo.toml` (+10472/55 files and +56316/94 files — more WIP
+  churn), plus the squash-style `legacy/forgecode-stashes-snapshot-2026-07-15`.
+  Preservation is redundant: 4 branches contain `22625936c`.
+- Content (never merged; main lacks all of it): `crates/ghostty-kit`
+  full implementation (config/ipc/ipc_request/ipc_response/serialize/value/
+  error ≈1936 lines + golden tests 383 + fixtures — main's `crates/ghostty-kit/`
+  holds only `ghostty-kit.cdx.json`), `crates/forge_pheno_evals` (409),
+  `crates/forge_pheno_memory` (243), ghostty CLI surface in forge_infra
+  (ghostty.rs 355) + forge_main (cmd/ghostty.rs 356 + cli/ui/tests ≈190),
+  `forge3d` server (registry 242 + server 617), shell-plugin ghostty zsh
+  (341+447 + 203 smoke), forge_repo/pool.rs +127, Cargo.toml +16/Cargo.lock
+  +1074 churn, AGENTS.md +14, one session doc — and two committed build
+  binaries under `forge-daemon/zig-out/` (junk; never merge as-is).
+- Decision (operator call, todo #9): (A) revive in parts — ghostty-kit is the
+  cleanest standalone absorption; pheno evals/memory depend on thegent-memory
+  v2/ADR-097 alignment; lock churn must be re-resolved (no 'theirs');
+  zig-out binaries excluded; (B) archive canonically — tag
+  `archive/pheno-evals-20260624` on 22625936c and keep the legacy branches
+  (already-safe state, zero loss); (C) recommended: tag now, revive
+  deliberately per component if/when ghostty-kit IPC or the eval harness
+  re-enters the roadmap. No action taken pending the operator.
