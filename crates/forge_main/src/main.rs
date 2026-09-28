@@ -185,13 +185,41 @@ async fn run() -> Result<()> {
             "Unexpected error occurred".to_string()
         };
 
-        println!("{}", TitleFormat::error(message.to_string()).display());
+        eprintln!("{}", TitleFormat::error(message.to_string()).display());
         tracker::error_blocking(message);
         std::process::exit(1);
     }));
 
     // Initialize and run the UI
     let mut cli = parse_cli();
+    if matches!(
+        cli.subcommands,
+        Some(TopLevelCommand::Acp | TopLevelCommand::LiveHost { .. })
+    ) {
+        #[cfg(unix)]
+        {
+            let cwd = cli
+                .directory
+                .clone()
+                .unwrap_or(std::env::current_dir()?)
+                .canonicalize()?;
+            std::env::set_current_dir(&cwd)?;
+            return match cli.subcommands {
+                Some(TopLevelCommand::Acp) => forge_main::acp::run(cwd).await,
+                Some(TopLevelCommand::LiveHost { session, create }) => {
+                    forge_main::acp::host(
+                        forge_domain::ConversationId::parse(session)?,
+                        cwd,
+                        create,
+                    )
+                    .await
+                }
+                _ => unreachable!(),
+            };
+        }
+        #[cfg(not(unix))]
+        anyhow::bail!("Live ACP currently requires Unix-domain sockets");
+    }
 
     // Check if there's piped input, but skip for `forge select` since that
     // command uses stdin for its item list.

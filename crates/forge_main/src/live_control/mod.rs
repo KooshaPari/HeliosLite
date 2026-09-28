@@ -21,6 +21,15 @@ impl LiveControl {
     pub fn start<A: API + 'static>(api: Arc<A>, session: ConversationId) -> anyhow::Result<Self> {
         let directory = lease::runtime_dir()?;
         let lease = lease::acquire(&directory, session)?;
+        Self::with_lease(api, session, directory, lease)
+    }
+
+    pub(crate) fn with_lease<A: API + 'static>(
+        api: Arc<A>,
+        session: ConversationId,
+        directory: std::path::PathBuf,
+        lease: std::fs::File,
+    ) -> anyhow::Result<Self> {
         #[cfg(unix)]
         let listener = {
             use std::os::unix::fs::PermissionsExt;

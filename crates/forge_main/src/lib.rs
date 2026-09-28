@@ -1,3 +1,5 @@
+#[cfg(unix)]
+pub mod acp;
 pub mod banner;
 mod cli;
 mod completer;

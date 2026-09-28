@@ -48,6 +48,7 @@ path = "src/bin/helioslite_helper.rs"
 
 
 [dependencies]
+agent-client-protocol-schema = { version = "=1.9.1", default-features = false }
 thiserror = { workspace = true }
 clap.workspace = true
 clap_complete.workspace = true
@@ -69,7 +70,7 @@ nucleo.workspace = true
 nucleo-picker.workspace = true
 libc = "0.2"
 forge_fs.workspace = true
-tokio = { workspace = true, features = ["net"] }
+tokio = { workspace = true, features = ["net", "io-std"] }
 uuid.workspace = true
 tokio-stream.workspace = true
 futures.workspace = true

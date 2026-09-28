@@ -817,6 +817,10 @@ impl<A: API + ConsoleWriter + 'static, F: Fn(ForgeConfig) -> A + Send + Sync> UI
 
     async fn handle_subcommands(&mut self, subcommand: TopLevelCommand) -> anyhow::Result<()> {
         match subcommand {
+            TopLevelCommand::Acp | TopLevelCommand::LiveHost { .. } => {
+                anyhow::bail!("ACP commands must be dispatched before UI initialization")
+            }
+
             TopLevelCommand::Test(test_group) => {
                 let runner = crate::TestRunner::new()?;
                 let result = match test_group.command {

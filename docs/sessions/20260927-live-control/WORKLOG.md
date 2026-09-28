@@ -79,3 +79,19 @@ identity now uses canonical paths while retaining filename equality, including
 remove events where the file no longer exists. A symlink-parent negative control
 covers correct target and unrelated file. Existing runtime tests remain unchanged
 pending actual hosted evidence. Split pre-existing 554-line watcher test module.
+
+## ACP source slice and compile feedback
+
+Official agent-client-protocol-schema =1.9.1 v1 types pin the wire boundary.
+Actual ACP stdio now launches/attaches owner-leased host runtimes through IPC,
+negotiates initialize, supports session/new/load/list/prompt/cancel, projects
+session/update, and correlates request_permission + negotiated form elicitation
+back to the original broker. Disconnect leaves runtime/pending requests alive.
+Runtime, turn, request and sequence metadata use io.phenotype/ namespaced _meta.
+Detached host creation acquires lease before creating/loading persisted session.
+No arbitrary executable is accepted from clients.
+
+828d52f32 hosted build reached forge_main and failed -D dead_code for unused
+IPC call() (ACP now consumes it); Clippy also found cancellable.rs collapsible_if,
+now corrected. These are real new-source failures, not the prior watcher failure.
+Current ACP source awaits its own compile/test evidence.

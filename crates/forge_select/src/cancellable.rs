@@ -85,14 +85,13 @@ pub fn prompt_cancellable(
                             .and_then(|value| value.checked_sub(1))
                     })
                     .collect::<Option<Vec<_>>>();
-                if let Some(indices) = parsed {
-                    if (multiple || indices.len() == 1)
-                        && indices.iter().enumerate().all(|(offset, index)| {
-                            *index < choices.len() && !indices[..offset].contains(index)
-                        })
-                    {
-                        return Ok(Some(PromptAnswer::Indices(indices)));
-                    }
+                if let Some(indices) = parsed
+                    && (multiple || indices.len() == 1)
+                    && indices.iter().enumerate().all(|(offset, index)| {
+                        *index < choices.len() && !indices[..offset].contains(index)
+                    })
+                {
+                    return Ok(Some(PromptAnswer::Indices(indices)));
                 }
                 text.clear();
                 write!(output, "Invalid choice. > ")?;

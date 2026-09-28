@@ -27,7 +27,7 @@ pub fn serve(listener: UnixListener, handle: Handle) -> tokio::task::JoinHandle<
     })
 }
 
-async fn read_frame<R: tokio::io::AsyncBufRead + Unpin>(
+pub(crate) async fn read_frame<R: tokio::io::AsyncBufRead + Unpin>(
     reader: &mut R,
 ) -> anyhow::Result<Option<Vec<u8>>> {
     let mut frame = Vec::new();
