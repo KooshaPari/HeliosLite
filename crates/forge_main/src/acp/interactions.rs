@@ -8,9 +8,15 @@ pub fn request(request: &InteractionRequest, forms: bool) -> anyhow::Result<Opti
     let id = format!("forge/{}", request.request_id);
     match &request.kind {
         InteractionKind::Permission { operation } => {
+            let tool_id = request
+                .tool_call
+                .as_ref()
+                .and_then(|tool| tool.call_id.as_ref())
+                .map(|id| id.as_str().to_owned())
+                .unwrap_or_else(|| request.request_id.to_string());
             let params = wire::checked::<schema::RequestPermissionRequest>(json!({
                 "sessionId":request.session_id,
-                "toolCall":{"toolCallId":request.request_id.to_string(),"title":request.message,"status":"pending","rawInput":operation},
+                "toolCall":{"toolCallId":tool_id,"title":request.message,"status":"pending","rawInput":operation},
                 "options":[
                     {"optionId":"0","name":"Accept","kind":"allow_once"},
                     {"optionId":"1","name":"Reject","kind":"reject_once"},
@@ -122,6 +128,7 @@ mod tests {
             message: "Choose a strategy".into(),
             choices: vec!["one".into(), "two".into()],
             kind,
+            tool_call: None,
         }
     }
 

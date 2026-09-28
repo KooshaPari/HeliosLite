@@ -36,7 +36,7 @@ impl UserInfra for ForgeInquire {
         operation: &PermissionOperation,
     ) -> Result<Option<PolicyPermission>> {
         if let Some(context) = InteractionContext::current() {
-            let options = vec![
+            let options = [
                 PolicyPermission::Accept,
                 PolicyPermission::Reject,
                 PolicyPermission::AcceptAndRemember,

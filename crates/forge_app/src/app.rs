@@ -439,12 +439,10 @@ impl<S: Services + EnvironmentInfra<Config = forge_config::ForgeConfig>> ForgeAp
         .models(models)
         .hook(Arc::new(hook));
 
-        // Preserve the actor's interaction identity across the spawned stream task.
-        let interaction = forge_domain::InteractionContext::current();
         // Create and return the stream
-        let stream = MpscStream::spawn(
+        let stream = crate::spawn_interaction_stream(
             |tx: tokio::sync::mpsc::Sender<Result<ChatResponse, anyhow::Error>>| {
-                let run = async move {
+                async move {
                     // Execute dispatch and always save conversation afterwards
                     let mut orch = orch.sender(tx.clone());
                     let dispatch_result = if let Some(mut context) =
@@ -480,13 +478,6 @@ impl<S: Services + EnvironmentInfra<Config = forge_config::ForgeConfig>> ForgeAp
                         if let Err(e) = tx.send(Err(err)).await {
                             tracing::error!("Failed to send error to stream: {}", e);
                         }
-                    }
-                };
-                async move {
-                    if let Some(context) = interaction {
-                        forge_domain::INTERACTION_CONTEXT.scope(context, run).await;
-                    } else {
-                        run.await;
                     }
                 }
             },

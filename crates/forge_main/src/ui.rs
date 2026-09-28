@@ -5085,6 +5085,7 @@ impl<A: API + ConsoleWriter + 'static, F: Fn(ForgeConfig) -> A + Send + Sync> UI
         self.state.conversation_id = Some(id);
         if !self.live_sessions.contains_key(&id) {
             let control = crate::live_control::LiveControl::start(self.api.clone(), id)?;
+            self.console.register_live(&control.handle);
             self.live_sessions.insert(id, control);
         }
 
@@ -5232,6 +5233,7 @@ impl<A: API + ConsoleWriter + 'static, F: Fn(ForgeConfig) -> A + Send + Sync> UI
         let session = chat.conversation_id;
         if !self.live_sessions.contains_key(&session) {
             let control = crate::live_control::LiveControl::start(self.api.clone(), session)?;
+            self.console.register_live(&control.handle);
             self.live_sessions.insert(session, control);
         }
         let mut stream = self.live_sessions[&session]

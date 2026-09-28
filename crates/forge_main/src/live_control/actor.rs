@@ -45,6 +45,7 @@ pub struct Handle {
     pub runtime_id: Uuid,
     pub broker: Arc<InteractionBroker>,
     tx: mpsc::UnboundedSender<Control>,
+    output: Arc<Mutex<Option<std::sync::mpsc::SyncSender<String>>>>,
 }
 
 pub struct TurnReceiver {
@@ -74,6 +75,10 @@ impl Drop for TurnReceiver {
 }
 
 impl Handle {
+    pub fn set_output(&self, output: Option<std::sync::mpsc::SyncSender<String>>) {
+        *self.output.lock().unwrap() = output;
+    }
+
     pub fn spawn<A: API + 'static>(
         api: Arc<A>,
         session_id: ConversationId,
@@ -87,7 +92,13 @@ impl Handle {
             .unwrap_or(300);
         let broker = InteractionBroker::new(session_id, runtime_id, Duration::from_secs(ttl));
         let (tx, rx) = mpsc::unbounded_channel();
-        let handle = Self { session_id, runtime_id, broker, tx };
+        let handle = Self {
+            session_id,
+            runtime_id,
+            broker,
+            tx,
+            output: Arc::new(Mutex::new(None)),
+        };
         let task = tokio::spawn(run(api, handle.clone(), rx, lease));
         (handle, task)
     }
@@ -145,6 +156,8 @@ async fn run<A: API + 'static>(
     let mut active: Option<(Uuid, watch::Sender<bool>, tokio::task::JoinHandle<()>)> = None;
     let mut interaction_changes = handle.broker.subscribe();
     let mut shutdown = false;
+    let mut remote_turns = std::collections::HashSet::new();
+    let mut shown = std::collections::HashSet::new();
     loop {
         if active.is_none() {
             if shutdown {
@@ -159,17 +172,22 @@ async fn run<A: API + 'static>(
                     journal.queued_turns.retain(|queued| *queued != id);
                     journal.publish(Some(id), Payload::TurnStarted);
                 }
+                if turn.observer.is_none() {
+                    remote_turns.insert(id);
+                }
                 let context = InteractionContext {
                     broker: handle.broker.clone(),
                     turn_id: id,
                     cancel: cancellation,
                     terminal: turn.observer.is_some(),
+                    tool_call: None,
                 };
                 let api = api.clone();
                 let journal = journal.clone();
                 let completed = completed.clone();
+                let output = handle.output.lock().unwrap().clone();
                 let task = tokio::spawn(async move {
-                    run_turn(api, turn, context, journal).await;
+                    run_turn(api, turn, context, journal, output).await;
                     let _ = completed.send(id);
                 });
                 active = Some((id, cancel, task));
@@ -184,6 +202,12 @@ async fn run<A: API + 'static>(
             }
             _ = interaction_changes.changed() => {
                 journal.lock().unwrap().publish(active.as_ref().map(|(id, _, _)| *id), Payload::InteractionsChanged);
+                let output = handle.output.lock().unwrap().clone();
+                for request in handle.broker.snapshot() {
+                    if remote_turns.contains(&request.turn_id) && shown.insert(request.request_id) {
+                        super::display::interaction(&output, &request);
+                    }
+                }
             }
             command = commands.recv(), if !shutdown => {
                 match command {
@@ -250,22 +274,27 @@ async fn run_turn<A: API>(
     turn: Turn,
     context: InteractionContext,
     journal: Arc<Mutex<Journal>>,
+    output: Option<std::sync::mpsc::SyncSender<String>>,
 ) {
     let cancellation = context.cancel.clone();
     let broker = context.broker.clone();
+    let mut buffer = String::new();
     let result = INTERACTION_CONTEXT
         .scope(context, async {
             let mut stream = api.chat(turn.request).await?;
             while let Some(response) = stream.next().await {
                 let response = response?;
+                if turn.observer.is_none() {
+                    super::display::response(&output, &response, &mut buffer);
+                }
                 journal.lock().unwrap().publish(
                     Some(turn.id),
                     Payload::Chat { event: ChatEvent::from(&response) },
                 );
                 if let Some(observer) = &turn.observer {
-                    if observer.send(Ok(response)).is_err() {
-                        anyhow::bail!("local renderer disconnected");
-                    }
+                    // The receiver's drop guard requests cooperative cancellation;
+                    // keep draining until orchestration has saved its state.
+                    let _ = observer.send(Ok(response));
                 } else if let ChatResponse::ToolCallStart { notifier, .. } = response {
                     // Remote transcript publication is the render acknowledgement only.
                     // UserInfra still enforces the original policy before tool execution.
@@ -275,6 +304,9 @@ async fn run_turn<A: API>(
             Ok::<(), anyhow::Error>(())
         })
         .await;
+    if let Some(output) = &output {
+        super::display::flush(output, &mut buffer);
+    }
     broker.cancel_turn(turn.id);
     let cancelled = *cancellation.borrow();
     let error = result.as_ref().err().map(|error| format!("{error:#}"));

@@ -1,9 +1,11 @@
 //! Owner-only live actor control. IPC is internal, independently versioned from ACP.
 mod actor;
+mod display;
 pub(crate) mod lease;
 pub(crate) mod protocol;
 #[cfg(unix)]
 pub(crate) mod server;
+pub(crate) mod terminal;
 
 pub use actor::{Handle, TurnReceiver};
 use forge_api::API;
@@ -30,6 +32,8 @@ impl LiveControl {
         directory: std::path::PathBuf,
         lease: std::fs::File,
     ) -> anyhow::Result<Self> {
+        #[cfg(not(unix))]
+        let _ = directory;
         #[cfg(unix)]
         let listener = {
             use std::os::unix::fs::PermissionsExt;

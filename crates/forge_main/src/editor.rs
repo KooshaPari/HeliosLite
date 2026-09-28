@@ -88,6 +88,21 @@ impl ForgeEditor {
         Self { editor, history_file, pending_buffer: None }
     }
 
+    /// Returns a bounded channel that prints while preserving readline's buffer.
+    pub fn external_output(&mut self) -> Option<std::sync::mpsc::SyncSender<String>> {
+        use rustyline::ExternalPrinter;
+        let mut printer = self.editor.create_external_printer().ok()?;
+        let (sender, receiver) = std::sync::mpsc::sync_channel::<String>(256);
+        std::thread::spawn(move || {
+            while let Ok(line) = receiver.recv() {
+                if printer.print(line).is_err() {
+                    break;
+                }
+            }
+        });
+        Some(sender)
+    }
+
     fn normalize_result(&mut self, buffer: String) -> ReadResult {
         let result = normalize_result_text(buffer);
         if let ReadResult::Success(text) = &result {

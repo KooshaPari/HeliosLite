@@ -100,11 +100,20 @@ impl<S: AgentService + EnvironmentInfra<Config = forge_config::ForgeConfig>> Orc
 
         // Execute task tool calls in parallel — mirrors how direct
         // agent-as-tool calls work.
-        let task_results: Vec<(ToolCallFull, ToolResult)> = join_all(
-            task_calls
-                .iter()
-                .map(|tc| self.services.call(&self.agent, tool_context, (*tc).clone())),
-        )
+        let task_results: Vec<(ToolCallFull, ToolResult)> = join_all(task_calls.iter().map(|tc| {
+            let call = self.services.call(&self.agent, tool_context, (*tc).clone());
+            let context = forge_domain::InteractionContext::current().map(|mut context| {
+                context.tool_call = Some((*tc).clone());
+                context
+            });
+            async move {
+                if let Some(context) = context {
+                    forge_domain::INTERACTION_CONTEXT.scope(context, call).await
+                } else {
+                    call.await
+                }
+            }
+        }))
         .await
         .into_iter()
         .zip(task_calls.iter())
@@ -150,10 +159,16 @@ impl<S: AgentService + EnvironmentInfra<Config = forge_config::ForgeConfig>> Orc
                 .await?;
 
             // Execute the tool
-            let tool_result = self
+            let call = self
                 .services
-                .call(&self.agent, tool_context, (*tool_call).clone())
-                .await;
+                .call(&self.agent, tool_context, (*tool_call).clone());
+            let tool_result = if let Some(mut context) = forge_domain::InteractionContext::current()
+            {
+                context.tool_call = Some((*tool_call).clone());
+                forge_domain::INTERACTION_CONTEXT.scope(context, call).await
+            } else {
+                call.await
+            };
 
             // Fire the ToolcallEnd lifecycle event (fires on both success and
             // failure)

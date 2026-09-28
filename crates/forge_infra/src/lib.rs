@@ -14,6 +14,8 @@ mod grpc;
 mod http;
 mod inquire;
 mod inquire_live;
+#[cfg(test)]
+mod inquire_live_tests;
 mod kv_storage;
 mod mcp_client;
 mod mcp_server;

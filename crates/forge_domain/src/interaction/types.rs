@@ -42,6 +42,7 @@ pub struct InteractionRequest {
     pub message: String,
     pub choices: Vec<String>,
     pub kind: InteractionKind,
+    pub tool_call: Option<crate::ToolCallFull>,
 }
 
 /// A response addresses the complete original request identity.

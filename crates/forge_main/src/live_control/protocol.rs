@@ -1,5 +1,7 @@
 use chrono::{DateTime, Utc};
-use forge_domain::{ChatEvent, ConversationId, InteractionRequest, InteractionResponse};
+#[cfg(unix)]
+use forge_domain::InteractionResponse;
+use forge_domain::{ChatEvent, ConversationId, InteractionRequest};
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use uuid::Uuid;
@@ -47,6 +49,7 @@ pub struct Snapshot {
     pub conversation: Option<serde_json::Value>,
 }
 
+#[cfg(unix)]
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Request {
     pub version: u16,
@@ -56,6 +59,7 @@ pub struct Request {
     pub command: Command,
 }
 
+#[cfg(unix)]
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(tag = "method", rename_all = "snake_case")]
 pub enum Command {

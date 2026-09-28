@@ -12,6 +12,7 @@ pub struct InteractionContext {
     pub turn_id: uuid::Uuid,
     pub cancel: tokio::sync::watch::Receiver<bool>,
     pub terminal: bool,
+    pub tool_call: Option<crate::ToolCallFull>,
 }
 
 tokio::task_local! {

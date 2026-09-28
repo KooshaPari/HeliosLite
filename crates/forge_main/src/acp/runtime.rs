@@ -85,7 +85,7 @@ pub async fn attach(
 pub async fn host(session: ConversationId, cwd: PathBuf, create: bool) -> anyhow::Result<()> {
     let directory = lease::runtime_dir()?;
     let ownership = lease::acquire(&directory, session)?;
-    let config = <forge_config::ForgeConfig as forge_config::ConfigReader>::read()?;
+    let config = forge_config::ForgeConfig::read()?;
     let api = Arc::new(ForgeAPI::init(cwd.clone(), config));
     let persisted = api.conversation(&session).await?;
     if create {

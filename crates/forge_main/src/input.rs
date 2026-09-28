@@ -11,6 +11,9 @@ use crate::tracker;
 /// Console implementation for handling user input via command line.
 pub struct Console {
     command: Arc<ForgeCommandManager>,
+    output: Option<std::sync::mpsc::SyncSender<String>>,
+    sessions:
+        Mutex<std::collections::HashMap<forge_domain::ConversationId, crate::live_control::Handle>>,
     editor: Mutex<ForgeEditor>,
 }
 
@@ -21,12 +24,26 @@ impl Console {
         custom_history_path: Option<PathBuf>,
         command: Arc<ForgeCommandManager>,
     ) -> Self {
-        let editor = Mutex::new(ForgeEditor::new(env, custom_history_path, command.clone()));
-        Self { command, editor }
+        let mut editor = ForgeEditor::new(env, custom_history_path, command.clone());
+        let output = editor.external_output();
+        Self {
+            command,
+            editor: Mutex::new(editor),
+            output,
+            sessions: Mutex::new(std::collections::HashMap::new()),
+        }
     }
 }
 
 impl Console {
+    pub fn register_live(&self, handle: &crate::live_control::Handle) {
+        handle.set_output(self.output.clone());
+        self.sessions
+            .lock()
+            .unwrap()
+            .insert(handle.session_id, handle.clone());
+    }
+
     pub async fn prompt(&self, prompt: &mut ForgePrompt) -> anyhow::Result<AppCommand> {
         loop {
             let mut forge_editor = self.editor.lock().unwrap();
@@ -38,6 +55,15 @@ impl Console {
                 ReadResult::Exit => return Ok(AppCommand::Exit),
                 ReadResult::Empty => continue,
                 ReadResult::Success(text) => {
+                    let sessions = self.sessions.lock().unwrap().clone();
+                    match crate::live_control::terminal::command(&text, &sessions).await {
+                        Ok(true) => continue,
+                        Err(error) => {
+                            eprintln!("{error}");
+                            continue;
+                        }
+                        Ok(false) => {}
+                    }
                     tracker::prompt(text.clone());
                     return self.command.parse(&text);
                 }

@@ -4,7 +4,6 @@ use super::{
 };
 use crate::live_control::protocol::{Command, Request, VERSION};
 use forge_api::{API, ForgeAPI};
-use forge_config::ConfigReader;
 use forge_domain::{ConversationId, Event};
 use serde_json::{Value, json};
 use std::collections::HashMap;

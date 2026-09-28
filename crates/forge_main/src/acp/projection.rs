@@ -22,7 +22,7 @@ pub async fn history(
                 }
                 ContextMessage::Tool(result) => {
                     if let Some(id) = &result.call_id {
-                        wire::update(session, json!({"sessionUpdate":"tool_call_update","toolCallId":id.to_string(),
+                        wire::update(session, json!({"sessionUpdate":"tool_call_update","toolCallId":id,
                             "status":if result.is_error() {"failed"} else {"completed"},"rawOutput":result.output,
                             "_meta":{"io.phenotype/history":true}})).await?;
                     }
@@ -51,14 +51,14 @@ pub async fn event(event: &Envelope) -> anyhow::Result<()> {
             let Some(id) = &tool_call.call_id else {
                 return Ok(());
             };
-            json!({"sessionUpdate":"tool_call","toolCallId":id.to_string(),"title":tool_call.name.to_string(),
+            json!({"sessionUpdate":"tool_call","toolCallId":id,"title":tool_call.name.to_string(),
                 "name":tool_call.name.to_string(),"status":"in_progress","rawInput":tool_call.arguments})
         }
         ChatEventPayload::ToolEnd { result } => {
             let Some(id) = &result.call_id else {
                 return Ok(());
             };
-            json!({"sessionUpdate":"tool_call_update","toolCallId":id.to_string(),
+            json!({"sessionUpdate":"tool_call_update","toolCallId":id,
                 "status":if result.is_error() {"failed"} else {"completed"},"rawOutput":result.output})
         }
         ChatEventPayload::ToolInput { title, .. } => {

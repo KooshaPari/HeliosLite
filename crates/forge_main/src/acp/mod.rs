@@ -223,9 +223,10 @@ impl Bridge {
             }
         }
         attachment.cursor = snapshot.sequence;
-        attachment.current_turn = snapshot.active_turn.or(attachment
+        attachment.current_turn = attachment
             .current_turn
-            .filter(|turn| !attachment.finished.contains_key(turn)));
+            .filter(|turn| !attachment.finished.contains_key(turn))
+            .or(snapshot.active_turn);
         self.pending.retain(|_, request| {
             request.session_id != session
                 || snapshot

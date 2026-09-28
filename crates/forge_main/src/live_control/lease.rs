@@ -4,10 +4,7 @@ use std::path::{Path, PathBuf};
 
 /// Private runtime directory shared by bridge and TUI. Never put it in /tmp.
 pub fn runtime_dir() -> anyhow::Result<PathBuf> {
-    let directory = dirs::home_dir()
-        .ok_or_else(|| anyhow::anyhow!("home unavailable"))?
-        .join(".forge")
-        .join("live");
+    let directory = forge_config::ConfigReader::base_path().join("live");
     std::fs::create_dir_all(&directory)?;
     #[cfg(unix)]
     {
@@ -43,6 +40,7 @@ pub fn acquire(directory: &Path, session: ConversationId) -> anyhow::Result<File
     Ok(file)
 }
 
+#[cfg(unix)]
 pub fn socket_path(directory: &Path, session: ConversationId) -> PathBuf {
     directory.join(format!("{session}.sock"))
 }

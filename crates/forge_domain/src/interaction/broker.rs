@@ -70,6 +70,7 @@ impl InteractionBroker {
             message,
             choices,
             kind,
+            tool_call: InteractionContext::current().and_then(|context| context.tool_call),
         };
         let (sender, receiver) = oneshot::channel();
         self.pending.lock().unwrap().insert(

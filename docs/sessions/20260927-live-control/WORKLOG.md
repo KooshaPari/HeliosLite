@@ -95,3 +95,23 @@ No arbitrary executable is accepted from clients.
 IPC call() (ACP now consumes it); Clippy also found cancellable.rs collapsible_if,
 now corrected. These are real new-source failures, not the prior watcher failure.
 Current ACP source awaits its own compile/test evidence.
+
+## Corrective source and TUI integration
+
+11bc69581 exact hosted failures: strum feature-unification caused duplicate
+EnumProperty macro import; ConfigReader was wrongly treated as trait; ToolCallId
+has serde/as_str but no Display; permission choices triggered useless_vec.
+Corrected all four. No local heavy compilation used.
+
+Readline external printer now displays remote transcript/tool lifecycle and held
+questions while preserving the input buffer. /respond REQUEST_ID answer (or
+--cancel) resolves the same broker request; choice numbers are explicit 1-based
+terminal inputs mapped to offered zero-based options. No second stdin reader is
+spawned for remote turns. Runtime sockets now honor ConfigReader::base_path(),
+including isolated HELIOSLITE_HOME, instead of touching legacy ~/.forge state.
+
+Factored the exact production MpscStream context propagation helper and added a
+real ForgeInquire-through-spawn test asserting pending session/runtime/turn IDs
+and response delivery. Orchestrator sequential and parallel tool scopes now carry
+the original ToolCallFull into permission requests. Full fake-provider/IPC and
+interactive PTY qualification still required; not inferred from these unit tests.
