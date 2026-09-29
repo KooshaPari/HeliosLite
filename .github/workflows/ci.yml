@@ -48,8 +48,6 @@ jobs:
         repo-token: ${{ secrets.GITHUB_TOKEN }}
     - name: Setup Rust Toolchain
       uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659
-      with:
-        toolchain: stable
     - name: Install cargo-llvm-cov
       run: cargo install cargo-llvm-cov
     - name: Generate coverage
@@ -69,8 +67,6 @@ jobs:
         repo-token: ${{ secrets.GITHUB_TOKEN }}
     - name: Setup Rust Toolchain
       uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659
-      with:
-        toolchain: stable
     - name: Run performance benchmark
       run: ./scripts/benchmark.sh --threshold 60 zsh rprompt
   draft_release:
