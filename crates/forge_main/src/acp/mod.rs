@@ -1,5 +1,6 @@
 //! ACP v1 NDJSON adapter backed by the exact live owner through private IPC.
 mod interactions;
+mod pending;
 mod projection;
 mod runtime;
 mod sessions;
@@ -29,7 +30,7 @@ struct Bridge {
     cwd: PathBuf,
     sessions: HashMap<ConversationId, Attachment>,
     pending: HashMap<String, InteractionRequest>,
-    prompts: HashMap<Uuid, Value>,
+    prompts: HashMap<Uuid, (ConversationId, Value)>,
 }
 
 pub async fn run(cwd: PathBuf) -> anyhow::Result<()> {
@@ -214,11 +215,15 @@ impl Bridge {
                     self.pending
                         .retain(|_, request| request.session_id != session);
                     wire::update(session, json!({"sessionUpdate":"session_info_update","_meta":{"io.phenotype/interactionController":false,"io.phenotype/controlReason":"runtime_unavailable"}})).await?;
-                    if let Some(attachment) = self.sessions.remove(&session)
-                        && let Some(turn) = attachment.current_turn
-                        && let Some(id) = self.prompts.remove(&turn)
-                    {
-                        wire::error(id, -32000, error).await?;
+                    self.sessions.remove(&session);
+                    for id in pending::take_missing(
+                        &mut self.prompts,
+                        session,
+                        None,
+                        &[],
+                        &HashMap::new(),
+                    ) {
+                        wire::error(id, -32000, &error).await?;
                     }
                 }
             }
@@ -254,7 +259,7 @@ impl Bridge {
             ) = (event.turn_id, event.payload)
             {
                 attachment.finished.insert(turn, status.clone());
-                if let Some(id) = self.prompts.remove(&turn) {
+                if let Some((_, id)) = self.prompts.remove(&turn) {
                     if status == "failed" {
                         wire::error(id, -32000, error.unwrap_or_else(|| "turn failed".into()))
                             .await?;
@@ -263,6 +268,15 @@ impl Bridge {
                     }
                 }
             }
+        }
+        for id in pending::take_missing(
+            &mut self.prompts,
+            session,
+            snapshot.active_turn,
+            &snapshot.queued_turns,
+            &attachment.finished,
+        ) {
+            wire::error(id, -32000, "command_result_expired").await?;
         }
         attachment.cursor = snapshot.sequence;
         attachment.current_turn = attachment

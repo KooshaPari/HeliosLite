@@ -364,3 +364,15 @@ not initialize the synthetic provider catalog, so the fixture uses the proven
 TUI initialization path. Process-scoped PTY bytes only, no screenshots. This
 fixture successfully drove the old binary during the red reproduction and was
 handed to HarnessDesk; bridge integration remains independently reported.
+
+### Pending-reply reconciliation closes eviction timing window
+
+MacOS artifact run36626247800 on0dbbe0a05 passed the bounded replay regression,
+generator snapshot test, exact binary build and actual-process qualification.
+The follow-up tracks pending prompt replies by session and settles a turn with
+`command_result_expired` when it is absent from active/queued/known-terminal
+state. This also closes eviction between retry acceptance and the next ACP poll,
+and drains all affected pending replies when a runtime disappears. A focused
+regression preserves active, queued, known-terminal and other-session requests
+while removing only missing receipts. Final artifact refresh follows this source
+change; no evidence-only source push is needed after that receipt.

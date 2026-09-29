@@ -244,7 +244,7 @@ impl Bridge {
             !self.prompts.contains_key(&turn),
             "prompt already pending on this connection"
         );
-        self.prompts.insert(turn, id);
+        self.prompts.insert(turn, (session, id));
         attachment.current_turn = Some(turn);
         Ok(())
     }

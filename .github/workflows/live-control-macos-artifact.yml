@@ -33,6 +33,7 @@ jobs:
       - name: Verify replay expiry and CI generator regressions
         run: |
           cargo test --locked -p forge_main --lib live_control::protocol::tests::completed_retry_expires_after_terminal_replay_eviction
+          cargo test --locked -p forge_main --lib acp::pending::tests::
           cargo test --locked -p forge_ci generated_ci_matches_workflow_snapshot
       - name: Build exact source binary
         run: cargo build --locked -p forge_main --bin helioslite
