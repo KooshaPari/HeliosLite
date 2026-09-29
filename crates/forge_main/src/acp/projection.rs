@@ -76,6 +76,9 @@ pub async fn event(event: &Envelope) -> anyhow::Result<()> {
         ChatEventPayload::Complete => return Ok(()),
     };
     let mut update = update;
-    update["_meta"] = metadata;
+    update
+        .as_object_mut()
+        .ok_or_else(|| anyhow::anyhow!("invalid session update object"))?
+        .insert("_meta".to_owned(), metadata);
     wire::update(event.session_id, update).await
 }

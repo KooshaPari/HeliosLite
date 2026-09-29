@@ -318,3 +318,12 @@ reached the multi-choice UserInfra option indexing. Replaced this already
 broker-validated lookup with `get` plus an explicit error if the invariant is
 violated. Added production Rust indexing was reviewed for further occurrences.
 Rustfmt and diff whitespace checks pass; hosted final-source refresh follows.
+
+### ACP checked JSON access
+
+cb36da511 passed complete process qualification run36598692289, plus workspace
+build and standard clippy. Strict lint next reached ACP serde_json indexing;
+its blanket indexing rule includes JSON object reads/writes. Converted ACP JSON
+reads to get with the same Null fallback semantics, metadata insertion to a
+checked object map, and live runtime map access to a checked owner lookup.
+Formatted, whitespace checked; no protocol or callback behavior change intended.

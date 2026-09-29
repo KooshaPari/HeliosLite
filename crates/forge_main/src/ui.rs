@@ -5243,7 +5243,10 @@ impl<A: API + ConsoleWriter + 'static, F: Fn(ForgeConfig) -> A + Send + Sync> UI
             self.console.register_live(&control.handle);
             entry.insert(control);
         }
-        let mut stream = self.live_sessions[&session]
+        let mut stream = self
+            .live_sessions
+            .get(&session)
+            .ok_or_else(|| anyhow::anyhow!("live session owner missing"))?
             .handle
             .local_prompt(chat)
             .await?;

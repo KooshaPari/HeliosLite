@@ -87,8 +87,15 @@ pub async fn run(cwd: PathBuf) -> anyhow::Result<()> {
 
 impl Bridge {
     async fn message(&mut self, message: Value) -> anyhow::Result<()> {
-        anyhow::ensure!(message["jsonrpc"] == "2.0", "invalid JSON-RPC version");
-        let Some(method) = message["method"].as_str() else {
+        anyhow::ensure!(
+            message.get("jsonrpc").unwrap_or(&serde_json::Value::Null) == "2.0",
+            "invalid JSON-RPC version"
+        );
+        let Some(method) = message
+            .get("method")
+            .unwrap_or(&serde_json::Value::Null)
+            .as_str()
+        else {
             return self.answer(message).await;
         };
         let params = message.get("params").cloned().unwrap_or_else(|| json!({}));
@@ -112,8 +119,13 @@ impl Bridge {
             "session/prompt" => self.prompt(params, id).await,
             "session/cancel" => {
                 let params = wire::checked::<schema::CancelNotification>(params)?;
-                let session =
-                    ConversationId::parse(params["sessionId"].as_str().unwrap_or_default())?;
+                let session = ConversationId::parse(
+                    params
+                        .get("sessionId")
+                        .unwrap_or(&serde_json::Value::Null)
+                        .as_str()
+                        .unwrap_or_default(),
+                )?;
                 let attachment = self
                     .sessions
                     .get(&session)
@@ -141,7 +153,11 @@ impl Bridge {
     }
 
     async fn answer(&mut self, message: Value) -> anyhow::Result<()> {
-        let Some(id) = message["id"].as_str() else {
+        let Some(id) = message
+            .get("id")
+            .unwrap_or(&serde_json::Value::Null)
+            .as_str()
+        else {
             return Ok(());
         };
         let Some(request) = self.pending.get(id) else {
@@ -150,7 +166,13 @@ impl Bridge {
         let answer = if message.get("error").is_some() {
             forge_domain::InteractionAnswer::Cancel
         } else {
-            interactions::answer(request, message["result"].clone())?
+            interactions::answer(
+                request,
+                message
+                    .get("result")
+                    .unwrap_or(&serde_json::Value::Null)
+                    .clone(),
+            )?
         };
         let response = InteractionResponse {
             request_id: request.request_id,

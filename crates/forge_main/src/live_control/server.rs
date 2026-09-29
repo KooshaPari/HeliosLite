@@ -133,7 +133,10 @@ pub async fn call(path: PathBuf, request: &Request) -> anyhow::Result<serde_json
         .await?
         .ok_or_else(|| anyhow::anyhow!("runtime_disconnected"))?;
     let response: serde_json::Value = serde_json::from_slice(&response)?;
-    anyhow::ensure!(response["version"] == VERSION, "unsupported_version");
+    anyhow::ensure!(
+        response.get("version").and_then(serde_json::Value::as_u64) == Some(u64::from(VERSION)),
+        "unsupported_version"
+    );
     if let Some(error) = response.get("error") {
         anyhow::bail!("{error}");
     }

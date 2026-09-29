@@ -59,10 +59,20 @@ pub fn request(request: &InteractionRequest, forms: bool) -> anyhow::Result<Opti
 pub fn answer(request: &InteractionRequest, value: Value) -> anyhow::Result<InteractionAnswer> {
     if matches!(request.kind, InteractionKind::Permission { .. }) {
         let value = wire::checked::<schema::RequestPermissionResponse>(value)?;
-        return match value["outcome"]["outcome"].as_str() {
+        return match value
+            .get("outcome")
+            .unwrap_or(&serde_json::Value::Null)
+            .get("outcome")
+            .unwrap_or(&serde_json::Value::Null)
+            .as_str()
+        {
             Some("cancelled") => Ok(InteractionAnswer::Cancel),
             Some("selected") => {
-                let id = value["outcome"]["optionId"]
+                let id = value
+                    .get("outcome")
+                    .unwrap_or(&serde_json::Value::Null)
+                    .get("optionId")
+                    .unwrap_or(&serde_json::Value::Null)
                     .as_str()
                     .ok_or_else(|| anyhow::anyhow!("missing optionId"))?;
                 anyhow::ensure!(["0", "1", "2"].contains(&id), "unoffered optionId");
@@ -72,10 +82,18 @@ pub fn answer(request: &InteractionRequest, value: Value) -> anyhow::Result<Inte
         };
     }
     let value = wire::checked::<schema::CreateElicitationResponse>(value)?;
-    match value["action"].as_str() {
+    match value
+        .get("action")
+        .unwrap_or(&serde_json::Value::Null)
+        .as_str()
+    {
         Some("cancel" | "decline") => Ok(InteractionAnswer::Cancel),
         Some("accept") => {
-            let value = &value["content"]["answer"];
+            let value = value
+                .get("content")
+                .unwrap_or(&serde_json::Value::Null)
+                .get("answer")
+                .unwrap_or(&serde_json::Value::Null);
             let answer = match request.kind {
                 InteractionKind::Text => InteractionAnswer::Text(
                     value

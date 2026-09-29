@@ -26,11 +26,17 @@ impl Bridge {
             wire::checked::<schema::LoadSessionRequest>(params)?
         };
         anyhow::ensure!(
-            params["mcpServers"].as_array().is_none_or(Vec::is_empty),
+            params
+                .get("mcpServers")
+                .unwrap_or(&serde_json::Value::Null)
+                .as_array()
+                .is_none_or(Vec::is_empty),
             "per-client MCP servers not supported"
         );
         let cwd = PathBuf::from(
-            params["cwd"]
+            params
+                .get("cwd")
+                .unwrap_or(&serde_json::Value::Null)
                 .as_str()
                 .ok_or_else(|| anyhow::anyhow!("cwd required"))?,
         );
@@ -42,7 +48,13 @@ impl Bridge {
         let session = if create {
             ConversationId::generate()
         } else {
-            ConversationId::parse(params["sessionId"].as_str().unwrap_or_default())?
+            ConversationId::parse(
+                params
+                    .get("sessionId")
+                    .unwrap_or(&serde_json::Value::Null)
+                    .as_str()
+                    .unwrap_or_default(),
+            )?
         };
         anyhow::ensure!(
             self.sessions.len() < 32 || self.sessions.contains_key(&session),
@@ -54,11 +66,12 @@ impl Bridge {
                 .and_then(Value::as_bool)
                 == Some(true);
         let (snapshot, state) = runtime::attach(session, &cwd, create).await?;
-        if let Some(path) = snapshot
-            .conversation
-            .as_ref()
-            .and_then(|value| value["cwd"].as_str())
-        {
+        if let Some(path) = snapshot.conversation.as_ref().and_then(|value| {
+            value
+                .get("cwd")
+                .unwrap_or(&serde_json::Value::Null)
+                .as_str()
+        }) {
             anyhow::ensure!(Path::new(path).canonicalize()? == cwd, "workspace_mismatch");
         }
         if wants_control {
@@ -117,7 +130,9 @@ impl Bridge {
             params.get("cursor").is_none_or(Value::is_null),
             "invalid_cursor"
         );
-        let cwd = params["cwd"]
+        let cwd = params
+            .get("cwd")
+            .unwrap_or(&serde_json::Value::Null)
             .as_str()
             .map(PathBuf::from)
             .unwrap_or_else(|| self.cwd.clone());
@@ -144,25 +159,52 @@ impl Bridge {
     pub(super) async fn prompt(&mut self, params: Value, id: Option<Value>) -> anyhow::Result<()> {
         let id = id.ok_or_else(|| anyhow::anyhow!("request id required"))?;
         let params = wire::checked::<schema::PromptRequest>(params)?;
-        let session = ConversationId::parse(params["sessionId"].as_str().unwrap_or_default())?;
+        let session = ConversationId::parse(
+            params
+                .get("sessionId")
+                .unwrap_or(&serde_json::Value::Null)
+                .as_str()
+                .unwrap_or_default(),
+        )?;
         let attachment = self
             .sessions
             .get_mut(&session)
             .ok_or_else(|| anyhow::anyhow!("session_not_loaded"))?;
         anyhow::ensure!(attachment.controls, "controller_required");
-        let content = params["prompt"]
+        let content = params
+            .get("prompt")
+            .unwrap_or(&serde_json::Value::Null)
             .as_array()
             .ok_or_else(|| anyhow::anyhow!("prompt required"))?;
         let text = content
             .iter()
-            .map(|block| match block["type"].as_str() {
-                Some("text") => Ok(block["text"].as_str().unwrap_or_default().to_owned()),
-                Some("resource_link") => Ok(format!(
-                    "{}: {}",
-                    block["name"].as_str().unwrap_or("Resource"),
-                    block["uri"].as_str().unwrap_or_default()
-                )),
-                _ => Err(anyhow::anyhow!("unsupported prompt content")),
+            .map(|block| {
+                match block
+                    .get("type")
+                    .unwrap_or(&serde_json::Value::Null)
+                    .as_str()
+                {
+                    Some("text") => Ok(block
+                        .get("text")
+                        .unwrap_or(&serde_json::Value::Null)
+                        .as_str()
+                        .unwrap_or_default()
+                        .to_owned()),
+                    Some("resource_link") => Ok(format!(
+                        "{}: {}",
+                        block
+                            .get("name")
+                            .unwrap_or(&serde_json::Value::Null)
+                            .as_str()
+                            .unwrap_or("Resource"),
+                        block
+                            .get("uri")
+                            .unwrap_or(&serde_json::Value::Null)
+                            .as_str()
+                            .unwrap_or_default()
+                    )),
+                    _ => Err(anyhow::anyhow!("unsupported prompt content")),
+                }
             })
             .collect::<anyhow::Result<Vec<_>>>()?
             .join("\n");
@@ -182,7 +224,9 @@ impl Bridge {
         })
         .await?;
         let turn = Uuid::parse_str(
-            result["turn_id"]
+            result
+                .get("turn_id")
+                .unwrap_or(&serde_json::Value::Null)
                 .as_str()
                 .ok_or_else(|| anyhow::anyhow!("missing turn identity"))?,
         )?;
