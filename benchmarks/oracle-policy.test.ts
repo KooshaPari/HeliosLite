@@ -45,7 +45,7 @@ test("unsupported llm validation fails closed", async () => {
 
 test("signalled shell verifier cannot masquerade as exit zero", async () => {
   if (process.platform === "win32") return;
-  const command = `${JSON.stringify(process.execPath)} -e "process.kill(process.pid, 'SIGTERM')"`;
+  const command = "kill -TERM $";
   const results = await runValidations("ignored", [{ name: "signal", type: "shell", command, exit_code: 0 }]);
   assert.equal(results[0]?.passed, false);
   assert.match(results[0]?.message ?? "", /signal SIGTERM/);
