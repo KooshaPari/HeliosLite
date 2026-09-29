@@ -411,3 +411,8 @@ runs on new pushes — the same mechanism that muddied this failure).
 - Preflight evidence: `ci.yml`/`codeql.yml` tag triggers = `v*` only (no release workflow spawn); 5 existing `archive/wip-20260716-*` precedent tags; commit reachable from 4 `legacy/*` branches.
 - Override path open: A (revive-in-parts), B (branch-only), D (delete) still available in chat; tag removal is trivial if requested.
 - #11 distribution stays approval-blocked (`hook-d6499f54`, 9 days).
+
+## 2026-09-29T15:09Z — dependabot excursion closed + sync #2 preview
+- Transient alert #11 (`undici`, npm, medium, CVE-2026-85024) opened 14:27:16Z against the PRE-sync lock (undici 7.29.0, vulnerable) and has **auto-closed**: the landed sync bumped it to **7.30.0** (>= patched 7.29.1). `npm audit` = 0 vulns (all severities), 0 nested copies, 0 open alerts re-observed 15:07Z.
+- **Sync #2 preview** (non-mutating `git merge-tree fork/main origin/main`, upstream now 7 commits ahead to `be1dcb471`): **Cargo.lock content conflict only**; Cargo.toml, forge_app anthropic response.rs, forge_repo anthropic.rs, provider.json, package-lock.json all auto-merge. Recipe = same as sync #1 (ours + `cargo metadata` re-resolve, never-'theirs'). Deferred: upstream mid-flux (html2md bump/pin/revert churn) + parallel session actively committing on local main (now `10a4c36af`).
+- Scratch worktree `ft-upstream-sync` removed (parallel session cleanup after landing). Distribution approval `hook-d6499f54` still ungranted (9 days) — sole remaining gate (#11).
