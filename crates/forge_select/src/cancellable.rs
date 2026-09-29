@@ -88,7 +88,11 @@ pub fn prompt_cancellable(
                 if let Some(indices) = parsed
                     && (multiple || indices.len() == 1)
                     && indices.iter().enumerate().all(|(offset, index)| {
-                        *index < choices.len() && !indices[..offset].contains(index)
+                        *index < choices.len()
+                            && !indices
+                                .iter()
+                                .take(offset)
+                                .any(|previous| previous == index)
                     })
                 {
                     return Ok(Some(PromptAnswer::Indices(indices)));

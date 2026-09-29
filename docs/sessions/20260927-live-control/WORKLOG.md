@@ -293,3 +293,18 @@ Rustfmt and diff whitespace checks passed locally; hosted qualification pending.
 Windows workspace test failure is in the main-branch shell workflow fixture
 `release_tags_reach_gh_as_literal_arguments` (forge_ci/tests/ci.rs:126), not the
 interaction or ACP tests; it invokes `bash` without platform qualification.
+
+### Complete standard ACP runtime witness
+
+Exact head c227dd780 passed qualification run 36596573276, job 109503559917.
+All 19 focused tests and the exact binary build passed. The same live PTY TUI
+accepted standard JSON-RPC form and permission replies on the original callback
+IDs, with exact tool identities and duplicate-response rejection. Original tool
+answers and the allow-once filesystem side effect were witnessed. Existing
+local/remote followup, reconnect, cancellation, expiry, shutdown/reopen and
+controller negative controls also passed. No installed/runtime/device claim.
+
+The strict lint job then found the terminal choice validator's duplicate-prefix
+slice. Replaced it and the bounded frame reader prefix with equivalent iterator
+operations. This follow-up has rustfmt and whitespace verification locally;
+current-source hosted validation will refresh after push.

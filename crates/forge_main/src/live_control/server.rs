@@ -40,7 +40,7 @@ pub(crate) async fn read_frame<R: tokio::io::AsyncBufRead + Unpin>(
         let end = available.iter().position(|byte| *byte == b'\n');
         let count = end.map_or(available.len(), |index| index + 1);
         anyhow::ensure!(frame.len() + count <= MAX_FRAME, "frame_too_large");
-        frame.extend_from_slice(&available[..count]);
+        frame.extend(available.iter().take(count));
         reader.consume(count);
         if end.is_some() {
             return Ok(Some(frame));
