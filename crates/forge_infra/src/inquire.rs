@@ -118,8 +118,12 @@ impl UserInfra for ForgeInquire {
                     InteractionAnswer::Choices(indices) => Some(
                         indices
                             .into_iter()
-                            .map(|index| options[index].clone())
-                            .collect(),
+                            .map(|index| {
+                                options.get(index).cloned().ok_or_else(|| {
+                                    anyhow::anyhow!("invalid interaction choice index")
+                                })
+                            })
+                            .collect::<Result<Vec<_>>>()?,
                     ),
                     _ => None,
                 },

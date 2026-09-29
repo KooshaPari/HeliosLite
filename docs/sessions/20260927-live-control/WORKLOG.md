@@ -308,3 +308,13 @@ The strict lint job then found the terminal choice validator's duplicate-prefix
 slice. Replaced it and the bounded frame reader prefix with equivalent iterator
 operations. This follow-up has rustfmt and whitespace verification locally;
 current-source hosted validation will refresh after push.
+
+### UserInfra strict lint follow-up
+
+Head 8862e45ca passed the complete actual-process qualification again in run
+36597409175 (job 109505763007), including original ACP callbacks and permission
+side effects. Workspace check and standard clippy passed. Strict lint additionally
+reached the multi-choice UserInfra option indexing. Replaced this already
+broker-validated lookup with `get` plus an explicit error if the invariant is
+violated. Added production Rust indexing was reviewed for further occurrences.
+Rustfmt and diff whitespace checks pass; hosted final-source refresh follows.
