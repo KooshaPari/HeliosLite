@@ -195,3 +195,26 @@ held-followup runtime witness failed because the fixture left global
 Synthetic provider therefore received no native tool definitions and emitted its
 text witness. Fixture now explicitly enables native tool support. This is a
 fixture correction, not weakening the held-operation acceptance assertion.
+
+## 9e4f1b70c ownership qualification and corrected followup diagnosis
+
+Run 36585387869 / job 109464188267 passed focused Rust/ACP/controller tests
+and exact binary build. Actual process gates passed: passive control rejection,
+exclusive controller, explicit ACP grant, disconnect release, owner preservation,
+private socket and replay resync. The TUI's ordinary remote prompt still passed.
+
+The held-followup witness still failed. Further source tracing supersedes the
+previous global-tool-flag hypothesis: embedded defaults already enable native
+tools. The actual missing wiring is the built-in Forge and Muse tool allowlists,
+which omitted `followup`. Added the real tool to those interactive agents and a
+parse/availability regression test; kept research-only Sage unchanged. No fixture
+acceptance assertion was relaxed. Synthetic provider records only offered tool
+names for bounded diagnosis.
+
+The final synthetic policy witness appends only to fresh temporary files after
+an actual permission grant. It requires no file before decision, exactly one
+append after Accept, and no file after Reject, turn cancellation or TTL expiry.
+Duplicate responses must fail. Followup qualification also checks a new external
+controller recovers and answers the original pending request after lease handoff.
+Build cache retention on failure is enabled for this dedicated free workflow,
+with cargo-bin caching disabled; failed tests still fail the job.

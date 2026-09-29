@@ -25,10 +25,14 @@ jobs:
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
       - uses: Swatinem/rust-cache@v2
+        with:
+          cache-bin: false
+          cache-on-failure: true
       - name: Actual producer and broker negative controls
         run: |
           cargo test -p forge_domain interaction::
           cargo test -p forge_infra inquire_live_tests::
+          cargo test -p forge_repo agent::tests::interactive_agents_offer_real_followup_tool
           cargo test -p forge_main --lib live_control::
           cargo test -p forge_main --lib acp::
       - name: Build exact source binary

@@ -10,81 +10,12 @@ import threading
 import uuid
 
 from live_control import wait_for
-
-
-class Provider(http.server.BaseHTTPRequestHandler):
-    def log_message(self, *_):
-        pass
-
-    def do_POST(self):
-        request = json.loads(
-            self.rfile.read(int(self.headers.get("Content-Length", 0)))
-        )
-        messages = request.get("messages", [])
-        user = next(
-            (
-                str(message.get("content", ""))
-                for message in reversed(messages)
-                if message.get("role") == "user"
-            ),
-            "",
-        )
-        followup = next(
-            (
-                tool["function"]["name"]
-                for tool in request.get("tools", [])
-                if tool["function"]["name"].lower().endswith("followup")
-            ),
-            None,
-        )
-        chunks = [
-            ({"role": "assistant", "content": "SYNTHETIC_TUI_WITNESS\n"}, None),
-            ({}, "stop"),
-        ]
-        if "SYNTHETIC_FOLLOWUP" in user and followup:
-            arguments = {
-                "question": "SYNTHETIC_HELD_QUESTION",
-                "multiple": None,
-                **{f"option{index}": None for index in range(1, 6)},
-            }
-            chunks = [
-                (
-                    {
-                        "role": "assistant",
-                        "tool_calls": [
-                            {
-                                "index": 0,
-                                "id": "synthetic-followup",
-                                "type": "function",
-                                "function": {
-                                    "name": followup,
-                                    "arguments": json.dumps(arguments),
-                                },
-                            }
-                        ],
-                    },
-                    None,
-                ),
-                ({}, "tool_calls"),
-            ]
-        self.send_response(200)
-        self.send_header("Content-Type", "text/event-stream")
-        self.end_headers()
-        for delta, finish in chunks:
-            chunk = {
-                "id": "synthetic",
-                "object": "chat.completion.chunk",
-                "created": 1,
-                "model": "synthetic",
-                "choices": [{"index": 0, "delta": delta, "finish_reason": finish}],
-            }
-            self.wfile.write(b"data: " + json.dumps(chunk).encode() + b"\n\n")
-        self.wfile.write(b"data: [DONE]\n\n")
-        self.wfile.flush()
+from live_provider import Provider
 
 
 def qualify_tui(binary, root, session):
     server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Provider)
+    server.witness_root = root
     threading.Thread(target=server.serve_forever, daemon=True).start()
     config = root / "state" / "config" / ".helioslite.toml"
     config.parent.mkdir(parents=True, exist_ok=True)
@@ -106,6 +37,9 @@ name = "Synthetic local witness"
 context_length = 32768
 tools_supported = true
 """)
+    (root / "state" / "permissions.yaml").write_text(
+        "policies:\n  - permission: confirm\n    rule:\n      command: '*'\n"
+    )
     env = dict(
         os.environ,
         HELIOSLITE_HOME=str(root / "state"),
@@ -203,6 +137,9 @@ tools_supported = true
         wait_for(lambda: witness(transcript), timeout=10)
         assert process.poll() is None, "TUI exited after remote turn"
         qualify_followups(ipc, runtime, session, master, transcript)
+        from live_permissions import qualify_permissions
+
+        qualify_permissions(ipc, runtime, root)
         print(
             json.dumps(
                 {
@@ -220,6 +157,7 @@ tools_supported = true
                         "local_response",
                         "remote_response",
                         "same_tool_result",
+                        "pending_reconnect",
                         "wrong_identity",
                         "invalid_answer",
                         "duplicate_response",
@@ -250,7 +188,7 @@ def witness(transcript):
 
 
 def qualify_followups(ipc, runtime, session, master, transcript):
-    for mode in ["local", "remote", "cancel", "expire"]:
+    for mode in ["local", "remote", "reconnect", "cancel", "expire"]:
         event = {
             "id": str(uuid.uuid4()),
             "timestamp": "2026-09-29T00:00:00Z",
@@ -290,6 +228,28 @@ def qualify_followups(ipc, runtime, session, master, transcript):
             )
         elif mode == "remote":
             assert "result" in ipc("respond", runtime_id=runtime, response=response)
+        elif mode == "reconnect":
+            assert "result" in ipc("release_control", runtime_id=runtime)
+            next_controller = str(uuid.uuid4())
+            assert "result" in ipc(
+                "claim_control", runtime_id=runtime, controller_id=next_controller
+            )
+            recovered = ipc(after=None, controller_id=next_controller)["result"][
+                "pending"
+            ]
+            assert any(
+                item["request_id"] == request["request_id"] for item in recovered
+            )
+            assert "result" in ipc(
+                "respond",
+                runtime_id=runtime,
+                controller_id=next_controller,
+                response=response,
+            )
+            assert "result" in ipc(
+                "release_control", runtime_id=runtime, controller_id=next_controller
+            )
+            assert "result" in ipc("claim_control", runtime_id=runtime)
         elif mode == "cancel":
             assert "result" in ipc("cancel", runtime_id=runtime, turn_id=turn)
 
@@ -308,7 +268,7 @@ def qualify_followups(ipc, runtime, session, master, transcript):
             assert finished
             expected = "cancelled" if mode == "cancel" else "completed"
             assert finished[-1]["payload"]["status"] == expected, finished[-1]
-            if mode in {"local", "remote"}:
+            if mode in {"local", "remote", "reconnect"}:
                 original_turn = [
                     item for item in snapshot["events"] if item["turn_id"] == turn
                 ]
