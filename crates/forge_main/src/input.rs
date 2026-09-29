@@ -56,7 +56,7 @@ impl Console {
                 ReadResult::Empty => continue,
                 ReadResult::Success(text) => {
                     let sessions = self.sessions.lock().unwrap().clone();
-                    match crate::live_control::terminal::command(&text, &sessions).await {
+                    match crate::live_control::terminal::command(&text, &sessions) {
                         Ok(true) => continue,
                         Err(error) => {
                             eprintln!("{error}");

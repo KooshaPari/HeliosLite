@@ -175,12 +175,11 @@ impl Bridge {
             match snapshot {
                 Ok(snapshot) => self.consume(snapshot).await?,
                 Err(error) => {
-                    if let Some(attachment) = self.sessions.remove(&session) {
-                        if let Some(turn) = attachment.current_turn {
-                            if let Some(id) = self.prompts.remove(&turn) {
-                                wire::error(id, -32000, error).await?;
-                            }
-                        }
+                    if let Some(attachment) = self.sessions.remove(&session)
+                        && let Some(turn) = attachment.current_turn
+                        && let Some(id) = self.prompts.remove(&turn)
+                    {
+                        wire::error(id, -32000, error).await?;
                     }
                 }
             }
@@ -236,11 +235,11 @@ impl Bridge {
         });
         for request in snapshot.pending {
             let id = format!("forge/{}", request.request_id);
-            if !self.pending.contains_key(&id) {
-                if let Some(message) = interactions::request(&request, self.forms)? {
-                    wire::send(message).await?;
-                    self.pending.insert(id, request);
-                }
+            if let std::collections::hash_map::Entry::Vacant(entry) = self.pending.entry(id)
+                && let Some(message) = interactions::request(&request, self.forms)?
+            {
+                wire::send(message).await?;
+                entry.insert(request);
             }
         }
         Ok(())

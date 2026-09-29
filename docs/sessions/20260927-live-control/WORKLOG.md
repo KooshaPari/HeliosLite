@@ -115,3 +115,18 @@ real ForgeInquire-through-spawn test asserting pending session/runtime/turn IDs
 and response delivery. Orchestrator sequential and parallel tool scopes now carry
 the original ToolCallFull into permission requests. Full fake-provider/IPC and
 interactive PTY qualification still required; not inferred from these unit tests.
+
+## 2026-09-29 continuation
+
+Preserved 5fbdee8d4 pushed without rewrite to PR #319. Hosted CVP run
+36580276682: full workspace cargo check passed at that source; clippy failed
+and workspace tests were still running at observation. This is the first
+compile pass for the actor/ACP/TUI integration, not runtime qualification.
+Compute placement remains standard free GitHub ubuntu-latest; no heavy local
+build was started. Main checkout and unrelated processes remain untouched.
+
+Added production spawned UserInfra permission negative controls (wrong session,
+runtime, turn, invalid selection, duplicate response) and actual followup
+cancellation/TTL/late-response tests. Corrected synchronous terminal response
+handling and map-entry registration/ACP conditional lint issues. These tests
+require exact new-source hosted execution before claiming pass.

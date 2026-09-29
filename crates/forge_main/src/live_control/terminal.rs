@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use uuid::Uuid;
 
 /// Resolves only explicit response commands; ordinary input remains a chat turn.
-pub(crate) async fn command(
+pub(crate) fn command(
     text: &str,
     sessions: &HashMap<ConversationId, Handle>,
 ) -> anyhow::Result<bool> {

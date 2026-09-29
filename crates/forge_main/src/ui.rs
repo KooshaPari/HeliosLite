@@ -5083,10 +5083,10 @@ impl<A: API + ConsoleWriter + 'static, F: Fn(ForgeConfig) -> A + Send + Sync> UI
 
         // Always set the conversation id in state
         self.state.conversation_id = Some(id);
-        if !self.live_sessions.contains_key(&id) {
+        if let std::collections::hash_map::Entry::Vacant(entry) = self.live_sessions.entry(id) {
             let control = crate::live_control::LiveControl::start(self.api.clone(), id)?;
             self.console.register_live(&control.handle);
-            self.live_sessions.insert(id, control);
+            entry.insert(control);
         }
 
         Ok(id)
@@ -5231,10 +5231,11 @@ impl<A: API + ConsoleWriter + 'static, F: Fn(ForgeConfig) -> A + Send + Sync> UI
 
     async fn on_chat(&mut self, chat: ChatRequest) -> Result<()> {
         let session = chat.conversation_id;
-        if !self.live_sessions.contains_key(&session) {
+        if let std::collections::hash_map::Entry::Vacant(entry) = self.live_sessions.entry(session)
+        {
             let control = crate::live_control::LiveControl::start(self.api.clone(), session)?;
             self.console.register_live(&control.handle);
-            self.live_sessions.insert(session, control);
+            entry.insert(control);
         }
         let mut stream = self.live_sessions[&session]
             .handle
