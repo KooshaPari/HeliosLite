@@ -118,12 +118,24 @@ fn release_tags_reach_gh_as_literal_arguments() {
                     .replace("${{ matrix.pattern }}", "*apple-darwin*");
                 // Exercise the actual rendered shell without network or filesystem writes.
                 let script = format!("mkdir() {{ :; }}\ngh() {{ printf '%s' \"$3\"; }}\n{script}");
-                let actual = std::process::Command::new("bash")
-                    .args(["-c", &script])
+                let bash = if cfg!(windows) {
+                    std::path::PathBuf::from(
+                        std::env::var_os("ProgramFiles").expect("Git Bash requires ProgramFiles"),
+                    )
+                    .join("Git/bin/bash.exe")
+                } else {
+                    std::path::PathBuf::from("bash")
+                };
+                let actual = std::process::Command::new(bash)
+                    .args(["--noprofile", "--norc", "-c", &script])
                     .env("RELEASE_TAG", tag)
                     .output()
                     .unwrap();
-                assert!(actual.status.success());
+                assert!(
+                    actual.status.success(),
+                    "bash fixture failed: {}",
+                    String::from_utf8_lossy(&actual.stderr)
+                );
                 assert_eq!(String::from_utf8(actual.stdout).unwrap(), tag);
                 release_commands += 1;
             }
