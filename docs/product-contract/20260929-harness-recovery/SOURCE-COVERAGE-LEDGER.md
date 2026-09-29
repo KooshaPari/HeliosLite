@@ -1,0 +1,34 @@
+# Source coverage ledger — HeliosLite
+
+Source revision: `536a25cac1dc21ac97bbc86c7e9af74bd5932780`. Date: 2026-09-29.
+
+**Denominator state: OPEN.** This is a source-family inventory and sampled-source ledger, not a complete file census. Root-tree responses were partly display-truncated. No percentage can be computed from this table. A sampled file does not resolve its family. Expand every meaningful family into stable source rows with revision/path/blob or conversation provenance before closure.
+
+Resolution requires understood meaning, authority classification, contradictions, extracted obligation or non-normative disposition, mounted implementation surfaces, stage/journey implications and verification consequences. Statuses below deliberately remain partial/open where any element is missing.
+
+| ID | Family and observed extent | Classification | Consequence / next resolution work | Status |
+|---|---|---|---|---|
+| H-S01 | Current user mission; retrieved dated summaries of Aug 29, Sep 18/19 and Sep 24 conversations | USER INTENT for direct user statements; retrieved summaries supporting only | Preserve two-primary limit, mature-first approach, no WSL requirement, Pine compatibility boundary; recover raw passages and competing CLI-role interpretations | Partial |
+| H-S02 | AGENTS.md lines 1–100; Sep 18 release-CI HANDOFF.md lines 1–145 | Historical implementation and author-reported observations | Preserve prior work; inspect remaining handoff and underlying run/artifact identities; signing skip does not prove signing | Partial |
+| H-S03 | FUNCTIONAL_REQUIREMENTS.md, full, blob ff099fde64addcb8acad435b1227b16c534fbd1e | Existing authored catalog; authority and implementation claims unqualified | Review each distinct obligation rather than import implemented flags or use the inherited row count as a target | Partial |
+| H-S04 | Cargo.toml full, blob f656395706dc0527957acc62245fbfd1518ea9d2; root tree sampled | Current deterministic source facts | Resolve lockfile, features, build profiles, actual consumers and all workspace members; workspace membership is not runtime reachability | Partial |
+| H-S05 | benchmarks/verification.ts full, blob 749619083402134b20582b0d08c9d0c583caeb84 | Current implementation | H-F001/H-F004; strict evidence-bearing terminal states and adversarial controls | Partial: native execution outstanding |
+| H-S06 | benchmarks/task-executor.ts full, blob d1d076a02264a5ef746b768cb2f59c2a757b3cf0 | Current implementation | H-F002; timeout/process-tree cleanup/partial-output semantics; follow every caller | Partial |
+| H-S07 | benchmarks/cli.ts lines 1–410, blob 3f681ce9adcefe1af05335e7173356e5947dbfc5 | Mounted CLI decision flow | H-F002/H-F003; CLI imports executor and verifier, maps result and chooses exit status | Partial |
+| H-S08 | CLI/TUI: forge_main, forge_tui, forge_select, forge_display, shell-plugin | Implementation surfaces located by manifest/catalog, not fully inspected | Trace actual launch, commands, headless behavior and human journeys | Open |
+| H-S09 | Runtime/domain/services: forge_app, forge_domain, forge_services, forge_sdk, forge_daemon | Located surfaces | Trace scheduler, cancel/retry, child runs, lease ownership and durable state boundaries | Open |
+| H-S10 | Storage/migrations: catalog's dual SQLite store and forge_dbd claims | Imported implementation claim | Inspect schema, read precedence, duplicate IDs, write atomicity, compression, crash recovery and migration rollback | Open |
+| H-S11 | Tools/MCP/provider adapters: forge_app, forge_repo, rmcp manifest dependency | Located surfaces and catalog claims | Resolve actual registration/dispatch, credential custody, authorization, reconnect and provider-history fidelity | Open |
+| H-S12 | APIs/integrations: forge_api, forge_sharecli, forge_agileplus, forge_tracera, forge_lsp | Located workspace surfaces | Establish mounted/exported interfaces and consumer contracts, not naming-based completion | Open |
+| H-S13 | Security: SECURITY.md, docs/security/threat-model.md, sandbox/guardian/audit crates | Located by tree/catalog | Inspect trust boundaries and wrong-scope/denied-tool controls; worktree isolation is not OS sandbox proof | Open |
+| H-S14 | Tests: forge_e2e, forge_test_kit, snapshots, benchmark suites | Located by manifest/catalog | Inventory actual assertions, fixture validity, skips and mutations; no inherited test counts accepted | Open |
+| H-S15 | CI/build: tip commit and root .github/.config/.cargo | Current source metadata; commit-message claims | Read workflows/generated sources, required checks, zero-job/skip behavior, reproducible toolchain identity | Partial |
+| H-S16 | Release/deployment/install/update: Sep 18 handoff, install scripts, release machinery | Historical report / located surfaces | Fork versus upstream install, artifact digest, channel, signing policy and update continuity | Partial |
+| H-S17 | Observability: health/observability/telemetry dependencies in Cargo.toml | Deterministic declaration, not proof of emitted signals | Trace actual calls and evidence collector identity, failures, redaction and retention | Partial |
+| H-S18 | History/renames/predecessors: forgecode alias in Cargo.toml/AGENTS; one tip commit and handoff history | Current alias plus historical claims | Enumerate useful refs, path history, deleted/moved contracts, unmerged PRs and release lineage | Partial |
+| H-S19 | Registry atlas STATE and mirrored dossiers at registry snapshot | Historical bounded evaluations / proposals | Older source 6de2d161 is not evidence for current tip; resolve mirror authority and Shared custody conflict | Partial |
+| H-S20 | Related repos: HeliosCLI/HeliosLab pins; Shared Agentora dossier; actual Shared manifest pin | Metadata, proposals, one direct dependency declaration | Map real API consumers and retained lineage; no third primary program | Partial |
+| H-S21 | External libraries/standards/competitors | Prior art, never internal accepted intent | Continue Registry SOTA passes, pin implementations/licenses and challenge every custom subsystem | Partial |
+| H-S22 | Quality/UX/accessibility/performance/support docs, auxiliary assets | Not yet fully inventoried | Define supported configurations and evidence-qualified targets separately from functional obligations | Open |
+
+The existing catalog mentions 15 entries, but that historical count is neither a coverage denominator nor a requirement target. No row here authorizes retirement or deletion. Current implementation mapping remains a targeted risk sample; full obligation-to-code mapping waits for a credible semantic contract.
