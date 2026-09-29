@@ -340,3 +340,36 @@ record).** Ground truth:
   (already-safe state, zero loss); (C) recommended: tag now, revive
   deliberately per component if/when ghostty-kit IPC or the eval harness
   re-enters the roadmap. No action taken pending the operator.
+
+## 2026-09-29: nightly acceptance OBSERVED GREEN (todo #7 closed)
+
+The scheduled-task watcher (`sched_9d38ee7e`, delivered after the 09-28
+session interruption) read both post-fix nightly schedule runs:
+
+| Run | Created | SHA | Conclusion | `content modified`/`-32801` in logs |
+|-----|---------|-----|-----------|--------------------------------------|
+| 36434829092 (09-28) | 14:17Z | `6dba1f674` | **success** | 0 matches (full-log grep) |
+| 36573297818 (09-29) | 13:11Z | `6dba1f674` | **success** | 0 matches (full-log grep) |
+
+Both ran on fork/main with all three fixes (`b30984166`, `da25401fc`,
+`835e7b02d`). Pre-fix comparison: 09-27 `36318434190` FAILED at
+`cli_definition.rs:102`; the layered fix now has two consecutive
+concluded-and-green schedule runs, closing the acceptance gate. Still
+external: distribution re-dispatch approval (`hook-d6499f54`) — no
+update-distribution run since 09-20. P5 remains the open product call.
+
+---
+
+## 2026-09-29T14:19Z — Nightly acceptance EVIDENCED (todo #7 closed); sync validation resumed
+
+**Acceptance (both armed criteria met, observed):**
+- 09-28 schedule run `36434829092` (created 14:17:11Z) = **success** @ `6dba1f674` (post-fix tip: b30984166 + da25401fc + 835e7b02d).
+- 09-29 schedule run `36573297818` (created 13:11:24Z) = **success** @ `6dba1f674` (2nd consecutive).
+- 09-28 job `rebuild-nightly-container` id `108969906299`, log 343,079 B: step `cargo test --workspace --all-features --quiet`; 153 test-result lines (92 nonzero), **3889 passed total, 0 failed, 0 panicked, 0x "content modified", 0x 32801**. `notify-track` success too (09-29 jobs: {success:2}).
+- Failed 09-27 run `36318434190` attributed to `fb94d603e` (pre-fixes) — attribution confirmed.
+
+**Watcher gap (lesson):** session interrupted 09-28 11:14Z, resumed 09-29 14:03Z. `sched_e965f791` + `sched_9d38ee7e` consumed/expired without delivery; ambient `sched_3696aa9a`/`sched_889280f5` remain listed past-due (left untouched). The 09-28 schedule fired 14:17Z (~2h late): future watchers need a **+3h buffer**.
+
+**Distribution:** no `update-distribution` run since #38 (2026-09-20, failure); approval `hook-d6499f54` ungranted 8 days (todo #11).
+
+**Upstream sync resumed (todo #10):** aws-lc-sys 0.45.0 identical pre/post merge; isolated `cargo check -p aws-lc-sys` **PASSED** (7m14s) after the 09-28 transient cc failure; full `cargo check --workspace --all-targets` re-running detached (log `/Users/kooshapari/.jcode/scratch/upstream_sync_check.log`). Merge remains STAGED-UNCOMMITTED on `sync/upstream-20260928`; `cargo deny` already GREEN (advisories/bans/licenses/sources ok).
