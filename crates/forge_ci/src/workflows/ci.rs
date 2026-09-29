@@ -30,8 +30,7 @@ fn ci_workflow() -> Workflow {
                     "actions-rust-lang",
                     "setup-rust-toolchain",
                     "166cdcfd11aee3cb47222f9ddb555ce30ddb9659",
-                )
-                .input("toolchain", "stable"),
+                ),
         )
         .add_step(Step::new("Install cargo-llvm-cov").run("cargo install cargo-llvm-cov"))
         .add_step(
@@ -53,8 +52,7 @@ fn ci_workflow() -> Workflow {
                     "actions-rust-lang",
                     "setup-rust-toolchain",
                     "166cdcfd11aee3cb47222f9ddb555ce30ddb9659",
-                )
-                .input("toolchain", "stable"),
+                ),
         )
         .add_step(
             Step::new("Run performance benchmark")
