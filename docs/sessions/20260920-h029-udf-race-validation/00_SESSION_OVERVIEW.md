@@ -340,3 +340,20 @@ record).** Ground truth:
   (already-safe state, zero loss); (C) recommended: tag now, revive
   deliberately per component if/when ghostty-kit IPC or the eval harness
   re-enters the roadmap. No action taken pending the operator.
+
+## 2026-09-29: nightly acceptance OBSERVED GREEN (todo #7 closed)
+
+The scheduled-task watcher (`sched_9d38ee7e`, delivered after the 09-28
+session interruption) read both post-fix nightly schedule runs:
+
+| Run | Created | SHA | Conclusion | `content modified`/`-32801` in logs |
+|-----|---------|-----|-----------|--------------------------------------|
+| 36434829092 (09-28) | 14:17Z | `6dba1f674` | **success** | 0 matches (full-log grep) |
+| 36573297818 (09-29) | 13:11Z | `6dba1f674` | **success** | 0 matches (full-log grep) |
+
+Both ran on fork/main with all three fixes (`b30984166`, `da25401fc`,
+`835e7b02d`). Pre-fix comparison: 09-27 `36318434190` FAILED at
+`cli_definition.rs:102`; the layered fix now has two consecutive
+concluded-and-green schedule runs, closing the acceptance gate. Still
+external: distribution re-dispatch approval (`hook-d6499f54`) — no
+update-distribution run since 09-20. P5 remains the open product call.
