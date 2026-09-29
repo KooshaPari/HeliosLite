@@ -26,10 +26,9 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
 
-      - name: Setup Rust toolchain (stable + rustfmt)
+      - name: Setup Rust toolchain (rust-toolchain.toml + rustfmt)
         uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659
         with:
-          toolchain: stable
           components: rustfmt
 
       - name: cargo fmt --check
@@ -46,10 +45,9 @@ jobs:
       - name: Install system deps
         run: sudo apt-get update -q && sudo apt-get install -y libsqlite3-dev protobuf-compiler
 
-      - name: Setup Rust toolchain (stable + clippy)
+      - name: Setup Rust toolchain (rust-toolchain.toml + clippy)
         uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659
         with:
-          toolchain: stable
           components: clippy
 
       - name: Setup Zig

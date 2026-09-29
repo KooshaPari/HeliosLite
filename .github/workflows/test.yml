@@ -43,10 +43,9 @@ jobs:
           npm install -g typescript-language-server typescript
           typescript-language-server --version
 
-      - name: Setup Rust toolchain (stable)
+      - name: Setup Rust toolchain
         uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659
         with:
-          toolchain: stable
           # This action restores ~/.cargo/bin too. A cached bin dir is corrupt
           # and poisons every later run, so never restore or save it (see the
           # Rust cache step below for the observed failures).

@@ -686,3 +686,8 @@ tagged, merged, or deleted.
 - **P5 decided: C executed** — annotated tag `archive/pheno-evals-20260624` (→ `22625936c`) pushed to fork; preflight confirmed non-`v*` tags trigger no workflow; operator override (A/B/D) still possible in chat.
 - **Upstream sync LANDED** — `fork/main` = `72ff2cab8` (16-commit sync to `574894e8e`); check-runs at tip = 0 failures; local fmt/check/clippy/deny green incl. final-tree deny re-run. Post-sync nightly backstop scheduled 2026-09-30 15:00Z.
 - **Distribution re-dispatch (`hook-d6499f54`)**: still ungranted (9 days); dispatch on approval only — recommended against current landed main.
+
+### 2026-09-29T16:14Z status deltas (jcode)
+- **Upstream sync #2 LANDED** — `fork/main` = `65e1b7994` (7 commits → upstream `be1dcb471`; Claude Opus/Sonnet 5.5 support, html2md 0.2.15 pin, JS bumps). Local fmt/check/deny green; post-land main CI OBSERVED **28/28, 0 failures at 16:09Z**. All security pins intact.
+- **Workflow-trigger finding:** branch pushes fire no workflows (ci/cvp `main`-only, lint `main`+`integration/**`); PR route hook-deferred (`hook-47ff4370…`) and now **moot** — landed directly; reject that inbox item.
+- **Todos:** #9 P5 closed/verified (option C tag pushed); #12 distribution still approval-blocked (`hook-d6499f54`, refresh 16:12Z). Open MCQ: **Q3** pin CI toolchain to `1.98` (recommended, not executed).

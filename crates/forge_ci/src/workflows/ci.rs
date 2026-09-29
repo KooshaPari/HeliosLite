@@ -24,15 +24,11 @@ fn ci_workflow() -> Workflow {
             "d23441a48e516b6c34aea4fa41551a30e30af803",
         ))
         .add_step(setup_protoc())
-        .add_step(
-            Step::new("Setup Rust Toolchain")
-                .uses(
-                    "actions-rust-lang",
-                    "setup-rust-toolchain",
-                    "166cdcfd11aee3cb47222f9ddb555ce30ddb9659",
-                )
-                .input("toolchain", "stable"),
-        )
+        .add_step(Step::new("Setup Rust Toolchain").uses(
+            "actions-rust-lang",
+            "setup-rust-toolchain",
+            "166cdcfd11aee3cb47222f9ddb555ce30ddb9659",
+        ))
         .add_step(Step::new("Install cargo-llvm-cov").run("cargo install cargo-llvm-cov"))
         .add_step(
             Step::new("Generate coverage")
@@ -47,15 +43,11 @@ fn ci_workflow() -> Workflow {
             "d23441a48e516b6c34aea4fa41551a30e30af803",
         ))
         .add_step(setup_protoc())
-        .add_step(
-            Step::new("Setup Rust Toolchain")
-                .uses(
-                    "actions-rust-lang",
-                    "setup-rust-toolchain",
-                    "166cdcfd11aee3cb47222f9ddb555ce30ddb9659",
-                )
-                .input("toolchain", "stable"),
-        )
+        .add_step(Step::new("Setup Rust Toolchain").uses(
+            "actions-rust-lang",
+            "setup-rust-toolchain",
+            "166cdcfd11aee3cb47222f9ddb555ce30ddb9659",
+        ))
         .add_step(
             Step::new("Run performance benchmark")
                 .run("./scripts/benchmark.sh --threshold 60 zsh rprompt"),
