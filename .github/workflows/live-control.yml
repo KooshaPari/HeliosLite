@@ -1,0 +1,36 @@
+name: Live control qualification
+on:
+  pull_request:
+    paths:
+      - 'crates/**'
+      - 'Cargo.*'
+      - 'scripts/qualification/live_control.py'
+      - '.github/workflows/live-control.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: live-control-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  qualification:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      RUSTFLAGS: -Dwarnings
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: Swatinem/rust-cache@v2
+      - name: Actual producer and broker negative controls
+        run: |
+          cargo test -p forge_domain interaction::
+          cargo test -p forge_infra inquire_live_tests::
+          cargo test -p forge_main --lib live_control::
+      - name: Build exact source binary
+        run: cargo build -p forge_main --bin helioslite
+      - name: Cross-process owner and ACP qualification
+        run: python3 scripts/qualification/live_control.py target/debug/helioslite

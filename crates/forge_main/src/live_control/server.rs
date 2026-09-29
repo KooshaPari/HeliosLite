@@ -126,3 +126,34 @@ pub async fn call(path: PathBuf, request: &Request) -> anyhow::Result<serde_json
         .cloned()
         .ok_or_else(|| anyhow::anyhow!("missing_result"))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use pretty_assertions::assert_eq;
+
+    #[tokio::test]
+    async fn framing_rejects_truncation_and_oversize_without_losing_next_frame() {
+        let mut reader = BufReader::new(&b"one\ntwo\n"[..]);
+        assert_eq!(
+            read_frame(&mut reader).await.unwrap(),
+            Some(b"one\n".to_vec())
+        );
+        assert_eq!(
+            read_frame(&mut reader).await.unwrap(),
+            Some(b"two\n".to_vec())
+        );
+        assert_eq!(read_frame(&mut reader).await.unwrap(), None);
+        assert!(
+            read_frame(&mut BufReader::new(&b"truncated"[..]))
+                .await
+                .is_err()
+        );
+        let oversized = vec![b'x'; MAX_FRAME + 1];
+        assert!(
+            read_frame(&mut BufReader::new(oversized.as_slice()))
+                .await
+                .is_err()
+        );
+    }
+}

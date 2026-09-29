@@ -59,8 +59,10 @@ pub async fn run(cwd: PathBuf) -> anyhow::Result<()> {
                 match serde_json::from_slice::<Value>(&frame) {
                     Ok(message) => {
                         let id = message.get("method").and_then(|_| message.get("id")).cloned();
-                        if let Err(error) = bridge.message(message).await {
-                            if let Some(id) = id { wire::error(id, -32602, error).await?; }
+                        if let Err(error) = bridge.message(message).await
+                            && let Some(id) = id
+                        {
+                            wire::error(id, -32602, error).await?;
                         }
                     }
                     Err(error) => wire::error(Value::Null, -32700, error).await?,

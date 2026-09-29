@@ -130,3 +130,12 @@ runtime, turn, invalid selection, duplicate response) and actual followup
 cancellation/TTL/late-response tests. Corrected synchronous terminal response
 handling and map-entry registration/ACP conditional lint issues. These tests
 require exact new-source hosted execution before claiming pass.
+
+Hosted clippy job 109446301338 showed five failures: four collapsible ACP
+conditionals and one input mutex held across terminal response await. All five
+are corrected. Added isolated cross-process qualification script and free
+ubuntu-latest workflow: real binary host lease/socket modes, conflicting owner,
+runtime mismatch, future cursor resync, schema initialize, ACP attachment to
+same runtime, and disconnect preserving that owner. It creates only temporary
+state and terminates only subprocesses it started. This host qualification is
+not yet same-live-TUI/fake-provider successful-turn proof; that remains open.

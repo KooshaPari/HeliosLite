@@ -44,3 +44,20 @@ pub fn acquire(directory: &Path, session: ConversationId) -> anyhow::Result<File
 pub fn socket_path(directory: &Path, session: ConversationId) -> PathBuf {
     directory.join(format!("{session}.sock"))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ownership_is_exclusive_and_released_with_owner() {
+        let directory = tempfile::tempdir().unwrap();
+        let session = ConversationId::generate();
+        let first = acquire(directory.path(), session).unwrap();
+        assert!(acquire(directory.path(), session).is_err());
+        let other = acquire(directory.path(), ConversationId::generate()).unwrap();
+        drop(first);
+        assert!(acquire(directory.path(), session).is_ok());
+        drop(other);
+    }
+}
