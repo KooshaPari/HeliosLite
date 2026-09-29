@@ -137,7 +137,7 @@ pub(super) async fn run<A: API + 'static>(
                             Err(error) => { let _ = reply.send(Err(error.into())); continue; }
                         };
                         if let Some((original, turn)) = accepted.get(&command) {
-                            let result = if *original == encoded { Ok(*turn) } else { Err(anyhow::anyhow!("command_id_conflict")) };
+                            let result = if *original == encoded { journal.lock().unwrap().retry_turn(*turn) } else { Err(anyhow::anyhow!("command_id_conflict")) };
                             let _ = reply.send(result);
                         } else if queue.len() >= 64 || accepted.len() >= 4096 {
                             let _ = reply.send(Err(anyhow::anyhow!("session_queue_or_idempotency_capacity")));

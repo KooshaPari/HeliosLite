@@ -119,6 +119,19 @@ impl Journal {
             self.events.pop_front();
         }
     }
+    pub fn retry_turn(&self, turn: Uuid) -> anyhow::Result<Uuid> {
+        anyhow::ensure!(
+            self.active_turn == Some(turn)
+                || self.queued_turns.contains(&turn)
+                || self.events.iter().any(|event| {
+                    event.turn_id == Some(turn)
+                        && matches!(event.payload, Payload::TurnFinished { .. })
+                }),
+            "command_result_expired"
+        );
+        Ok(turn)
+    }
+
     pub fn snapshot(&self, after: Option<u64>, pending: Vec<InteractionRequest>) -> Snapshot {
         let cursor = after.unwrap_or(0);
         let resync_required = cursor > self.sequence
@@ -162,5 +175,30 @@ mod tests {
         let replay = journal.snapshot(Some(REPLAY_LIMIT as u64), vec![]);
         assert_eq!(replay.events.len(), 1);
         assert_eq!(replay.events[0].sequence, REPLAY_LIMIT as u64 + 1);
+    }
+
+    #[test]
+    fn completed_retry_expires_after_terminal_replay_eviction() {
+        let mut journal = Journal::new(ConversationId::generate(), Uuid::new_v4());
+        let turn = Uuid::new_v4();
+        journal.queued_turns.push(turn);
+        assert_eq!(journal.retry_turn(turn).unwrap(), turn);
+        journal.queued_turns.clear();
+        journal.active_turn = Some(turn);
+        assert_eq!(journal.retry_turn(turn).unwrap(), turn);
+        journal.publish(
+            Some(turn),
+            Payload::TurnFinished { status: "completed".into(), error: None },
+        );
+        journal.active_turn = None;
+        assert_eq!(journal.retry_turn(turn).unwrap(), turn);
+        for _ in 0..REPLAY_LIMIT {
+            journal.publish(None, Payload::InteractionsChanged);
+        }
+        assert!(journal.snapshot(None, vec![]).resync_required);
+        assert_eq!(
+            journal.retry_turn(turn).unwrap_err().to_string(),
+            "command_result_expired"
+        );
     }
 }

@@ -327,3 +327,40 @@ its blanket indexing rule includes JSON object reads/writes. Converted ACP JSON
 reads to get with the same Null fallback semantics, metadata insertion to a
 checked object map, and live runtime map access to a checked owner lookup.
 Formatted, whitespace checked; no protocol or callback behavior change intended.
+
+### Independent review: completed retry after replay eviction
+
+The accepted-command map (4096 commands) outlives the event journal (2048 events).
+A fresh ACP attachment could retry an accepted completed command whose terminal
+event had been evicted and wait forever. Reproduced against the exact prior
+qualified macOS executable SHA256
+5add631add7d1134e3af8bd09cd58d6240f098356c0e72e6c546a6d57d3f47ef:
+an isolated real TUI completed a command, a localhost synthetic provider emitted
+2100 text chunks, the terminal event was absent after reconnect, and the original
+command retry failed the bounded 10-second response deadline. Local reproduction
+receipt is /tmp/forge-replay-red.log; the new fixture has a positive error oracle.
+
+Fix: accepted command retries outside active/queued/retained-terminal state now
+return `command_result_expired`. They never execute the old operation again.
+Retained command identity conflicts still fail before replay checks. A Journal
+regression covers queued, active, terminal-retained and terminal-evicted cases;
+`live_replay.py` covers actual fresh ACP attachment, explicit expiry and unchanged
+journal sequence (no reexecution). Hosted exact source/artifact gates follow.
+
+### CI failure reconciliation and fixture handoff
+
+Current platform snapshot failure was NOT the earlier Windows bash test:
+macOS job109577864311 checked synthetic merge4590b5d onto main536a25cac, which
+removed stable toolchain inputs in ci.yml before the generator correction.
+Forward-merged existing main corrections e5e7f6473/d1a84bdf7, preserving the other
+main changes. This updates generator and snapshot together. macOS artifact gate
+now also runs the exact generator regression; qualification workflows use1.98
+matching rust-toolchain.toml. No local Cargo compilation.
+
+`live_fixture.py` starts a private localhost provider and real TUI actor, writes
+canonical root/session/runtime/environment to fixture.json, and holds original
+question/permission operations for HarnessDesk. Seed-only headless startup did
+not initialize the synthetic provider catalog, so the fixture uses the proven
+TUI initialization path. Process-scoped PTY bytes only, no screenshots. This
+fixture successfully drove the old binary during the red reproduction and was
+handed to HarnessDesk; bridge integration remains independently reported.

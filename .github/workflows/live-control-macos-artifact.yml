@@ -21,6 +21,8 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.98"
       - uses: arduino/setup-protoc@v3
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
@@ -28,6 +30,10 @@ jobs:
         with:
           cache-bin: false
           cache-on-failure: true
+      - name: Verify replay expiry and CI generator regressions
+        run: |
+          cargo test --locked -p forge_main --lib live_control::protocol::tests::completed_retry_expires_after_terminal_replay_eviction
+          cargo test --locked -p forge_ci generated_ci_matches_workflow_snapshot
       - name: Build exact source binary
         run: cargo build --locked -p forge_main --bin helioslite
       - name: Qualify exact artifact bytes

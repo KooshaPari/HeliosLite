@@ -144,6 +144,9 @@ tools_supported = true
         from live_acp import qualify_acp
 
         qualify_acp(ipc, runtime, session, root, binary, env)
+        from live_replay import qualify_replay
+
+        qualify_replay(ipc, runtime, session, root, binary, env, command, turn)
         from live_shutdown import qualify_shutdown
 
         qualify_shutdown(ipc, runtime, session, root, binary, process, master, env)

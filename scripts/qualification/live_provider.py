@@ -122,6 +122,8 @@ class Provider(http.server.BaseHTTPRequestHandler):
                 ),
                 ({}, "tool_calls"),
             ]
+        if "SYNTHETIC_REPLAY_FLOOD" in user:
+            chunks = [({"content": "x"}, None) for _ in range(2100)] + [({}, "stop")]
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")
         self.end_headers()
