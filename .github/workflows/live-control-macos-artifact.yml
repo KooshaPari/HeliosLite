@@ -1,5 +1,8 @@
 name: Live control macOS artifact
 on:
+  pull_request:
+    paths:
+      - '.github/workflows/live-control-macos-artifact.yml'
   workflow_dispatch:
 permissions:
   contents: read
@@ -16,7 +19,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.sha }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: dtolnay/rust-toolchain@stable
       - uses: arduino/setup-protoc@v3
         with:
@@ -42,7 +45,7 @@ jobs:
           shasum -a 256 helioslite > SHA256SUMS
       - uses: actions/upload-artifact@v4
         with:
-          name: helioslite-macos-${{ github.sha }}
+          name: helioslite-macos-${{ github.event.pull_request.head.sha || github.sha }}
           path: qualified/
           if-no-files-found: error
           retention-days: 14
