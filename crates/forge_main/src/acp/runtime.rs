@@ -126,7 +126,9 @@ pub async fn host(session: ConversationId, cwd: PathBuf, create: bool) -> anyhow
             );
         }
     }
-    let _runtime = LiveControl::with_lease(api, session, directory, ownership)?;
-    tokio::signal::ctrl_c().await?;
+    let runtime = LiveControl::with_lease(api, session, directory, ownership)?;
+    let interrupted = tokio::signal::ctrl_c().await;
+    runtime.shutdown().await?;
+    interrupted?;
     Ok(())
 }

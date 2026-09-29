@@ -212,11 +212,16 @@ async fn run_turn<A: API>(
     output: Option<std::sync::mpsc::SyncSender<String>>,
 ) {
     let cancellation = context.cancel.clone();
+    let mut setup_cancellation = cancellation.clone();
     let broker = context.broker.clone();
     let mut buffer = String::new();
     let result = INTERACTION_CONTEXT
         .scope(context, async {
-            let mut stream = api.chat(turn.request).await?;
+            anyhow::ensure!(!*setup_cancellation.borrow(), "turn cancelled");
+            let mut stream = tokio::select! {
+                result = api.chat(turn.request) => result?,
+                _ = setup_cancellation.changed() => anyhow::bail!("turn cancelled"),
+            };
             while let Some(response) = stream.next().await {
                 let response = response?;
                 if turn.observer.is_none() {

@@ -140,6 +140,9 @@ tools_supported = true
         from live_permissions import qualify_permissions
 
         qualify_permissions(ipc, runtime, root)
+        from live_shutdown import qualify_shutdown
+
+        qualify_shutdown(ipc, runtime, session, root, binary, process, master, env)
         print(
             json.dumps(
                 {

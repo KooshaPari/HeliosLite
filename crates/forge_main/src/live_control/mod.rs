@@ -28,6 +28,15 @@ impl LiveControl {
         Self::with_lease(api, session, directory, lease)
     }
 
+    /// Cancels active work and waits for its final persistence before releasing ownership.
+    pub async fn shutdown(mut self) -> anyhow::Result<()> {
+        #[cfg(unix)]
+        self.listener.abort();
+        self.handle.shutdown();
+        (&mut self.task).await?;
+        Ok(())
+    }
+
     pub(crate) fn with_lease<A: API + 'static>(
         api: Arc<A>,
         session: ConversationId,
@@ -65,8 +74,48 @@ impl Drop for LiveControl {
         #[cfg(unix)]
         self.listener.abort();
         self.handle.shutdown();
-        // The owned task receives shutdown and persists the cancelled turn before
-        // releasing its lease. It is not aborted in the middle of a store write.
-        let _ = &self.task;
+        // Explicit shutdown is awaited at the host and UI entrypoints. Drop is
+        // best effort for exceptional paths while the executor is still alive.
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Mutex;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::time::Duration;
+    use uuid::Uuid;
+
+    #[tokio::test]
+    async fn shutdown_waits_for_owner_completion() {
+        let session = ConversationId::generate();
+        let runtime = Uuid::new_v4();
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let persisted = Arc::new(AtomicBool::new(false));
+        let completion = persisted.clone();
+        let task = tokio::spawn(async move {
+            assert!(matches!(rx.recv().await, Some(actor::Control::Shutdown)));
+            tokio::task::yield_now().await;
+            completion.store(true, Ordering::Release);
+        });
+        let owner = LiveControl {
+            handle: Handle {
+                session_id: session,
+                runtime_id: runtime,
+                broker: forge_domain::InteractionBroker::new(
+                    session,
+                    runtime,
+                    Duration::from_secs(5),
+                ),
+                tx,
+                output: Arc::new(Mutex::new(None)),
+            },
+            task,
+            #[cfg(unix)]
+            listener: tokio::spawn(std::future::pending()),
+        };
+        owner.shutdown().await.unwrap();
+        assert!(persisted.load(Ordering::Acquire));
     }
 }

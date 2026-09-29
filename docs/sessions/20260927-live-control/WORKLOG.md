@@ -218,3 +218,18 @@ Duplicate responses must fail. Followup qualification also checks a new external
 controller recovers and answers the original pending request after lease handoff.
 Build cache retention on failure is enabled for this dedicated free workflow,
 with cargo-bin caching disabled; failed tests still fail the job.
+
+## Graceful lifetime finalization
+
+Source review found Drop-only shutdown could return from tokio main before the
+actor completed its final save. Added awaited LiveControl shutdown at both UI
+and detached-host entrypoints, plus cancellation during pre-stream setup. The
+owner completion unit test requires the shutdown task to finish before return.
+An isolated runtime witness exits the TUI while a question is pending, then
+acquires a new owner and verifies the same persisted session/prompt is available.
+No existing user process is involved.
+
+At 0cfe4d1f0, PR head was confirmed current but no source Actions runs had been
+created automatically (release-drafter/bot checks only). Explicit standard free
+workflow dispatch is used for the final grouped revision; no paid runner or
+required gate bypass is involved.

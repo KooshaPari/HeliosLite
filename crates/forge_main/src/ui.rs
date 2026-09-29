@@ -607,7 +607,13 @@ impl<A: API + ConsoleWriter + 'static, F: Fn(ForgeConfig) -> A + Send + Sync> UI
     }
 
     pub async fn run(&mut self) {
-        match self.run_inner().await {
+        let result = self.run_inner().await;
+        for (_, runtime) in self.live_sessions.drain() {
+            if let Err(error) = runtime.shutdown().await {
+                tracing::error!(error = ?error, "live session shutdown failed");
+            }
+        }
+        match result {
             Ok(_) => {}
             Err(error) => {
                 // Check if this is a cursor position error (non-fatal)
