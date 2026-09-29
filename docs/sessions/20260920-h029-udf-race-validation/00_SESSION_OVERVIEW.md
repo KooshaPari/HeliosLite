@@ -358,6 +358,29 @@ concluded-and-green schedule runs, closing the acceptance gate. Still
 external: distribution re-dispatch approval (`hook-d6499f54`) — no
 update-distribution run since 09-20. P5 remains the open product call.
 
+## 2026-09-29: macOS CI flake on c503badf6 + forward-fix (mcp_watcher)
+
+While the acceptance record pushed, `Test (macos-latest)` on the
+docs-only `c503badf6` FAILED at 14:17:06Z: two `mcp_watcher` panics
+(`watcher_fires_reload_on_modify` :451, `watcher_debounces_burst_into_one_reload`
+:483), 117 passed / 2 failed. Proven a flake: byte-identical test code
+was green on `6dba1f674` (prior day) and `b0485410b` (14:27Z, 7 min
+after the failure); the diff between shas was +17 doc lines only; both
+tests panicked in the same instant → runner-wide fs-event delivery
+stall vs the tests' fixed 400/700ms settle sleeps. (The check later
+flipped to `cancelled` via re-run/concurrency; attempt-1 job log
+preserved the evidence.)
+
+Forward-fix: bounded 5s polling in both tests (fires-reload also
+re-writes until observed, covering slow attach), debounce assertion
+widened to `1..=3` for stall-split batches (a genuinely broken
+debouncer still fails at ~5), and the test module extracted to
+`mcp_watcher/tests.rs` — file 554 → 319 lines (554 was over the 500
+hard limit). Local observed: 13/13 mcp_watcher, 119/119 forge_lsp +
+both LSP e2e binaries, fmt + clippy green. Push sequenced after
+`72ff2cab8`'s benchmark jobs (workflow concurrency cancels in-flight
+runs on new pushes — the same mechanism that muddied this failure).
+
 ---
 
 ## 2026-09-29T14:19Z — Nightly acceptance EVIDENCED (todo #7 closed); sync validation resumed
