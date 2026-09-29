@@ -1,0 +1,48 @@
+name: Live control macOS artifact
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: live-control-macos-artifact-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  artifact:
+    runs-on: macos-latest
+    timeout-minutes: 60
+    env:
+      RUSTFLAGS: -Dwarnings
+      TMPDIR: /tmp
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-bin: false
+          cache-on-failure: true
+      - name: Build exact source binary
+        run: cargo build --locked -p forge_main --bin helioslite
+      - name: Qualify exact artifact bytes
+        run: |
+          mkdir -p qualified
+          cp target/debug/helioslite qualified/helioslite
+          strip -x qualified/helioslite
+          python3 scripts/qualification/live_control.py "$PWD/qualified/helioslite" | tee qualified/qualification.log
+      - name: Record artifact provenance
+        run: |
+          git rev-parse HEAD > qualified/source-sha.txt
+          rustc -vV > qualified/toolchain.txt
+          uname -sm > qualified/platform.txt
+          cd qualified
+          shasum -a 256 helioslite > SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: helioslite-macos-${{ github.sha }}
+          path: qualified/
+          if-no-files-found: error
+          retention-days: 14
