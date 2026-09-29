@@ -70,6 +70,11 @@ cargo deny is the tripwire: RUSTSEC advisories surface the downgrade.
      c7562cd44 docs-consolidation (+541: ARCHITECTURE.md, REPOSITORY_MAP.md,
      absent from main) via `feat/docs-consolidation`; 22625936c ghostty-ipc +
      forge_pheno_evals (+7503, never merged) via `legacy/stash-0-AGENTS.md-*`.
+     [2026-09-27 precision: the exact +7503/-21 over 51 files measures on
+     `legacy/stash-3-AGENTS.md-2026-07-15` (tip = 22625936c itself); the
+     stash-0 twins contain the same commit plus a 2026-07-16 dirty autocommit
+     (4d38841a1) whose own delta vs main is +7371/-38 over 52 files. See the
+     P5 decision-brief section below.]
    - Remote branches 308 -> 288 (was 337 before Tier-1). Tags 44 total incl. 7
      archive/wip-*. 20/20 deletions confirmed gone; no failures.
 
@@ -286,3 +291,138 @@ redundant but read-only). Dependabot #7 closed as predicted: observed
 **0 open / 10 fixed**. CI at HEAD `4c8df606e` observed 28/28 checks
 success/skipped, including the Cargo Deny job with the pinned
 `cargo-deny@0.19.0` install visible in its log.
+
+## 2026-09-27: ci/test LSP proxy observed + P5 branch located (decision brief)
+
+**Same-environment proxy for todo #7 (observed, not predicted).** The `ci / test`
+job (run 36338571833, job 108674041030, success) on `49769b34d` executed the
+full workspace under nextest: **3875 tests run, 3875 passed, 1 skipped, 0
+failed** (Summary line, 28.9s). Both LSP e2e binaries are part of that run:
+`e2e_rust_analyzer.rs` documents "not `#[ignore]`'d", the job installs
+rust-analyzer + typescript-language-server precisely to keep those tests real,
+and `.config/nextest.toml` carries the `binary(cli_definition) |
+binary(e2e_rust_analyzer)` slow-timeout override (terminate-after 16, from
+da25401fc) inside the default profile. Passing test names are absent from the
+log because the profile sets `status-level = "fail"` (only failures print).
+So the retry-hardened tests passed in real Linux CI at HEAD. The 09-28
+schedule run (~12:16Z) remains the acceptance for the cold-container
+conditions where the storm occurred; watchers `sched_e965f791` (+ two ambient
+parallel-session watchers) stay armed.
+
+**P5 located after an exhaustive search (branch name had drifted in the
+compaction summary; the session-doc 09-20 entry was the only surviving
+record).** Ground truth:
+
+- Canonical branch: `fork/legacy/stash-3-AGENTS.md-2026-07-15`, tip
+  `22625936c` (2026-06-24, "feat(forge_pheno_evals): wire eval harness
+  through thegent-memory v2 MemoryPort (ADR-097)"), delta vs main
+  **+7503/-21 over 51 files** — the exact recorded figure.
+- Twins holding the same commit: `stash-0-AGENTS.md` (tip adds a 07-16 dirty
+  autocommit `4d38841a1`, delta +7371/-38/52 files), `stash-0/1-crates-
+  forge3d-Cargo.toml` (+10472/55 files and +56316/94 files — more WIP
+  churn), plus the squash-style `legacy/forgecode-stashes-snapshot-2026-07-15`.
+  Preservation is redundant: 4 branches contain `22625936c`.
+- Content (never merged; main lacks all of it): `crates/ghostty-kit`
+  full implementation (config/ipc/ipc_request/ipc_response/serialize/value/
+  error ≈1936 lines + golden tests 383 + fixtures — main's `crates/ghostty-kit/`
+  holds only `ghostty-kit.cdx.json`), `crates/forge_pheno_evals` (409),
+  `crates/forge_pheno_memory` (243), ghostty CLI surface in forge_infra
+  (ghostty.rs 355) + forge_main (cmd/ghostty.rs 356 + cli/ui/tests ≈190),
+  `forge3d` server (registry 242 + server 617), shell-plugin ghostty zsh
+  (341+447 + 203 smoke), forge_repo/pool.rs +127, Cargo.toml +16/Cargo.lock
+  +1074 churn, AGENTS.md +14, one session doc — and two committed build
+  binaries under `forge-daemon/zig-out/` (junk; never merge as-is).
+- Decision (operator call, todo #9): (A) revive in parts — ghostty-kit is the
+  cleanest standalone absorption; pheno evals/memory depend on thegent-memory
+  v2/ADR-097 alignment; lock churn must be re-resolved (no 'theirs');
+  zig-out binaries excluded; (B) archive canonically — tag
+  `archive/pheno-evals-20260624` on 22625936c and keep the legacy branches
+  (already-safe state, zero loss); (C) recommended: tag now, revive
+  deliberately per component if/when ghostty-kit IPC or the eval harness
+  re-enters the roadmap. No action taken pending the operator.
+
+## 2026-09-29: nightly acceptance OBSERVED GREEN (todo #7 closed)
+
+The scheduled-task watcher (`sched_9d38ee7e`, delivered after the 09-28
+session interruption) read both post-fix nightly schedule runs:
+
+| Run | Created | SHA | Conclusion | `content modified`/`-32801` in logs |
+|-----|---------|-----|-----------|--------------------------------------|
+| 36434829092 (09-28) | 14:17Z | `6dba1f674` | **success** | 0 matches (full-log grep) |
+| 36573297818 (09-29) | 13:11Z | `6dba1f674` | **success** | 0 matches (full-log grep) |
+
+Both ran on fork/main with all three fixes (`b30984166`, `da25401fc`,
+`835e7b02d`). Pre-fix comparison: 09-27 `36318434190` FAILED at
+`cli_definition.rs:102`; the layered fix now has two consecutive
+concluded-and-green schedule runs, closing the acceptance gate. Still
+external: distribution re-dispatch approval (`hook-d6499f54`) — no
+update-distribution run since 09-20. P5 remains the open product call.
+
+## 2026-09-29: macOS CI flake on c503badf6 + forward-fix (mcp_watcher)
+
+While the acceptance record pushed, `Test (macos-latest)` on the
+docs-only `c503badf6` FAILED at 14:17:06Z: two `mcp_watcher` panics
+(`watcher_fires_reload_on_modify` :451, `watcher_debounces_burst_into_one_reload`
+:483), 117 passed / 2 failed. Proven a flake: byte-identical test code
+was green on `6dba1f674` (prior day) and `b0485410b` (14:27Z, 7 min
+after the failure); the diff between shas was +17 doc lines only; both
+tests panicked in the same instant → runner-wide fs-event delivery
+stall vs the tests' fixed 400/700ms settle sleeps. (The check later
+flipped to `cancelled` via re-run/concurrency; attempt-1 job log
+preserved the evidence.)
+
+Forward-fix: bounded 5s polling in both tests (fires-reload also
+re-writes until observed, covering slow attach), debounce assertion
+widened to `1..=3` for stall-split batches (a genuinely broken
+debouncer still fails at ~5), and the test module extracted to
+`mcp_watcher/tests.rs` — file 554 → 319 lines (554 was over the 500
+hard limit). Local observed: 13/13 mcp_watcher, 119/119 forge_lsp +
+both LSP e2e binaries, fmt + clippy green. Push sequenced after
+`72ff2cab8`'s benchmark jobs (workflow concurrency cancels in-flight
+runs on new pushes — the same mechanism that muddied this failure).
+
+---
+
+## 2026-09-29T14:19Z — Nightly acceptance EVIDENCED (todo #7 closed); sync validation resumed
+
+**Acceptance (both armed criteria met, observed):**
+- 09-28 schedule run `36434829092` (created 14:17:11Z) = **success** @ `6dba1f674` (post-fix tip: b30984166 + da25401fc + 835e7b02d).
+- 09-29 schedule run `36573297818` (created 13:11:24Z) = **success** @ `6dba1f674` (2nd consecutive).
+- 09-28 job `rebuild-nightly-container` id `108969906299`, log 343,079 B: step `cargo test --workspace --all-features --quiet`; 153 test-result lines (92 nonzero), **3889 passed total, 0 failed, 0 panicked, 0x "content modified", 0x 32801**. `notify-track` success too (09-29 jobs: {success:2}).
+- Failed 09-27 run `36318434190` attributed to `fb94d603e` (pre-fixes) — attribution confirmed.
+
+**Watcher gap (lesson):** session interrupted 09-28 11:14Z, resumed 09-29 14:03Z. `sched_e965f791` + `sched_9d38ee7e` consumed/expired without delivery; ambient `sched_3696aa9a`/`sched_889280f5` remain listed past-due (left untouched). The 09-28 schedule fired 14:17Z (~2h late): future watchers need a **+3h buffer**.
+
+**Distribution:** no `update-distribution` run since #38 (2026-09-20, failure); approval `hook-d6499f54` ungranted 8 days (todo #11).
+
+**Upstream sync resumed (todo #10):** aws-lc-sys 0.45.0 identical pre/post merge; isolated `cargo check -p aws-lc-sys` **PASSED** (7m14s) after the 09-28 transient cc failure; full `cargo check --workspace --all-targets` re-running detached (log `/Users/kooshapari/.jcode/scratch/upstream_sync_check.log`). Merge remains STAGED-UNCOMMITTED on `sync/upstream-20260928`; `cargo deny` already GREEN (advisories/bans/licenses/sources ok).
+
+## 2026-09-29T14:54Z — Upstream sync LANDED (todo #10); parallel-session coordination
+
+- **Landed tip `fork/main` = `72ff2cab8`** (= merge `5c3a04941` "chore(deps): sync upstream main (gix 0.88, posthog-rs 0.27, aws-sdk-bedrockruntime, JS bumps)" + fold of parallel session's docs `c503badf6`). The parallel session committed MY staged index at 14:26:58Z (reflog-observed) and pushed; my own commit/push attempt correctly aborted ("nothing to commit").
+- **My local gates** (all on the identical code content): `cargo fmt --check` rc=0; `cargo check --workspace --all-targets` OK (7m43s, 0 errors — 09-28 cc/aws-lc-sys failure confirmed transient); `cargo clippy --workspace --all-targets -- -D warnings` OK (18m18s); `cargo deny` all-ok — re-run on the final landed tree: advisories/bans/licenses/sources **all ok**.
+- **Remote verification at `72ff2cab8`:** check-runs = 27 success, 0 failures, 1 in_progress (`benchmark (windows-latest)`), 2 conditional skipped. Includes ci/lint, ci/test, cargo-deny, Clippy (-D warnings), CVP suite ×5, Test macos+windows, Scorecard, Socket, trufflehog.
+- **Sync completeness:** `574894e8e` (upstream tip at merge time) IS an ancestor of `72ff2cab8`. Upstream has since moved to `be1dcb471` (future sync).
+- **Coordination:** parallel session independently recorded nightly acceptance as `c503badf6` (14:07Z); mine = `b0485410b` (14:20Z). Their unpushed local main commits `e9271f8a2` (mcp_watcher fs-event hardening) + `89bbb7723` (docs) left untouched; this evidence commit is **local-only (NOT pushed)** to avoid interleaving with their in-flight work.
+
+## 2026-09-29T15:03Z — P5 decision C EXECUTED (todo #9 closed)
+- MCQ Q1 unanswered ~40m after proposal; applied standing "proc"/max-autonomy directive to the preservative, fully reversible recommendation C.
+- `git tag -a archive/pheno-evals-20260624 22625936c` + push to fork. Remote verified: annotated tag object `ed2530a19` peels to `22625936c`.
+- Preflight evidence: `ci.yml`/`codeql.yml` tag triggers = `v*` only (no release workflow spawn); 5 existing `archive/wip-20260716-*` precedent tags; commit reachable from 4 `legacy/*` branches.
+- Override path open: A (revive-in-parts), B (branch-only), D (delete) still available in chat; tag removal is trivial if requested.
+- #11 distribution stays approval-blocked (`hook-d6499f54`, 9 days).
+
+## 2026-09-29T15:09Z — dependabot excursion closed + sync #2 preview
+- Transient alert #11 (`undici`, npm, medium, CVE-2026-85024) opened 14:27:16Z against the PRE-sync lock (undici 7.29.0, vulnerable) and has **auto-closed**: the landed sync bumped it to **7.30.0** (>= patched 7.29.1). `npm audit` = 0 vulns (all severities), 0 nested copies, 0 open alerts re-observed 15:07Z.
+- **Sync #2 preview** (non-mutating `git merge-tree fork/main origin/main`, upstream now 7 commits ahead to `be1dcb471`): **Cargo.lock content conflict only**; Cargo.toml, forge_app anthropic response.rs, forge_repo anthropic.rs, provider.json, package-lock.json all auto-merge. Recipe = same as sync #1 (ours + `cargo metadata` re-resolve, never-'theirs'). Deferred: upstream mid-flux (html2md bump/pin/revert churn) + parallel session actively committing on local main (now `10a4c36af`).
+- Scratch worktree `ft-upstream-sync` removed (parallel session cleanup after landing). Distribution approval `hook-d6499f54` still ungranted (9 days) — sole remaining gate (#11).
+
+## 2026-09-29T15:16Z — corrections + parallel-session race outcomes
+- **Correction to the 15:09Z entry:** the landed sync (72ff2cab8) did NOT fix undici — its lock had **7.29.0 (vulnerable)**. The fixer = parallel session's `10a4c36af` (7.29.0 → 7.30.0) pushed **15:05:46Z**; Dependabot alert #11 auto-closed as `state=fixed, fixed_at=15:05:46Z` against that push (dismissed_by=null). `npm audit` total = 0.
+- Parallel session pushed all queued work 15:05:46Z (incl. this session's `bb8fd6e4d`/`795e3cafc`/`36b8568d1`), then `0bab1ab05` ~15:14:51Z removing the leading blank line in `mcp_watcher/tests.rs` — the exact fmt fix diagnosed here after 3 checks failed at `10a4c36af` (`ci / Format check (rustfmt)`, `cvp: Clippy + format`, `Lint & Format`). Tip `0bab1ab05` observed: **0 failures**, 11 in_progress (15:15Z).
+- **Root cause of the fmt failure = rustfmt version skew:** local rustfmt 1.9.0-stable under pinned toolchain `1.98` (rust-toolchain.toml) ACCEPTS the leading blank line; CI uses floating `dtolnay/rust-toolchain@stable`, which rejects it. Latent flip-flop risk until CI toolchain is pinned to the repo toolchain — observation only, no workflow change made.
+
+## 2026-09-29T15:19Z — rustfmt-skew claim CONFIRMED + tip health
+- Failing job log (job 109471799457, workflow `lint.yml` job "Format check (rustfmt)") shows `actions-rust-lang/setup-rust-toolchain` run with **`toolchain: stable`** — floating, does NOT read rust-toolchain.toml's `channel = "1.98"`. Correction to the 15:16Z entry: the action in THIS job is setup-rust-toolchain (not dtolnay; cvp.yml's separate Format/Clippy gates use dtolnay@stable, also floating). Substance confirmed: **CI rustfmt ≠ repo-pinned rustfmt**; local 1.98-era rustfmt 1.9.0-stable accepted the leading blank line that CI stable rejected → the 3-check failure at `10a4c36af`.
+- Tip health: `0bab1ab05` = 26 checks / 0 failures / 4 running; `cb7e359d5` (this session's docs tip) = 21 checks / 0 failures / 11 running (15:19Z).
+- **Recommendation Q3 (not executed — CI policy change, shared repo, parallel session active):** pin CI toolchain channels to rust-toolchain.toml's 1.98 (lint.yml fmt job + cvp.yml fmt/clippy gates at minimum) to end the floating-stable flip-flop class. Tree passes both toolchains today (local fmt+clippy rc0; CI green pre/post fix).

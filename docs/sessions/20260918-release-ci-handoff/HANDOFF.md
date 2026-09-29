@@ -647,3 +647,42 @@ of 10, all `fixed`** (observed 2026-09-27T17:50Z); HEAD `4c8df606e` CI observed
 28/28 checks green including the pinned `cargo-deny@0.19.0` job. Distribution
 re-dispatch (`hook-d6499f54…`) and windows rerun remain unapproved — windows
 moot (three later green runs), distribution has no run since 09-20.
+
+### 2026-09-28 addendum (nightly pre-flight + P5 decision request)
+
+**Nightly acceptance pre-flight (observed 09-27 21:10Z):** workflow
+`helios-lite-nightly` is `state=active` with `schedule: cron "30 6 * * *"` and
+NO explicit checkout ref, so schedule runs execute default-branch HEAD
+(fork/main) — the 09-28 run therefore includes all three fixes
+(`b30984166`, `da25401fc`, `835e7b02d`). Schedule runs are created daily
+11:38–12:16Z (5-day observed pattern). Watchers: `sched_e965f791`,
+`sched_3696aa9a`, `sched_889280f5` (09-28 12:50Z) plus backup
+`sched_9d38ee7e` (13:45Z, guaranteed post-completion read). CI proxy already
+observed: `ci / test` full-workspace nextest **3875/3875 passed** at
+`49769b34d` including both LSP e2e binaries; docs commit `c846dea3e`
+observed 29/29 green.
+
+**P5 — the one remaining product call, awaiting operator:** branch
+`fork/legacy/stash-3-AGENTS.md-2026-07-15` (tip `22625936c`, 2026-06-24,
+**+7503 over 51 files**, never merged; the commit is preserved redundantly
+on 4 legacy branches) holds: the full `ghostty-kit` implementation (~1936
+lines + golden tests — main's `crates/ghostty-kit/` has only
+`ghostty-kit.cdx.json`), `forge_pheno_evals` (409 lines), `forge_pheno_memory`
+(243), a `forge ghostty` CLI surface, a forge3d server (~859), the ghostty
+zsh plugin (~1000 + smokes), and 2 committed build binaries (exclude —
+never merge as-is). Options: **A** revive in parts now (ghostty-kit is the
+cleanest absorption; pheno evals/memory depend on thegent-memory v2
+ADR-097 alignment; Cargo.lock churn must be re-resolved, no 'theirs');
+**B** archive as-is via the existing legacy branches (no new tag);
+**C (recommended)** tag `archive/pheno-evals-20260624` now as a canonical
+bookmark and revive deliberately per component if/when it re-enters the
+roadmap. Full decision brief:
+`docs/sessions/20260920-h029-udf-race-validation/00_SESSION_OVERVIEW.md`
+(2026-09-27 section). A structured decision popup was attempted twice but
+the channel is unavailable — reply in chat when ready; nothing has been
+tagged, merged, or deleted.
+
+### 2026-09-29T15:03Z status deltas (jcode)
+- **P5 decided: C executed** — annotated tag `archive/pheno-evals-20260624` (→ `22625936c`) pushed to fork; preflight confirmed non-`v*` tags trigger no workflow; operator override (A/B/D) still possible in chat.
+- **Upstream sync LANDED** — `fork/main` = `72ff2cab8` (16-commit sync to `574894e8e`); check-runs at tip = 0 failures; local fmt/check/clippy/deny green incl. final-tree deny re-run. Post-sync nightly backstop scheduled 2026-09-30 15:00Z.
+- **Distribution re-dispatch (`hook-d6499f54`)**: still ungranted (9 days); dispatch on approval only — recommended against current landed main.

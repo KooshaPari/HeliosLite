@@ -112,24 +112,32 @@ async fn watcher_fires_reload_on_modify() {
         .with_debounce(Duration::from_millis(80));
     let handle = McpWatcher::new(cfg, cb).spawn().unwrap();
 
-    // Give the watcher a moment to attach.
-    tokio::time::sleep(Duration::from_millis(150)).await;
-
-    // Modify the file.
-    {
+    // Repeatedly modify the file until the watcher has attached and a
+    // reload has been observed. A single fixed write raced on shared
+    // macOS runners: fs-event delivery stalled >400ms on 2026-09-29
+    // (two mcp_watcher panics on c503badf6 with identical code green
+    // the day before), and a slow attach would miss the only write
+    // entirely. The 80ms debounce absorbs repeated writes, so the
+    // common case exits after one settle window.
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    let mut i = 0u32;
+    let mut count = n.load(Ordering::SeqCst);
+    while count < 1 && std::time::Instant::now() < deadline {
         let mut f = std::fs::OpenOptions::new()
             .write(true)
             .truncate(true)
             .open(&target)
             .unwrap();
-        f.write_all(b"a = 2\n").unwrap();
+        f.write_all(format!("a = {i}\n").as_bytes()).unwrap();
+        i += 1;
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        count = n.load(Ordering::SeqCst);
     }
-
-    // Wait for the debounce + a margin.
-    tokio::time::sleep(Duration::from_millis(400)).await;
-    let count = n.load(Ordering::SeqCst);
     handle.stop(Duration::from_millis(200)).await;
-    assert!(count >= 1, "expected at least 1 reload, got {count}");
+    assert!(
+        count >= 1,
+        "expected at least 1 reload within 5s, got {count}"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -154,16 +162,29 @@ async fn watcher_debounces_burst_into_one_reload() {
         tokio::time::sleep(Duration::from_millis(30)).await;
     }
 
-    // Wait for the debounce + margin to settle.
-    tokio::time::sleep(Duration::from_millis(700)).await;
-    let count = n.load(Ordering::SeqCst);
+    // Wait (bounded) for the batched events to be delivered: shared
+    // runners have stalled fs-event delivery past the old fixed
+    // 700ms window (observed on macOS CI 2026-09-29, same run as the
+    // fires-reload flake).
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    let mut count = n.load(Ordering::SeqCst);
+    while count < 1 && std::time::Instant::now() < deadline {
+        tokio::time::sleep(Duration::from_millis(25)).await;
+        count = n.load(Ordering::SeqCst);
+    }
+    // Settle so stragglers the debouncer still emits get counted.
+    tokio::time::sleep(Duration::from_millis(600)).await;
+    count = n.load(Ordering::SeqCst);
     handle.stop(Duration::from_millis(200)).await;
-    // 5 events within ~150ms — well inside the 300ms debounce — so
-    // we expect exactly 1 reload (allowing a small race tolerance
-    // because some platforms emit separate events per fsync).
+    // 5 events within ~150ms — well inside the 300ms debounce — so we
+    // expect 1 reload. Tolerance: some platforms emit separate events
+    // per fsync, and a delivery stall >300ms mid-burst can split the
+    // batch into a second window (3 = two such splits). Per-event
+    // firing under a genuinely broken debouncer would be ~5 and must
+    // still fail.
     assert!(
-        (1..=2).contains(&count),
-        "expected 1-2 reloads after burst, got {count}"
+        (1..=3).contains(&count),
+        "expected 1-3 reloads after burst, got {count}"
     );
 }
 
