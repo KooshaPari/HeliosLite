@@ -396,3 +396,11 @@ runs on new pushes — the same mechanism that muddied this failure).
 **Distribution:** no `update-distribution` run since #38 (2026-09-20, failure); approval `hook-d6499f54` ungranted 8 days (todo #11).
 
 **Upstream sync resumed (todo #10):** aws-lc-sys 0.45.0 identical pre/post merge; isolated `cargo check -p aws-lc-sys` **PASSED** (7m14s) after the 09-28 transient cc failure; full `cargo check --workspace --all-targets` re-running detached (log `/Users/kooshapari/.jcode/scratch/upstream_sync_check.log`). Merge remains STAGED-UNCOMMITTED on `sync/upstream-20260928`; `cargo deny` already GREEN (advisories/bans/licenses/sources ok).
+
+## 2026-09-29T14:54Z — Upstream sync LANDED (todo #10); parallel-session coordination
+
+- **Landed tip `fork/main` = `72ff2cab8`** (= merge `5c3a04941` "chore(deps): sync upstream main (gix 0.88, posthog-rs 0.27, aws-sdk-bedrockruntime, JS bumps)" + fold of parallel session's docs `c503badf6`). The parallel session committed MY staged index at 14:26:58Z (reflog-observed) and pushed; my own commit/push attempt correctly aborted ("nothing to commit").
+- **My local gates** (all on the identical code content): `cargo fmt --check` rc=0; `cargo check --workspace --all-targets` OK (7m43s, 0 errors — 09-28 cc/aws-lc-sys failure confirmed transient); `cargo clippy --workspace --all-targets -- -D warnings` OK (18m18s); `cargo deny` all-ok — re-run on the final landed tree: advisories/bans/licenses/sources **all ok**.
+- **Remote verification at `72ff2cab8`:** check-runs = 27 success, 0 failures, 1 in_progress (`benchmark (windows-latest)`), 2 conditional skipped. Includes ci/lint, ci/test, cargo-deny, Clippy (-D warnings), CVP suite ×5, Test macos+windows, Scorecard, Socket, trufflehog.
+- **Sync completeness:** `574894e8e` (upstream tip at merge time) IS an ancestor of `72ff2cab8`. Upstream has since moved to `be1dcb471` (future sync).
+- **Coordination:** parallel session independently recorded nightly acceptance as `c503badf6` (14:07Z); mine = `b0485410b` (14:20Z). Their unpushed local main commits `e9271f8a2` (mcp_watcher fs-event hardening) + `89bbb7723` (docs) left untouched; this evidence commit is **local-only (NOT pushed)** to avoid interleaving with their in-flight work.
