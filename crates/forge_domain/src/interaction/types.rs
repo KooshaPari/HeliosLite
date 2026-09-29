@@ -80,7 +80,11 @@ impl InteractionRequest {
                 };
                 shape
                     && indices.iter().enumerate().all(|(offset, index)| {
-                        *index < self.choices.len() && !indices[..offset].contains(index)
+                        *index < self.choices.len()
+                            && !indices
+                                .iter()
+                                .take(offset)
+                                .any(|previous| previous == index)
                     })
             }
             _ => false,

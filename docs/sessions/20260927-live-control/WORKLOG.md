@@ -283,3 +283,13 @@ to that same TUI. It verifies original request/turn/tool identity, original tool
 result delivery, exactly one approved file change, duplicate-response handling,
 and explicit controller release/reacquisition. This closes the standard ACP
 callback boundary rather than inferring it from working IPC and schema tests.
+
+### Strict lint follow-up
+
+At adb6fd707, full workspace build and standard clippy passed. The independent
+Lint Fix workflow additionally denies `clippy::indexing_slicing`; replaced the
+validated prefix slice with an equivalent `iter().take(offset)` duplicate check.
+Rustfmt and diff whitespace checks passed locally; hosted qualification pending.
+Windows workspace test failure is in the main-branch shell workflow fixture
+`release_tags_reach_gh_as_literal_arguments` (forge_ci/tests/ci.rs:126), not the
+interaction or ACP tests; it invokes `bash` without platform qualification.
