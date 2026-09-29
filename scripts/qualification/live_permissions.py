@@ -21,11 +21,18 @@ def qualify_permissions(ipc, runtime, root):
         )["result"]["turn_id"]
 
         def held(turn=turn):
-            pending = [
+            snapshot = ipc(after=0)["result"]
+            pending = [item for item in snapshot["pending"] if item["turn_id"] == turn]
+            ended = [
                 item
-                for item in ipc(after=None)["result"]["pending"]
+                for item in snapshot["events"]
                 if item["turn_id"] == turn
+                and item["payload"]["kind"] == "turn_finished"
             ]
+            if ended and not pending:
+                raise RuntimeError(
+                    f"permission operation completed without a held decision: {ended}"
+                )
             assert len(pending) == 1
             return pending[0]
 

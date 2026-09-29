@@ -252,3 +252,19 @@ its exact event SHA) and runs Cargo with --locked. Earlier pull-request runs
 checked GitHub's merge tree; the subsequent manual 0cfe/cac runs bind branch SHAs.
 PR319 became conflicting with main, explaining absent automatic source CI; merge
 main forward and requalify the resulting exact tree before delivery.
+
+## 604c124b1 question-flow witness
+
+After forward-merging main f1af9b9b6 and pinning the upstream input fix, exact-head
+run 36591840917 / job 109486639488 passed focused tests and binary build. All
+followup modes completed: whole-command local /respond and remote answers reached
+the original tool result; a new controller recovered the same pending UUID;
+wrong identity/invalid/duplicate answers, cancellation and expiry were checked.
+The immutable upstream pin fixed the observed paste/typeahead regression.
+
+The next permission fixture had no held request because it left the existing
+policy mode unrestricted. Source ToolRegistry only consults policies when
+`restricted = true`. Enable that flag in the isolated fixture; production policy
+semantics remain unchanged. The permission witness still requires an actual held
+request before any temporary-file side effect, and now fails promptly if a turn
+finishes without that request. Graceful-exit qualification remains after it.

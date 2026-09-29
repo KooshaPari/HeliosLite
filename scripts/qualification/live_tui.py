@@ -20,6 +20,7 @@ def qualify_tui(binary, root, session):
     config = root / "state" / "config" / ".helioslite.toml"
     config.parent.mkdir(parents=True, exist_ok=True)
     config.write_text(f"""tool_supported = true
+restricted = true
 [session]
 provider_id = "synthetic"
 model_id = "synthetic"
