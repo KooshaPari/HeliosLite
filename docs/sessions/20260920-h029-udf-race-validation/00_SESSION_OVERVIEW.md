@@ -381,6 +381,17 @@ both LSP e2e binaries, fmt + clippy green. Push sequenced after
 `72ff2cab8`'s benchmark jobs (workflow concurrency cancels in-flight
 runs on new pushes — the same mechanism that muddied this failure).
 
+Outcome (2026-09-29 16:10Z): the fix push took one CI round-trip —
+`10a4c36af` failed Trunk `Lint & Format` on a leading blank line at the
+extracted `tests.rs:1` (reproduced locally with `cargo fmt --all
+--check`, fixed in `0bab1ab05`; `clippy -D warnings` clean). The
+`0bab1ab05` check set then read "7 failed" but all 7 were `cancelled`
+by parallel-session doc pushes — zero real failures. Observed final
+states: `f1af9b9b6` ALL_COMPLETE 26 success + 2 skipped at 15:50Z, and
+`65e1b7994` (second upstream sync: Claude Opus/Sonnet 5.5, html2md
+0.2.15 pin) ALL_COMPLETE 28/28 at 16:10Z — the flake fix, fmt fix,
+undici 7.30.0, and both syncs are green together in one head.
+
 ---
 
 ## 2026-09-29T14:19Z — Nightly acceptance EVIDENCED (todo #7 closed); sync validation resumed
