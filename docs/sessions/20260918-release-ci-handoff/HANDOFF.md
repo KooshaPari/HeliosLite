@@ -681,3 +681,8 @@ roadmap. Full decision brief:
 (2026-09-27 section). A structured decision popup was attempted twice but
 the channel is unavailable — reply in chat when ready; nothing has been
 tagged, merged, or deleted.
+
+### 2026-09-29T15:03Z status deltas (jcode)
+- **P5 decided: C executed** — annotated tag `archive/pheno-evals-20260624` (→ `22625936c`) pushed to fork; preflight confirmed non-`v*` tags trigger no workflow; operator override (A/B/D) still possible in chat.
+- **Upstream sync LANDED** — `fork/main` = `72ff2cab8` (16-commit sync to `574894e8e`); check-runs at tip = 0 failures; local fmt/check/clippy/deny green incl. final-tree deny re-run. Post-sync nightly backstop scheduled 2026-09-30 15:00Z.
+- **Distribution re-dispatch (`hook-d6499f54`)**: still ungranted (9 days); dispatch on approval only — recommended against current landed main.

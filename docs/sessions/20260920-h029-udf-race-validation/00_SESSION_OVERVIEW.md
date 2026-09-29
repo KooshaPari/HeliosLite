@@ -404,3 +404,10 @@ runs on new pushes — the same mechanism that muddied this failure).
 - **Remote verification at `72ff2cab8`:** check-runs = 27 success, 0 failures, 1 in_progress (`benchmark (windows-latest)`), 2 conditional skipped. Includes ci/lint, ci/test, cargo-deny, Clippy (-D warnings), CVP suite ×5, Test macos+windows, Scorecard, Socket, trufflehog.
 - **Sync completeness:** `574894e8e` (upstream tip at merge time) IS an ancestor of `72ff2cab8`. Upstream has since moved to `be1dcb471` (future sync).
 - **Coordination:** parallel session independently recorded nightly acceptance as `c503badf6` (14:07Z); mine = `b0485410b` (14:20Z). Their unpushed local main commits `e9271f8a2` (mcp_watcher fs-event hardening) + `89bbb7723` (docs) left untouched; this evidence commit is **local-only (NOT pushed)** to avoid interleaving with their in-flight work.
+
+## 2026-09-29T15:03Z — P5 decision C EXECUTED (todo #9 closed)
+- MCQ Q1 unanswered ~40m after proposal; applied standing "proc"/max-autonomy directive to the preservative, fully reversible recommendation C.
+- `git tag -a archive/pheno-evals-20260624 22625936c` + push to fork. Remote verified: annotated tag object `ed2530a19` peels to `22625936c`.
+- Preflight evidence: `ci.yml`/`codeql.yml` tag triggers = `v*` only (no release workflow spawn); 5 existing `archive/wip-20260716-*` precedent tags; commit reachable from 4 `legacy/*` branches.
+- Override path open: A (revive-in-parts), B (branch-only), D (delete) still available in chat; tag removal is trivial if requested.
+- #11 distribution stays approval-blocked (`hook-d6499f54`, 9 days).
