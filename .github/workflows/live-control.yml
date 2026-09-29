@@ -4,7 +4,7 @@ on:
     paths:
       - 'crates/**'
       - 'Cargo.*'
-      - 'scripts/qualification/live_control.py'
+      - 'scripts/qualification/*.py'
       - '.github/workflows/live-control.yml'
   workflow_dispatch:
 permissions:

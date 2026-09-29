@@ -212,7 +212,7 @@ async fn run<A: API + 'static>(
             command = commands.recv(), if !shutdown => {
                 match command {
                     Some(Control::Prompt { command, request, observer, reply }) => {
-                        let encoded = match serde_json::to_string(&request) {
+                        let encoded = match fingerprint(&request) {
                             Ok(encoded) => encoded,
                             Err(error) => { let _ = reply.send(Err(error.into())); continue; }
                         };
@@ -323,5 +323,31 @@ async fn run_turn<A: API>(
     );
     if let (Some(observer), Err(error)) = (turn.observer, result) {
         let _ = observer.send(Err(error));
+    }
+}
+
+fn fingerprint(request: &ChatRequest) -> anyhow::Result<String> {
+    let mut semantic = request.clone();
+    semantic.event.id.clear();
+    semantic.event.timestamp.clear();
+    Ok(serde_json::to_string(&semantic)?)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use forge_domain::Event;
+    use pretty_assertions::assert_eq;
+
+    #[test]
+    fn command_identity_ignores_generated_event_metadata_but_not_content() {
+        let session = ConversationId::generate();
+        let first = ChatRequest::new(Event::new("same prompt"), session);
+        let retry = ChatRequest::new(Event::new("same prompt"), session);
+        assert_eq!(fingerprint(&first).unwrap(), fingerprint(&retry).unwrap());
+        let changed = ChatRequest::new(Event::new("different prompt"), session);
+        assert_ne!(fingerprint(&first).unwrap(), fingerprint(&changed).unwrap());
+        let other = ChatRequest::new(Event::new("same prompt"), ConversationId::generate());
+        assert_ne!(fingerprint(&first).unwrap(), fingerprint(&other).unwrap());
     }
 }

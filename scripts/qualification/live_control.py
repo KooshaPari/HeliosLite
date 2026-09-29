@@ -93,6 +93,7 @@ def qualify(binary, root):
                           "checks": ["private_socket", "exclusive_owner", "runtime_identity",
                                      "future_cursor_resync", "acp_initialize", "same_owner_attach",
                                      "disconnect_preserves_owner"]}))
+        return session
     finally:
         if bridge is not None:
             bridge.terminate()
@@ -109,4 +110,8 @@ def qualify(binary, root):
 
 if __name__ == "__main__":
     with tempfile.TemporaryDirectory(prefix="hl-control-") as directory:
-        qualify(str(Path(sys.argv[1]).resolve()), Path(directory).resolve())
+        binary = str(Path(sys.argv[1]).resolve())
+        root = Path(directory).resolve()
+        session = qualify(binary, root)
+        from live_tui import qualify_tui
+        qualify_tui(binary, root, session)

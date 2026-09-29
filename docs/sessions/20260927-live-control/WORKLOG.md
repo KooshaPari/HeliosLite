@@ -139,3 +139,13 @@ runtime mismatch, future cursor resync, schema initialize, ACP attachment to
 same runtime, and disconnect preserving that owner. It creates only temporary
 state and terminates only subprocesses it started. This host qualification is
 not yet same-live-TUI/fake-provider successful-turn proof; that remains open.
+
+Synthetic live-TUI qualification now starts a separate owned PTY process using
+only temporary HELIOSLITE_HOME and a localhost SSE provider. It requires a
+completed remote prompt, correlated session/runtime/turn events, transcript text
+in that same live TUI, and duplicate/conflicting command behavior. While adding
+this witness, found an actual idempotency bug: ACP regenerates Event UUID/time
+on retry, so full JSON comparison falsely rejected an identical command.
+Fingerprint comparison now excludes only those generated metadata fields,
+retaining session, prompt, attachments and context; independent negative test
+requires changed content/session to differ. Hosted runtime results still pending.
