@@ -268,3 +268,18 @@ policy mode unrestricted. Source ToolRegistry only consults policies when
 semantics remain unchanged. The permission witness still requires an actual held
 request before any temporary-file side effect, and now fails promptly if a turn
 finishes without that request. Graceful-exit qualification remains after it.
+
+## e32fc6acc source and real operation gates passed
+
+Exact-head run 36593466007 / job 109492249954 succeeded. It includes the real
+TUI question modes, native permission side-effect oracles, and graceful exit
+while a question is held followed by reopening the persisted session. Workspace
+check, clippy and tests also passed in CVP run 36593465967. Source gates and
+IPC actionability are now established on this revision, with no live user state.
+
+One final adapter-specific fixture sends standard elicitation/create and
+session/request_permission responses through a real ACP stdio connection attached
+to that same TUI. It verifies original request/turn/tool identity, original tool
+result delivery, exactly one approved file change, duplicate-response handling,
+and explicit controller release/reacquisition. This closes the standard ACP
+callback boundary rather than inferring it from working IPC and schema tests.

@@ -74,7 +74,7 @@ class Provider(http.server.BaseHTTPRequestHandler):
                 ({}, "tool_calls"),
             ]
         permission = re.search(
-            r"SYNTHETIC_PERMISSION_(accept|reject|cancel|expire)", user
+            r"SYNTHETIC_PERMISSION_(accept|reject|cancel|expire|acp)", user
         )
         last_user = max(
             (
