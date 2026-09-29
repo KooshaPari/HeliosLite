@@ -84,7 +84,7 @@ fn get_context_length(model_id: &str) -> Option<u64> {
         return Some(1_000_000);
     }
 
-    // Claude Sonnet 5 and Opus 5 (1M context)
+    // Claude Sonnet 5 and Opus 5 / Opus 5.5 (1M context)
     if model_id.starts_with("claude-sonnet-5") || model_id.starts_with("claude-opus-5") {
         return Some(1_000_000);
     }
@@ -702,6 +702,22 @@ mod tests {
         assert_eq!(usage.completion_tokens, TokenCount::Actual(0));
         assert_eq!(usage.cached_tokens, TokenCount::Actual(300));
         assert_eq!(usage.total_tokens, TokenCount::Actual(1500));
+    }
+
+    #[test]
+    fn test_get_context_length_opus_5_5() {
+        // Claude Opus 5.5 has a 1M context window, matching Opus 5.
+        assert_eq!(get_context_length("claude-opus-5-5"), Some(1_000_000));
+        assert_eq!(get_context_length("claude-opus-5"), Some(1_000_000));
+        assert_eq!(get_context_length("claude-sonnet-5"), Some(1_000_000));
+    }
+
+    #[test]
+    fn test_get_context_length_sonnet_5_5() {
+        // Claude Sonnet 5.5 has a 1M context window, matching Sonnet 5.
+        let actual = get_context_length("claude-sonnet-5-5");
+        let expected = Some(1_000_000);
+        assert_eq!(actual, expected);
     }
 
     #[test]
