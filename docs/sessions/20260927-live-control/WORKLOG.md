@@ -149,3 +149,23 @@ on retry, so full JSON comparison falsely rejected an identical command.
 Fingerprint comparison now excludes only those generated metadata fields,
 retaining session, prompt, attachments and context; independent negative test
 requires changed content/session to differ. Hosted runtime results still pending.
+
+## Verified 81e0e6ad1 hosted runtime witness
+
+Run 36582436825 / job 109454081677 logs: domain interaction 4/4;
+real spawned UserInfra 3/3; live_control 4/4; exact helioslite binary built.
+Process checks passed for private socket, exclusive owner, runtime identity,
+future-cursor resync, ACP initialize/same-owner attach/disconnect preservation.
+Real TUI (owned PTY, no captures) passed remote prompt completion, terminal text
+witness, duplicate/conflict command handling and event correlation. Witness:
+session dc6d7ee9-a8f0-4fc4-ac99-0b8595326161, TUI runtime
+50e89598-89dd-4174-9c3b-67429120e804, turn
+f34e2cf2-b5b4-460b-9020-52c23ea1abb1. Prior a29a53f25 full workspace tests,
+check and clippy passed; 81e0e6ad1 clippy found one redundant error conversion.
+
+Grouped follow-up fixes normalize fingerprint error type, observe cancellation
+before/during real UserInfra waits, test pre-cancel and original tool-call
+identity, and exercise held followups through the actual synthetic provider/TUI:
+local /respond, wrong identity, invalid answer, duplicate/late response,
+turn cancellation and five-second TTL. Python ruff + syntax and Rust formatting
+checked locally; hosted execution required for the changed revision.

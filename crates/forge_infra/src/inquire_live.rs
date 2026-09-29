@@ -19,6 +19,10 @@ pub(crate) async fn ask(
     message: &str,
     choices: Vec<String>,
 ) -> InteractionAnswer {
+    let mut cancellation = context.cancel.clone();
+    if *cancellation.borrow() {
+        return InteractionAnswer::Cancel;
+    }
     let multiple = matches!(kind, InteractionKind::MultipleChoice);
     let pending = context
         .broker
@@ -49,7 +53,19 @@ pub(crate) async fn ask(
     } else {
         None
     };
-    let answer = pending.wait().await;
+    let answer = tokio::select! {
+        answer = pending.wait() => answer,
+        _ = async {
+            loop {
+                if *cancellation.borrow_and_update() {
+                    break;
+                }
+                if cancellation.changed().await.is_err() {
+                    break;
+                }
+            }
+        } => InteractionAnswer::Cancel,
+    };
     drop(cancel_input);
     if let Some(terminal) = terminal {
         let _ = terminal.await;

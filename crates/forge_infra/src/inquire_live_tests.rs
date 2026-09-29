@@ -66,12 +66,14 @@ async fn production_permission_rejects_stale_invalid_and_duplicate_responses() {
     let turn = uuid::Uuid::new_v4();
     let broker = InteractionBroker::new(session, runtime, Duration::from_secs(5));
     let (_cancel, cancellation) = tokio::sync::watch::channel(false);
+    let tool = forge_domain::ToolCallFull::new("shell")
+        .call_id(forge_domain::ToolCallId::new("synthetic-tool"));
     let context = InteractionContext {
         broker: broker.clone(),
         turn_id: turn,
         cancel: cancellation,
         terminal: false,
-        tool_call: None,
+        tool_call: Some(tool.clone()),
     };
     let operation = PermissionOperation::Execute {
         command: "synthetic command".into(),
@@ -98,6 +100,7 @@ async fn production_permission_rejects_stale_invalid_and_duplicate_responses() {
         matches!(request.kind, InteractionKind::Permission { operation } if operation == expected)
     );
     assert_eq!(request.turn_id, turn);
+    assert_eq!(request.tool_call, Some(tool));
     let response = InteractionResponse {
         request_id: request.request_id,
         session_id: session,
@@ -139,7 +142,7 @@ async fn production_followup_cancel_and_expiry_reject_late_answers() {
             Duration::from_secs(5)
         };
         let broker = InteractionBroker::new(session, runtime, ttl);
-        let (_cancel, cancellation) = tokio::sync::watch::channel(false);
+        let (cancel, cancellation) = tokio::sync::watch::channel(false);
         let context = InteractionContext {
             broker: broker.clone(),
             turn_id: turn,
@@ -164,7 +167,7 @@ async fn production_followup_cancel_and_expiry_reject_late_answers() {
             .unwrap();
         let request = broker.snapshot().pop().unwrap();
         if !expire {
-            broker.cancel_turn(turn);
+            cancel.send(true).unwrap();
         }
         let actual = tokio::time::timeout(Duration::from_secs(2), stream.next())
             .await
@@ -185,4 +188,38 @@ async fn production_followup_cancel_and_expiry_reject_late_answers() {
         );
         assert!(broker.snapshot().is_empty());
     }
+}
+
+#[tokio::test]
+async fn production_already_cancelled_turn_never_opens_a_followup() {
+    let broker = InteractionBroker::new(
+        ConversationId::generate(),
+        uuid::Uuid::new_v4(),
+        Duration::from_secs(5),
+    );
+    let (_cancel, cancellation) = tokio::sync::watch::channel(true);
+    let context = InteractionContext {
+        broker: broker.clone(),
+        turn_id: uuid::Uuid::new_v4(),
+        cancel: cancellation,
+        terminal: false,
+        tool_call: None,
+    };
+    let mut stream = INTERACTION_CONTEXT
+        .scope(context, async {
+            forge_app::spawn_interaction_stream(|sender| async move {
+                sender
+                    .send(ForgeInquire::new().prompt_question("After cancel?").await)
+                    .await
+                    .unwrap();
+            })
+        })
+        .await;
+    let actual = tokio::time::timeout(Duration::from_secs(2), stream.next())
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    assert_eq!(actual, None);
+    assert!(broker.snapshot().is_empty());
 }

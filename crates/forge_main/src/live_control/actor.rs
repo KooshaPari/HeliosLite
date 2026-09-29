@@ -326,11 +326,11 @@ async fn run_turn<A: API>(
     }
 }
 
-fn fingerprint(request: &ChatRequest) -> anyhow::Result<String> {
+fn fingerprint(request: &ChatRequest) -> serde_json::Result<String> {
     let mut semantic = request.clone();
     semantic.event.id.clear();
     semantic.event.timestamp.clear();
-    Ok(serde_json::to_string(&semantic)?)
+    serde_json::to_string(&semantic)
 }
 
 #[cfg(test)]
