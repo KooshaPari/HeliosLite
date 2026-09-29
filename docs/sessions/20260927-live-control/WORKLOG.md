@@ -233,3 +233,22 @@ At 0cfe4d1f0, PR head was confirmed current but no source Actions runs had been
 created automatically (release-drafter/bot checks only). Explicit standard free
 workflow dispatch is used for the final grouped revision; no paid runner or
 required gate bypass is involved.
+
+## Whole-command input negative control
+
+Run 36588892471 / job 109476471043 now reached a real native followup and
+printed its request UUID, but only the first `/` of the pasted `/respond ...`
+command was consumed. The stronger oracle failed: the answer never reached the
+original tool result. Source inspection identified the Rustyline 18.0.1 external
+printer path polling stdin while bytes were already in its BufReader.
+
+Official upstream fix: https://github.com/kkawakam/rustyline/commit/f2bbcc5cdf7b99dfe7d97af03976b111bc6fd256
+(`Check input buffer before polling`). Pin that exact upstream revision and allow
+only its official Git source in cargo-deny. Keep the single-write whole-command
+PTY test; do not disguise the regression with byte-at-a-time fixture input.
+
+Dedicated qualification now checks out the explicit PR head (manual dispatch uses
+its exact event SHA) and runs Cargo with --locked. Earlier pull-request runs
+checked GitHub's merge tree; the subsequent manual 0cfe/cac runs bind branch SHAs.
+PR319 became conflicting with main, explaining absent automatic source CI; merge
+main forward and requalify the resulting exact tree before delivery.

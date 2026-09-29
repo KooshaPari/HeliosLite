@@ -20,6 +20,8 @@ jobs:
       RUSTFLAGS: -Dwarnings
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: dtolnay/rust-toolchain@stable
       - uses: arduino/setup-protoc@v3
         with:
@@ -30,12 +32,12 @@ jobs:
           cache-on-failure: true
       - name: Actual producer and broker negative controls
         run: |
-          cargo test -p forge_domain interaction::
-          cargo test -p forge_infra inquire_live_tests::
-          cargo test -p forge_repo agent::tests::interactive_agents_offer_real_followup_tool
-          cargo test -p forge_main --lib live_control::
-          cargo test -p forge_main --lib acp::
+          cargo test --locked -p forge_domain interaction::
+          cargo test --locked -p forge_infra inquire_live_tests::
+          cargo test --locked -p forge_repo agent::tests::interactive_agents_offer_real_followup_tool
+          cargo test --locked -p forge_main --lib live_control::
+          cargo test --locked -p forge_main --lib acp::
       - name: Build exact source binary
-        run: cargo build -p forge_main --bin helioslite
+        run: cargo build --locked -p forge_main --bin helioslite
       - name: Cross-process owner and ACP qualification
         run: python3 scripts/qualification/live_control.py target/debug/helioslite
