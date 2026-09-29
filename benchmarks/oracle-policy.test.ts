@@ -45,7 +45,7 @@ test("unsupported llm validation fails closed", async () => {
 
 test("signalled shell verifier cannot masquerade as exit zero", async () => {
   if (process.platform === "win32") return;
-  const command = "kill -TERM $";
+  const command = "python3 -c \"import os,signal; os.kill(os.getppid(), signal.SIGTERM)\"";
   const results = await runValidations("ignored", [{ name: "signal", type: "shell", command, exit_code: 0 }]);
   assert.equal(results[0]?.passed, false);
   assert.match(results[0]?.message ?? "", /signal SIGTERM/);
