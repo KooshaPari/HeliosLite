@@ -169,3 +169,29 @@ identity, and exercise held followups through the actual synthetic provider/TUI:
 local /respond, wrong identity, invalid answer, duplicate/late response,
 turn cancellation and five-second TTL. Python ruff + syntax and Rust formatting
 checked locally; hosted execution required for the changed revision.
+
+## Explicit external controller contract
+
+HarnessDesk integration identified a required distinction: runtime ownership is
+not remote interaction ownership. Per CLIENT-CONTRACT.md section 2.2, passive
+session/load must not enable controls. Added actor-serialized 30-second external
+controller leases (renewed by ACP polling), explicit grant on namespaced
+io.phenotype/interactionController load metadata, advertised initialize capability,
+passive mutation rejection, conflict rejection (no steal), release on disconnect,
+and session_info_update ownership-loss metadata. Local native TUI stays available.
+Only the external controller receives ACP held requests; runtime and pending
+operations survive connection loss. Interaction metadata now explicitly includes
+io.phenotype/sessionId so forms never depend on a client's selected session.
+Actor handle extraction keeps new modules below the 350-line target.
+
+Qualification now requires passive controls rejected, exclusive controller,
+explicit ACP grant, and control release on disconnect. Existing actual TUI
+prompt/followup tests acquire control first, verify remote and local answers reach
+the original tool result, and retain cancel/expiry/late-answer negative controls.
+
+At e7833cb2e: focused Rust tests and binary build passed, host/ACP checks passed;
+held-followup runtime witness failed because the fixture left global
+`tool_supported` false (production agent config overrides model capabilities).
+Synthetic provider therefore received no native tool definitions and emitted its
+text witness. Fixture now explicitly enables native tool support. This is a
+fixture correction, not weakening the held-operation acceptance assertion.

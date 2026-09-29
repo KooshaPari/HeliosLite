@@ -30,6 +30,7 @@ jobs:
           cargo test -p forge_domain interaction::
           cargo test -p forge_infra inquire_live_tests::
           cargo test -p forge_main --lib live_control::
+          cargo test -p forge_main --lib acp::
       - name: Build exact source binary
         run: cargo build -p forge_main --bin helioslite
       - name: Cross-process owner and ACP qualification

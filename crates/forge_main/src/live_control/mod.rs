@@ -1,15 +1,17 @@
 //! Owner-only live actor control. IPC is internal, independently versioned from ACP.
 mod actor;
+mod controller;
 mod display;
+mod handle;
 pub(crate) mod lease;
 pub(crate) mod protocol;
 #[cfg(unix)]
 pub(crate) mod server;
 pub(crate) mod terminal;
 
-pub use actor::{Handle, TurnReceiver};
 use forge_api::API;
 use forge_domain::ConversationId;
+pub use handle::{Handle, TurnReceiver};
 use std::sync::Arc;
 
 pub struct LiveControl {

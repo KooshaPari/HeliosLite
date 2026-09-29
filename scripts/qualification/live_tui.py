@@ -88,7 +88,8 @@ def qualify_tui(binary, root, session):
     threading.Thread(target=server.serve_forever, daemon=True).start()
     config = root / "state" / "config" / ".helioslite.toml"
     config.parent.mkdir(parents=True, exist_ok=True)
-    config.write_text(f"""[session]
+    config.write_text(f"""tool_supported = true
+[session]
 provider_id = "synthetic"
 model_id = "synthetic"
 [updates]
@@ -138,12 +139,14 @@ tools_supported = true
     reader = threading.Thread(target=drain, daemon=True)
     reader.start()
     path = root / "state" / "live" / f"{session}.sock"
+    controller = str(uuid.uuid4())
 
     def ipc(method="snapshot", **fields):
         message = {
             "version": 1,
             "session_id": session,
             "runtime_id": None,
+            "controller_id": controller,
             "method": method,
             **fields,
         }
@@ -156,6 +159,8 @@ tools_supported = true
     try:
         snapshot = wait_for(lambda: ipc(after=None), timeout=45)["result"]
         runtime = snapshot["runtime_id"]
+        assert snapshot["controlled"] is False
+        assert ipc("claim_control", runtime_id=runtime)["result"]["controlled"] is True
         event = {
             "id": str(uuid.uuid4()),
             "timestamp": "2026-09-29T00:00:00Z",
@@ -213,6 +218,8 @@ tools_supported = true
                         "event_correlation",
                         "held_followup",
                         "local_response",
+                        "remote_response",
+                        "same_tool_result",
                         "wrong_identity",
                         "invalid_answer",
                         "duplicate_response",
@@ -243,7 +250,7 @@ def witness(transcript):
 
 
 def qualify_followups(ipc, runtime, session, master, transcript):
-    for mode in ["local", "cancel", "expire"]:
+    for mode in ["local", "remote", "cancel", "expire"]:
         event = {
             "id": str(uuid.uuid4()),
             "timestamp": "2026-09-29T00:00:00Z",
@@ -281,6 +288,8 @@ def qualify_followups(ipc, runtime, session, master, transcript):
             os.write(
                 master, f"/respond {request['request_id']} SYNTHETIC_ANSWER\n".encode()
             )
+        elif mode == "remote":
+            assert "result" in ipc("respond", runtime_id=runtime, response=response)
         elif mode == "cancel":
             assert "result" in ipc("cancel", runtime_id=runtime, turn_id=turn)
 
@@ -299,6 +308,13 @@ def qualify_followups(ipc, runtime, session, master, transcript):
             assert finished
             expected = "cancelled" if mode == "cancel" else "completed"
             assert finished[-1]["payload"]["status"] == expected, finished[-1]
+            if mode in {"local", "remote"}:
+                original_turn = [
+                    item for item in snapshot["events"] if item["turn_id"] == turn
+                ]
+                assert "SYNTHETIC_ANSWER" in json.dumps(original_turn), (
+                    "answer did not reach original tool result"
+                )
             return True
 
         wait_for(settled, timeout=15)

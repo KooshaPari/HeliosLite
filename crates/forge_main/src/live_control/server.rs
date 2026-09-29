@@ -3,7 +3,7 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{UnixListener, UnixStream};
 use tokio::task::JoinSet;
 
-use super::actor::Handle;
+use super::Handle;
 use super::protocol::{Command, Request, VERSION};
 
 const MAX_FRAME: usize = 1024 * 1024;
@@ -78,11 +78,27 @@ async fn dispatch(handle: &Handle, request: Request) -> anyhow::Result<serde_jso
     } else if let Some(runtime) = request.runtime_id {
         anyhow::ensure!(runtime == handle.runtime_id, "runtime_mismatch");
     }
+    let controller = || {
+        request
+            .controller_id
+            .ok_or_else(|| anyhow::anyhow!("controller_required"))
+    };
     match request.command {
-        Command::Snapshot { after } => Ok(serde_json::to_value(handle.snapshot(after).await?)?),
+        Command::ClaimControl => {
+            handle.control(controller()?, false).await?;
+            Ok(serde_json::json!({ "controlled": true }))
+        }
+        Command::ReleaseControl => {
+            handle.control(controller()?, true).await?;
+            Ok(serde_json::json!({ "controlled": false }))
+        }
+        Command::Snapshot { after } => Ok(serde_json::to_value(
+            handle.snapshot(after, request.controller_id).await?,
+        )?),
         Command::Prompt { command_id, event } => {
             let turn = handle
                 .prompt(
+                    controller()?,
                     command_id,
                     forge_domain::ChatRequest::new(event, handle.session_id),
                 )
@@ -90,11 +106,11 @@ async fn dispatch(handle: &Handle, request: Request) -> anyhow::Result<serde_jso
             Ok(serde_json::json!({ "turn_id": turn, "runtime_id": handle.runtime_id }))
         }
         Command::Cancel { turn_id } => {
-            handle.cancel(turn_id).await?;
+            handle.cancel(controller()?, turn_id).await?;
             Ok(serde_json::json!({}))
         }
         Command::Respond { response } => {
-            handle.broker.respond(response)?;
+            handle.respond(controller()?, response).await?;
             Ok(serde_json::json!({}))
         }
     }

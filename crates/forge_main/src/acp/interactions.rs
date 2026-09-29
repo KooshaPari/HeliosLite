@@ -3,7 +3,7 @@ use forge_domain::{InteractionAnswer, InteractionKind, InteractionRequest};
 use serde_json::{Value, json};
 
 pub fn request(request: &InteractionRequest, forms: bool) -> anyhow::Result<Option<Value>> {
-    let metadata = json!({"io.phenotype/runtimeId":request.runtime_id,"io.phenotype/turnId":request.turn_id,
+    let metadata = json!({"io.phenotype/sessionId":request.session_id,"io.phenotype/runtimeId":request.runtime_id,"io.phenotype/turnId":request.turn_id,
         "io.phenotype/requestId":request.request_id,"io.phenotype/expiresAt":request.expires_at});
     let id = format!("forge/{}", request.request_id);
     match &request.kind {
@@ -143,6 +143,14 @@ mod tests {
             assert!(request(&fixture, false).unwrap().is_none());
             let request = request(&fixture, true).unwrap().unwrap();
             assert_eq!(request["method"], "elicitation/create");
+            assert_eq!(
+                request["params"]["_meta"]["io.phenotype/sessionId"],
+                fixture.session_id.to_string()
+            );
+            assert_eq!(
+                request["params"]["_meta"]["io.phenotype/requestId"],
+                fixture.request_id.to_string()
+            );
             assert!(request["params"]["requestedSchema"]["properties"]["answer"].is_object());
         }
     }

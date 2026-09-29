@@ -18,7 +18,6 @@ impl Bridge {
         params: Value,
         id: Option<Value>,
     ) -> anyhow::Result<()> {
-        anyhow::ensure!(self.sessions.len() < 32, "attachment_capacity");
         let id = id.ok_or_else(|| anyhow::anyhow!("request id required"))?;
         let create = method == "session/new";
         let params = if create {
@@ -45,6 +44,15 @@ impl Bridge {
         } else {
             ConversationId::parse(params["sessionId"].as_str().unwrap_or_default())?
         };
+        anyhow::ensure!(
+            self.sessions.len() < 32 || self.sessions.contains_key(&session),
+            "attachment_capacity"
+        );
+        let wants_control = create
+            || params
+                .pointer("/_meta/io.phenotype~1interactionController")
+                .and_then(Value::as_bool)
+                == Some(true);
         let (snapshot, state) = runtime::attach(session, &cwd, create).await?;
         if let Some(path) = snapshot
             .conversation
@@ -52,6 +60,17 @@ impl Bridge {
             .and_then(|value| value["cwd"].as_str())
         {
             anyhow::ensure!(Path::new(path).canonicalize()? == cwd, "workspace_mismatch");
+        }
+        if wants_control {
+            runtime::control(session, snapshot.runtime_id, self.controller, false).await?;
+        } else if self
+            .sessions
+            .get(&session)
+            .is_some_and(|attachment| attachment.controls)
+        {
+            let _ = runtime::control(session, snapshot.runtime_id, self.controller, true).await;
+            self.pending
+                .retain(|_, request| request.session_id != session);
         }
         if let Some(conversation) = snapshot.conversation {
             projection::history(session, conversation).await?;
@@ -73,13 +92,14 @@ impl Bridge {
             session,
             Attachment {
                 runtime: snapshot.runtime_id,
+                controls: wants_control,
                 cursor: snapshot.sequence,
                 current_turn: snapshot.active_turn,
                 finished,
             },
         );
         let metadata = json!({"io.phenotype/runtimeId":snapshot.runtime_id,"io.phenotype/state":state,
-            "io.phenotype/sequence":snapshot.sequence});
+            "io.phenotype/sequence":snapshot.sequence,"io.phenotype/interactionController":wants_control});
         let result = if create {
             wire::checked::<schema::NewSessionResponse>(
                 json!({"sessionId":session,"_meta":metadata}),
@@ -129,6 +149,7 @@ impl Bridge {
             .sessions
             .get_mut(&session)
             .ok_or_else(|| anyhow::anyhow!("session_not_loaded"))?;
+        anyhow::ensure!(attachment.controls, "controller_required");
         let content = params["prompt"]
             .as_array()
             .ok_or_else(|| anyhow::anyhow!("prompt required"))?;
@@ -156,6 +177,7 @@ impl Bridge {
             version: VERSION,
             session_id: session,
             runtime_id: Some(attachment.runtime),
+            controller_id: Some(self.controller),
             command: Command::Prompt { command_id, event: Event::new(text) },
         })
         .await?;

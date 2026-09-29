@@ -47,6 +47,7 @@ pub struct Snapshot {
     pub resync_required: bool,
     pub pending: Vec<InteractionRequest>,
     pub conversation: Option<serde_json::Value>,
+    pub controlled: bool,
 }
 
 #[cfg(unix)]
@@ -55,6 +56,8 @@ pub struct Request {
     pub version: u16,
     pub session_id: ConversationId,
     pub runtime_id: Option<Uuid>,
+    #[serde(default)]
+    pub controller_id: Option<Uuid>,
     #[serde(flatten)]
     pub command: Command,
 }
@@ -63,6 +66,8 @@ pub struct Request {
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(tag = "method", rename_all = "snake_case")]
 pub enum Command {
+    ClaimControl,
+    ReleaseControl,
     Snapshot {
         after: Option<u64>,
     },
@@ -137,6 +142,7 @@ impl Journal {
             resync_required,
             pending,
             conversation: None,
+            controlled: false,
         }
     }
 }

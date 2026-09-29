@@ -14,11 +14,13 @@ pub async fn snapshot(
     session: ConversationId,
     runtime: Option<Uuid>,
     after: Option<u64>,
+    controller: Option<Uuid>,
 ) -> anyhow::Result<Snapshot> {
     let request = Request {
         version: VERSION,
         session_id: session,
         runtime_id: runtime,
+        controller_id: controller,
         command: Command::Snapshot { after },
     };
     Ok(serde_json::from_value(call(&request).await?)?)
@@ -29,12 +31,33 @@ pub async fn call(request: &Request) -> anyhow::Result<serde_json::Value> {
     tokio::time::timeout(Duration::from_secs(5), server::call(path, request)).await?
 }
 
+pub async fn control(
+    session: ConversationId,
+    runtime: Uuid,
+    controller: Uuid,
+    release: bool,
+) -> anyhow::Result<()> {
+    call(&Request {
+        version: VERSION,
+        session_id: session,
+        runtime_id: Some(runtime),
+        controller_id: Some(controller),
+        command: if release {
+            Command::ReleaseControl
+        } else {
+            Command::ClaimControl
+        },
+    })
+    .await?;
+    Ok(())
+}
+
 pub async fn attach(
     session: ConversationId,
     cwd: &Path,
     create: bool,
 ) -> anyhow::Result<(Snapshot, &'static str)> {
-    if let Ok(snapshot) = snapshot(session, None, None).await {
+    if let Ok(snapshot) = snapshot(session, None, None, None).await {
         anyhow::ensure!(!create, "new_session_identity_already_exists");
         return Ok((snapshot, "attached"));
     }
@@ -65,7 +88,7 @@ pub async fn attach(
     }
     let mut child = command.spawn()?;
     for _ in 0..50 {
-        if let Ok(snapshot) = snapshot(session, None, None).await {
+        if let Ok(snapshot) = snapshot(session, None, None, None).await {
             // Reap the launcher asynchronously without tying runtime lifetime to ACP.
             std::thread::spawn(move || {
                 let _ = child.wait();

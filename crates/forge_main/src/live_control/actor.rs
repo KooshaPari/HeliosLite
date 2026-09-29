@@ -1,20 +1,21 @@
 use std::collections::{HashMap, VecDeque};
 use std::fs::File;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
 
 use forge_api::API;
 use forge_domain::{
-    ChatEvent, ChatRequest, ChatResponse, ConversationId, INTERACTION_CONTEXT, InteractionBroker,
-    InteractionContext,
+    ChatEvent, ChatRequest, ChatResponse, INTERACTION_CONTEXT, InteractionContext,
+    InteractionResponse,
 };
 use futures::StreamExt;
 use tokio::sync::{mpsc, oneshot, watch};
 use uuid::Uuid;
 
+use super::controller::Controller;
+use super::handle::Handle;
 use super::protocol::{Journal, Payload, Snapshot};
 
-type Observer = mpsc::UnboundedSender<anyhow::Result<ChatResponse>>;
+pub(super) type Observer = mpsc::UnboundedSender<anyhow::Result<ChatResponse>>;
 struct Turn {
     id: Uuid,
     request: ChatRequest,
@@ -26,121 +27,33 @@ pub(super) enum Control {
         command: Uuid,
         request: ChatRequest,
         observer: Option<Observer>,
+        controller: Option<Uuid>,
         reply: oneshot::Sender<anyhow::Result<Uuid>>,
     },
     Cancel {
         turn: Uuid,
+        controller: Option<Uuid>,
         reply: Option<oneshot::Sender<anyhow::Result<()>>>,
     },
     Snapshot {
         after: Option<u64>,
+        controller: Option<Uuid>,
         reply: oneshot::Sender<anyhow::Result<Snapshot>>,
+    },
+    Lease {
+        controller: Uuid,
+        release: bool,
+        reply: oneshot::Sender<anyhow::Result<()>>,
+    },
+    Respond {
+        controller: Uuid,
+        response: InteractionResponse,
+        reply: oneshot::Sender<anyhow::Result<()>>,
     },
     Shutdown,
 }
 
-#[derive(Clone)]
-pub struct Handle {
-    pub session_id: ConversationId,
-    pub runtime_id: Uuid,
-    pub broker: Arc<InteractionBroker>,
-    tx: mpsc::UnboundedSender<Control>,
-    output: Arc<Mutex<Option<std::sync::mpsc::SyncSender<String>>>>,
-}
-
-pub struct TurnReceiver {
-    turn: Uuid,
-    handle: Handle,
-    receiver: mpsc::UnboundedReceiver<anyhow::Result<ChatResponse>>,
-    finished: bool,
-}
-impl TurnReceiver {
-    pub async fn recv(&mut self) -> Option<anyhow::Result<ChatResponse>> {
-        let result = self.receiver.recv().await;
-        if result.is_none() {
-            self.finished = true;
-        }
-        result
-    }
-}
-impl Drop for TurnReceiver {
-    fn drop(&mut self) {
-        if !self.finished {
-            let _ = self
-                .handle
-                .tx
-                .send(Control::Cancel { turn: self.turn, reply: None });
-        }
-    }
-}
-
-impl Handle {
-    pub fn set_output(&self, output: Option<std::sync::mpsc::SyncSender<String>>) {
-        *self.output.lock().unwrap() = output;
-    }
-
-    pub fn spawn<A: API + 'static>(
-        api: Arc<A>,
-        session_id: ConversationId,
-        lease: File,
-    ) -> (Self, tokio::task::JoinHandle<()>) {
-        let runtime_id = Uuid::new_v4();
-        let ttl = std::env::var("FORGE_INTERACTION_TTL_SECONDS")
-            .ok()
-            .and_then(|value| value.parse::<u64>().ok())
-            .filter(|seconds| *seconds > 0 && *seconds <= 86400)
-            .unwrap_or(300);
-        let broker = InteractionBroker::new(session_id, runtime_id, Duration::from_secs(ttl));
-        let (tx, rx) = mpsc::unbounded_channel();
-        let handle = Self {
-            session_id,
-            runtime_id,
-            broker,
-            tx,
-            output: Arc::new(Mutex::new(None)),
-        };
-        let task = tokio::spawn(run(api, handle.clone(), rx, lease));
-        (handle, task)
-    }
-    async fn submit(
-        &self,
-        command: Uuid,
-        request: ChatRequest,
-        observer: Option<Observer>,
-    ) -> anyhow::Result<Uuid> {
-        anyhow::ensure!(
-            request.conversation_id == self.session_id,
-            "session_mismatch"
-        );
-        let (reply, receiver) = oneshot::channel();
-        self.tx
-            .send(Control::Prompt { command, request, observer, reply })?;
-        receiver.await?
-    }
-    pub async fn prompt(&self, command: Uuid, request: ChatRequest) -> anyhow::Result<Uuid> {
-        self.submit(command, request, None).await
-    }
-    pub async fn local_prompt(&self, request: ChatRequest) -> anyhow::Result<TurnReceiver> {
-        let (sender, receiver) = mpsc::unbounded_channel();
-        let turn = self.submit(Uuid::new_v4(), request, Some(sender)).await?;
-        Ok(TurnReceiver { turn, handle: self.clone(), receiver, finished: false })
-    }
-    pub async fn cancel(&self, turn: Uuid) -> anyhow::Result<()> {
-        let (reply, receiver) = oneshot::channel();
-        self.tx.send(Control::Cancel { turn, reply: Some(reply) })?;
-        receiver.await?
-    }
-    pub async fn snapshot(&self, after: Option<u64>) -> anyhow::Result<Snapshot> {
-        let (reply, receiver) = oneshot::channel();
-        self.tx.send(Control::Snapshot { after, reply })?;
-        receiver.await?
-    }
-    pub fn shutdown(&self) {
-        let _ = self.tx.send(Control::Shutdown);
-    }
-}
-
-async fn run<A: API + 'static>(
+pub(super) async fn run<A: API + 'static>(
     api: Arc<A>,
     handle: Handle,
     mut commands: mpsc::UnboundedReceiver<Control>,
@@ -158,6 +71,7 @@ async fn run<A: API + 'static>(
     let mut shutdown = false;
     let mut remote_turns = std::collections::HashSet::new();
     let mut shown = std::collections::HashSet::new();
+    let mut controller_lease = Controller::default();
     loop {
         if active.is_none() {
             if shutdown {
@@ -211,7 +125,13 @@ async fn run<A: API + 'static>(
             }
             command = commands.recv(), if !shutdown => {
                 match command {
-                    Some(Control::Prompt { command, request, observer, reply }) => {
+                    Some(Control::Prompt { command, request, observer, controller, reply }) => {
+                        if let Some(controller) = controller
+                            && let Err(error) = controller_lease.require(controller)
+                        {
+                            let _ = reply.send(Err(error));
+                            continue;
+                        }
                         let encoded = match fingerprint(&request) {
                             Ok(encoded) => encoded,
                             Err(error) => { let _ = reply.send(Err(error.into())); continue; }
@@ -229,7 +149,13 @@ async fn run<A: API + 'static>(
                             let _ = reply.send(Ok(id));
                         }
                     }
-                    Some(Control::Cancel { turn, reply }) => {
+                    Some(Control::Cancel { turn, controller, reply }) => {
+                        if let Some(controller) = controller
+                            && let Err(error) = controller_lease.require(controller)
+                        {
+                            if let Some(reply) = reply { let _ = reply.send(Err(error)); }
+                            continue;
+                        }
                         let result = if let Some((_, cancel, _)) = active.as_ref().filter(|(id, _, _)| *id == turn) {
                             handle.broker.cancel_turn(turn);
                             let _ = cancel.send(true);
@@ -244,15 +170,24 @@ async fn run<A: API + 'static>(
                         } else { Err(anyhow::anyhow!("turn_not_active_or_queued")) };
                         if let Some(reply) = reply { let _ = reply.send(result); }
                     }
-                    Some(Control::Snapshot { after, reply }) => {
+                    Some(Control::Snapshot { after, controller, reply }) => {
                         let pending = handle.broker.snapshot();
                         let mut snapshot = journal.lock().unwrap().snapshot(after, pending);
+                        snapshot.controlled = controller.is_some_and(|id| controller_lease.renew(id));
                         let result = if after.is_none() || snapshot.resync_required {
                             api.conversation(&handle.session_id).await.and_then(|conversation| {
                                 snapshot.conversation = conversation.map(serde_json::to_value).transpose()?;
                                 Ok(snapshot)
                             })
                         } else { Ok(snapshot) };
+                        let _ = reply.send(result);
+                    }
+                    Some(Control::Lease { controller, release, reply }) => {
+                        let result = if release { controller_lease.release(controller) } else { controller_lease.claim(controller) };
+                        let _ = reply.send(result);
+                    }
+                    Some(Control::Respond { controller, response, reply }) => {
+                        let result = controller_lease.require(controller).and_then(|()| handle.broker.respond(response));
                         let _ = reply.send(result);
                     }
                     Some(Control::Shutdown) | None => {
@@ -336,7 +271,7 @@ fn fingerprint(request: &ChatRequest) -> serde_json::Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use forge_domain::Event;
+    use forge_domain::{ConversationId, Event};
     use pretty_assertions::assert_eq;
 
     #[test]

@@ -17,11 +17,13 @@ use wire::schema;
 pub use runtime::host;
 struct Attachment {
     runtime: Uuid,
+    controls: bool,
     cursor: u64,
     current_turn: Option<Uuid>,
     finished: HashMap<Uuid, String>,
 }
 struct Bridge {
+    controller: Uuid,
     initialized: bool,
     forms: bool,
     cwd: PathBuf,
@@ -32,6 +34,7 @@ struct Bridge {
 
 pub async fn run(cwd: PathBuf) -> anyhow::Result<()> {
     let mut bridge = Bridge {
+        controller: Uuid::new_v4(),
         initialized: false,
         forms: false,
         cwd,
@@ -72,6 +75,11 @@ pub async fn run(cwd: PathBuf) -> anyhow::Result<()> {
         }
     }
     reader.abort();
+    for (session, attachment) in &bridge.sessions {
+        if attachment.controls {
+            let _ = runtime::control(*session, attachment.runtime, bridge.controller, true).await;
+        }
+    }
     // Disconnect drops only this attachment. Runtime and held calls continue
     // until their own terminal/remote response, cancellation or TTL.
     Ok(())
@@ -93,7 +101,7 @@ impl Bridge {
                 .is_some_and(|form| !form.is_null());
             self.initialized = true;
             return wire::result(id.ok_or_else(|| anyhow::anyhow!("request id required"))?, wire::checked::<schema::InitializeResponse>(json!({
-                "protocolVersion":1,"agentCapabilities":{"loadSession":true,"sessionCapabilities":{"list":{}}},
+                "protocolVersion":1,"agentCapabilities":{"loadSession":true,"sessionCapabilities":{"list":{}},"_meta":{"io.phenotype/interactionController":true}},
                 "agentInfo":{"name":"helioslite","title":"Forge / HeliosLite","version":env!("CARGO_PKG_VERSION")},"authMethods":[]
             }))?).await;
         }
@@ -110,11 +118,13 @@ impl Bridge {
                     .sessions
                     .get(&session)
                     .ok_or_else(|| anyhow::anyhow!("session_not_loaded"))?;
+                anyhow::ensure!(attachment.controls, "controller_required");
                 if let Some(turn) = attachment.current_turn {
                     runtime::call(&Request {
                         version: VERSION,
                         session_id: session,
                         runtime_id: Some(attachment.runtime),
+                        controller_id: Some(self.controller),
                         command: Command::Cancel { turn_id: turn },
                     })
                     .await?;
@@ -153,6 +163,7 @@ impl Bridge {
             version: VERSION,
             session_id: request.session_id,
             runtime_id: Some(request.runtime_id),
+            controller_id: Some(self.controller),
             command: Command::Respond { response },
         })
         .await?;
@@ -165,10 +176,11 @@ impl Bridge {
             let session = *session;
             let runtime = attachment.runtime;
             let cursor = attachment.cursor;
+            let controller = attachment.controls.then_some(self.controller);
             async move {
                 (
                     session,
-                    runtime::snapshot(session, Some(runtime), Some(cursor)).await,
+                    runtime::snapshot(session, Some(runtime), Some(cursor), controller).await,
                 )
             }
         });
@@ -177,6 +189,9 @@ impl Bridge {
             match snapshot {
                 Ok(snapshot) => self.consume(snapshot).await?,
                 Err(error) => {
+                    self.pending
+                        .retain(|_, request| request.session_id != session);
+                    wire::update(session, json!({"sessionUpdate":"session_info_update","_meta":{"io.phenotype/interactionController":false,"io.phenotype/controlReason":"runtime_unavailable"}})).await?;
                     if let Some(attachment) = self.sessions.remove(&session)
                         && let Some(turn) = attachment.current_turn
                         && let Some(id) = self.prompts.remove(&turn)
@@ -195,6 +210,10 @@ impl Bridge {
             .sessions
             .get_mut(&session)
             .ok_or_else(|| anyhow::anyhow!("session_not_loaded"))?;
+        if attachment.controls && !snapshot.controlled {
+            attachment.controls = false;
+            wire::update(session, json!({"sessionUpdate":"session_info_update","_meta":{"io.phenotype/interactionController":false,"io.phenotype/controlReason":"lease_lost"}})).await?;
+        }
         if snapshot.resync_required {
             wire::update(session, json!({"sessionUpdate":"session_info_update","_meta":{
                 "io.phenotype/resyncRequired":true,"io.phenotype/runtimeId":snapshot.runtime_id,"io.phenotype/sequence":snapshot.sequence}})).await?;
@@ -230,12 +249,13 @@ impl Bridge {
             .or(snapshot.active_turn);
         self.pending.retain(|_, request| {
             request.session_id != session
-                || snapshot
-                    .pending
-                    .iter()
-                    .any(|pending| pending.request_id == request.request_id)
+                || attachment.controls
+                    && snapshot
+                        .pending
+                        .iter()
+                        .any(|pending| pending.request_id == request.request_id)
         });
-        for request in snapshot.pending {
+        for request in snapshot.pending.into_iter().filter(|_| attachment.controls) {
             let id = format!("forge/{}", request.request_id);
             if let std::collections::hash_map::Entry::Vacant(entry) = self.pending.entry(id)
                 && let Some(message) = interactions::request(&request, self.forms)?

@@ -40,9 +40,13 @@ def qualify(binary, root):
     bridge = None
 
     def ipc(method="snapshot", **fields):
-        message = dict(
-            version=1, session_id=session, runtime_id=None, method=method, **fields
-        )
+        message = {
+            "version": 1,
+            "session_id": session,
+            "runtime_id": None,
+            "method": method,
+            **fields,
+        }
         with socket.socket(socket.AF_UNIX) as client:
             client.settimeout(5)
             client.connect(str(path))
@@ -54,6 +58,38 @@ def qualify(binary, root):
         snapshot = wait_for(lambda: ipc(after=None))["result"]
         runtime = snapshot["runtime_id"]
         assert runtime != session
+        controller = str(uuid.uuid4())
+        assert snapshot["controlled"] is False
+        assert (
+            ipc("cancel", runtime_id=runtime, turn_id=str(uuid.uuid4()))["error"]
+            == "controller_required"
+        )
+        assert (
+            ipc("claim_control", runtime_id=runtime, controller_id=controller)[
+                "result"
+            ]["controlled"]
+            is True
+        )
+        assert (
+            ipc("claim_control", runtime_id=runtime, controller_id=str(uuid.uuid4()))[
+                "error"
+            ]
+            == "controller_conflict"
+        )
+        assert (
+            ipc("release_control", runtime_id=runtime, controller_id=str(uuid.uuid4()))[
+                "error"
+            ]
+            == "controller_lease_lost"
+        )
+        assert ipc(after=None, controller_id=controller)["result"]["controlled"] is True
+        assert ipc(after=None)["result"]["controlled"] is False
+        assert (
+            ipc("release_control", runtime_id=runtime, controller_id=controller)[
+                "result"
+            ]["controlled"]
+            is False
+        )
         assert path.stat().st_mode & 0o777 == 0o600
         assert path.parent.stat().st_mode & 0o777 == 0o700
         duplicate = subprocess.run(
@@ -102,6 +138,12 @@ def qualify(binary, root):
             1, "initialize", {"protocolVersion": 1, "clientCapabilities": {}}
         )
         assert initialized["result"]["protocolVersion"] == 1
+        assert (
+            initialized["result"]["agentCapabilities"]["_meta"][
+                "io.phenotype/interactionController"
+            ]
+            is True
+        )
         loaded = rpc(
             2,
             "session/load",
@@ -109,10 +151,41 @@ def qualify(binary, root):
         )
         assert loaded["result"]["_meta"]["io.phenotype/runtimeId"] == runtime
         assert loaded["result"]["_meta"]["io.phenotype/state"] == "attached"
+        assert loaded["result"]["_meta"]["io.phenotype/interactionController"] is False
+        passive = rpc(
+            3,
+            "session/prompt",
+            {
+                "sessionId": session,
+                "prompt": [{"type": "text", "text": "must not run"}],
+            },
+        )
+        assert passive["error"]["message"] == "controller_required"
+        granted = rpc(
+            4,
+            "session/load",
+            {
+                "sessionId": session,
+                "cwd": str(root),
+                "mcpServers": [],
+                "_meta": {"io.phenotype/interactionController": True},
+            },
+        )
+        assert granted["result"]["_meta"]["io.phenotype/interactionController"] is True
+        assert (
+            ipc("claim_control", runtime_id=runtime, controller_id=controller)["error"]
+            == "controller_conflict"
+        )
         bridge.stdin.close()
         assert bridge.wait(timeout=10) == 0
         bridge = None
         assert ipc(after=None)["result"]["runtime_id"] == runtime
+        assert (
+            ipc("claim_control", runtime_id=runtime, controller_id=controller)[
+                "result"
+            ]["controlled"]
+            is True
+        )
         print(
             json.dumps(
                 {
@@ -126,6 +199,10 @@ def qualify(binary, root):
                         "acp_initialize",
                         "same_owner_attach",
                         "disconnect_preserves_owner",
+                        "passive_cannot_control",
+                        "exclusive_controller",
+                        "explicit_acp_grant",
+                        "disconnect_releases_control",
                     ],
                 }
             )
