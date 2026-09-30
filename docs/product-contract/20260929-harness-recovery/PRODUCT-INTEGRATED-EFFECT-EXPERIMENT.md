@@ -51,3 +51,9 @@ Adapter extension:
 For Write, persist target path and expected content/hash in the effect intent. Attempt A writes and dies/loses durable confirmation. Attempt B reads/hashes the target before dispatch. Match => RECONCILED_SUCCESS/no write; provable absence/precondition => RETRY_ALLOWED; conflicting or unknowable state => STILL_UNCERTAIN and fail closed.
 
 The current candidate's effect ID uses durable effort + conversation + path because ToolCallContext lacks stable call identity. Before production integration, add a runtime-generated effect/call identity to the context so repeated legitimate writes to the same path cannot alias. Path-only identity is test scaffolding, not accepted mature identity.
+## Identity correction — reuse ToolCallFull.call_id
+Further source tracing found the correct identity already exists immediately above execution: `ToolRegistry::call` receives `ToolCallFull`, whose `call_id: Option<ToolCallId>` is preserved into ToolResult; `ToolCallId::generate()` already exists for missing provider IDs.
+
+Therefore do **not** create a second effect-call namespace. At `ToolRegistry::call`, clone the context and set an execution call ID equal to the model/provider call ID when present, otherwise a runtime-generated ToolCallId. Pass that context through `call_inner` -> ToolExecutor. The effect adapter uses durable_effort_ref + execution call ID (+ tool name/version as needed), not file path.
+
+This also makes identity stable across attempt replacement only if the durable effort preserves the assigned call ID. The generated fallback must be persisted with the attempt/intent before dispatch; regenerating on attempt B would create a new effect and defeat reconciliation.
