@@ -242,15 +242,18 @@ impl<S: Services + EnvironmentInfra<Config = forge_config::ForgeConfig>> ToolReg
         &self,
         agent: &Agent,
         context: &ToolCallContext,
-        call: ToolCallFull,
+        mut call: ToolCallFull,
     ) -> ToolResult {
-        let call_id = call.call_id.clone();
+        let call_id = call.call_id.clone().unwrap_or_else(ToolCallId::generate);
+        call.call_id = Some(call_id.clone());
         let tool_name = call.name.clone();
-        let output = self.call_inner(agent, call, context).await;
+        let mut execution_context = context.clone();
+        execution_context.set_tool_call_id(Some(call_id.clone()));
+        let output = self.call_inner(agent, call, &execution_context).await;
         if output.is_err() {
             tracing::warn!(tool = %tool_name, "tool call produced an error");
         }
-        ToolResult::new(tool_name).call_id(call_id).output(output)
+        ToolResult::new(tool_name).call_id(Some(call_id)).output(output)
     }
 
     pub async fn list(&self) -> anyhow::Result<Vec<ToolDefinition>> {
