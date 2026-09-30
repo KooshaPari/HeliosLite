@@ -26,6 +26,49 @@ pub struct EffectRecoveryContext {
     pub adapter: Arc<dyn EffectRecoveryAdapter>,
 }
 
+async fn execute_effect<T, F, Fut>(
+    recovery: Option<&EffectRecoveryContext>,
+    intent: Option<EffectIntent>,
+    operation: F,
+) -> anyhow::Result<T>
+where
+    F: FnOnce() -> Fut,
+    Fut: std::future::Future<Output = anyhow::Result<T>>,
+{
+    let active = match (recovery, intent) {
+        (Some(recovery), Some(intent)) => {
+            let id = intent.effect_id.clone();
+            recovery.adapter.begin(intent).await?;
+            recovery.adapter.mark_dispatched(&id).await?;
+            Some((id, Arc::clone(&recovery.adapter)))
+        }
+        _ => None,
+    };
+
+    let result = operation().await;
+    match result {
+        Ok(value) => {
+            if let Some((effect_id, adapter)) = active.as_ref()
+                && let Err(confirm_error) = adapter.confirm_success(effect_id).await
+            {
+                let reason = format!(
+                    "tool side effect completed but durable confirmation failed: {confirm_error}"
+                );
+                let _ = adapter.mark_uncertain(effect_id, &reason).await;
+                return Err(anyhow!(reason));
+            }
+            Ok(value)
+        }
+        Err(error) => {
+            if let Some((effect_id, adapter)) = active.as_ref() {
+                let reason = format!("tool execution returned error after dispatch: {error}");
+                let _ = adapter.mark_uncertain(effect_id, &reason).await;
+            }
+            Err(error)
+        }
+    }
+}
+
 use anyhow::anyhow;
 use forge_domain::{CodebaseQueryResult, ToolCallContext, ToolCatalog, ToolOutput};
 use forge_sandbox::SandboxConfig;
@@ -501,52 +544,39 @@ impl<
             self.require_prior_read(context, &input.file_path, "overwrite it")?;
         }
 
-        let effect = if let (ToolCatalog::Write(input), Some(recovery)) =
+        let intent = if let (ToolCatalog::Write(input), Some(recovery)) =
             (&tool_input, self.effect_recovery.as_ref())
         {
             let conversation = context
                 .conversation_id()
-                .map(|id| id.to_string())
+                .map(|id| format!("{id:?}"))
                 .unwrap_or_else(|| "no-conversation".to_string());
-            let id = format!(
-                "{}:{}:write:{}",
-                recovery.durable_effort_ref, conversation, input.file_path
-            );
-            let intent = EffectIntent {
-                effect_id: id.clone(),
+            Some(EffectIntent {
+                effect_id: format!(
+                    "{}:{}:write:{}",
+                    recovery.durable_effort_ref, conversation, input.file_path
+                ),
                 durable_effort_ref: recovery.durable_effort_ref.clone(),
                 worker_attempt_id: recovery.worker_attempt_id.clone(),
                 tool_name: "write".to_string(),
                 target_fingerprint: input.file_path.clone(),
-            };
-            recovery.adapter.begin(intent).await?;
-            recovery.adapter.mark_dispatched(&id).await?;
-            Some((id, Arc::clone(&recovery.adapter)))
+            })
         } else {
             None
         };
 
-        let execution_result = self.call_internal(tool_input.clone(), context).await;
+        let execution_result = execute_effect(
+            self.effect_recovery.as_ref(),
+            intent,
+            || self.call_internal(tool_input.clone(), context),
+        )
+        .await;
 
         if let Err(ref error) = execution_result {
             tracing::error!(error = ?error, "Tool execution failed");
-            if let Some((effect_id, adapter)) = effect.as_ref() {
-                let reason = format!("tool execution returned error after dispatch: {error}");
-                let _ = adapter.mark_uncertain(effect_id, &reason).await;
-            }
         }
 
         let operation = execution_result?;
-
-        if let Some((effect_id, adapter)) = effect.as_ref()
-            && let Err(confirm_error) = adapter.confirm_success(effect_id).await
-        {
-            let reason = format!(
-                "tool side effect completed but durable confirmation failed: {confirm_error}"
-            );
-            let _ = adapter.mark_uncertain(effect_id, &reason).await;
-            return Err(anyhow!(reason));
-        }
 
         // Send formatted output message
         if let Some(output) = operation.to_content(&env) {
@@ -610,4 +640,111 @@ fn parse_shell_command(input: &str) -> (String, Vec<String>) {
     }
     let program = out.remove(0);
     (program, out)
+}
+
+
+#[cfg(test)]
+mod effect_recovery_tests {
+    use super::*;
+    use std::sync::Mutex;
+
+    #[derive(Default)]
+    struct RecordingAdapter {
+        events: Mutex<Vec<String>>,
+        fail_confirm: bool,
+    }
+
+    #[async_trait]
+    impl EffectRecoveryAdapter for RecordingAdapter {
+        async fn begin(&self, intent: EffectIntent) -> anyhow::Result<()> {
+            self.events.lock().unwrap().push(format!("intent:{}", intent.effect_id));
+            Ok(())
+        }
+
+        async fn mark_dispatched(&self, effect_id: &str) -> anyhow::Result<()> {
+            self.events.lock().unwrap().push(format!("dispatched:{effect_id}"));
+            Ok(())
+        }
+
+        async fn confirm_success(&self, effect_id: &str) -> anyhow::Result<()> {
+            self.events.lock().unwrap().push(format!("confirm:{effect_id}"));
+            if self.fail_confirm {
+                anyhow::bail!("simulated durable confirmation failure");
+            }
+            Ok(())
+        }
+
+        async fn mark_uncertain(&self, effect_id: &str, _reason: &str) -> anyhow::Result<()> {
+            self.events.lock().unwrap().push(format!("uncertain:{effect_id}"));
+            Ok(())
+        }
+    }
+
+    fn intent() -> EffectIntent {
+        EffectIntent {
+            effect_id: "effect-1".into(),
+            durable_effort_ref: "effort-1".into(),
+            worker_attempt_id: "attempt-a".into(),
+            tool_name: "write".into(),
+            target_fingerprint: "fixture.txt".into(),
+        }
+    }
+
+    #[tokio::test]
+    async fn effect_wrapper_records_intent_dispatch_and_confirmation() {
+        let adapter = Arc::new(RecordingAdapter::default());
+        let recovery = EffectRecoveryContext {
+            durable_effort_ref: "effort-1".into(),
+            worker_attempt_id: "attempt-a".into(),
+            adapter: adapter.clone(),
+        };
+        let side_effect = Arc::new(Mutex::new(0u8));
+        let observed = Arc::clone(&side_effect);
+        let result = execute_effect(Some(&recovery), Some(intent()), move || async move {
+            *observed.lock().unwrap() += 1;
+            Ok::<_, anyhow::Error>("done")
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(result, "done");
+        assert_eq!(*side_effect.lock().unwrap(), 1);
+        assert_eq!(
+            adapter.events.lock().unwrap().as_slice(),
+            ["intent:effect-1", "dispatched:effect-1", "confirm:effect-1"]
+        );
+    }
+
+    #[tokio::test]
+    async fn effect_wrapper_marks_uncertain_after_effect_when_confirmation_fails() {
+        let adapter = Arc::new(RecordingAdapter {
+            fail_confirm: true,
+            ..Default::default()
+        });
+        let recovery = EffectRecoveryContext {
+            durable_effort_ref: "effort-1".into(),
+            worker_attempt_id: "attempt-a".into(),
+            adapter: adapter.clone(),
+        };
+        let side_effect = Arc::new(Mutex::new(0u8));
+        let observed = Arc::clone(&side_effect);
+        let error = execute_effect(Some(&recovery), Some(intent()), move || async move {
+            *observed.lock().unwrap() += 1;
+            Ok::<_, anyhow::Error>("committed")
+        })
+        .await
+        .expect_err("failed durable confirmation must not return normal success");
+
+        assert!(error.to_string().contains("durable confirmation failed"));
+        assert_eq!(*side_effect.lock().unwrap(), 1, "effect already committed");
+        assert_eq!(
+            adapter.events.lock().unwrap().as_slice(),
+            [
+                "intent:effect-1",
+                "dispatched:effect-1",
+                "confirm:effect-1",
+                "uncertain:effect-1"
+            ]
+        );
+    }
 }
