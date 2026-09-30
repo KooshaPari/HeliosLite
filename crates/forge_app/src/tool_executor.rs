@@ -26,6 +26,27 @@ pub struct EffectRecoveryContext {
     pub adapter: Arc<dyn EffectRecoveryAdapter>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReconcileDecision {
+    ConfirmedSuccess,
+    RetryAllowed,
+    StillUncertain,
+}
+
+pub fn reconcile_write_postcondition(
+    path: &std::path::Path,
+    expected_content: &str,
+) -> ReconcileDecision {
+    match std::fs::read_to_string(path) {
+        Ok(actual) if actual == expected_content => ReconcileDecision::ConfirmedSuccess,
+        Ok(_) => ReconcileDecision::StillUncertain,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            ReconcileDecision::RetryAllowed
+        }
+        Err(_) => ReconcileDecision::StillUncertain,
+    }
+}
+
 async fn execute_effect<T, F, Fut>(
     recovery: Option<&EffectRecoveryContext>,
     intent: Option<EffectIntent>,
@@ -748,4 +769,27 @@ mod effect_recovery_tests {
             ]
         );
     }
+    #[test]
+    fn write_reconciliation_is_fail_closed() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("effect.txt");
+
+        assert_eq!(
+            reconcile_write_postcondition(&path, "expected"),
+            ReconcileDecision::RetryAllowed
+        );
+
+        std::fs::write(&path, "expected").unwrap();
+        assert_eq!(
+            reconcile_write_postcondition(&path, "expected"),
+            ReconcileDecision::ConfirmedSuccess
+        );
+
+        std::fs::write(&path, "conflict").unwrap();
+        assert_eq!(
+            reconcile_write_postcondition(&path, "expected"),
+            ReconcileDecision::StillUncertain
+        );
+    }
+
 }
