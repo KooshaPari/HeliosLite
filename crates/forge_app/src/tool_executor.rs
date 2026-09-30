@@ -569,11 +569,7 @@ impl<
                 .tool_call_id()
                 .ok_or_else(|| anyhow!("effect-protected tool execution requires a stable tool call id"))?;
             Some(EffectIntent {
-                effect_id: format!(
-                    "{}:{}:write",
-                    recovery.durable_effort_ref,
-                    call_id.as_str()
-                ),
+                effect_id: format!("{}:{}:write", recovery.durable_effort_ref, call_id.as_str()),
                 durable_effort_ref: recovery.durable_effort_ref.clone(),
                 worker_attempt_id: recovery.worker_attempt_id.clone(),
                 tool_name: "write".to_string(),
@@ -675,17 +671,26 @@ mod effect_recovery_tests {
     #[async_trait]
     impl EffectRecoveryAdapter for RecordingAdapter {
         async fn begin(&self, intent: EffectIntent) -> anyhow::Result<()> {
-            self.events.lock().unwrap().push(format!("intent:{}", intent.effect_id));
+            self.events
+                .lock()
+                .unwrap()
+                .push(format!("intent:{}", intent.effect_id));
             Ok(())
         }
 
         async fn mark_dispatched(&self, effect_id: &str) -> anyhow::Result<()> {
-            self.events.lock().unwrap().push(format!("dispatched:{effect_id}"));
+            self.events
+                .lock()
+                .unwrap()
+                .push(format!("dispatched:{effect_id}"));
             Ok(())
         }
 
         async fn confirm_success(&self, effect_id: &str) -> anyhow::Result<()> {
-            self.events.lock().unwrap().push(format!("confirm:{effect_id}"));
+            self.events
+                .lock()
+                .unwrap()
+                .push(format!("confirm:{effect_id}"));
             if self.fail_confirm {
                 anyhow::bail!("simulated durable confirmation failure");
             }
@@ -693,7 +698,10 @@ mod effect_recovery_tests {
         }
 
         async fn mark_uncertain(&self, effect_id: &str, _reason: &str) -> anyhow::Result<()> {
-            self.events.lock().unwrap().push(format!("uncertain:{effect_id}"));
+            self.events
+                .lock()
+                .unwrap()
+                .push(format!("uncertain:{effect_id}"));
             Ok(())
         }
     }
@@ -735,10 +743,7 @@ mod effect_recovery_tests {
 
     #[tokio::test]
     async fn effect_wrapper_marks_uncertain_after_effect_when_confirmation_fails() {
-        let adapter = Arc::new(RecordingAdapter {
-            fail_confirm: true,
-            ..Default::default()
-        });
+        let adapter = Arc::new(RecordingAdapter { fail_confirm: true, ..Default::default() });
         let recovery = EffectRecoveryContext {
             durable_effort_ref: "effort-1".into(),
             worker_attempt_id: "attempt-a".into(),
