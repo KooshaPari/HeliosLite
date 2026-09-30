@@ -1,0 +1,42 @@
+# Product-integrated effect-recovery experiment — HeliosLite
+
+Date: 2026-09-30. Status: DESIGN_READY / IMPLEMENTATION_NOT_STARTED.
+
+## Injection seam
+
+Instrument `ToolExecutor::execute`, not every Fs/Shell/Fetch service. This is the common boundary immediately above `call_internal`, where tool class/input are known and before the side effect begins.
+
+`ToolCallContext` currently has no tool-call/effect identity. Add an optional, versioned effect context rather than overloading conversation_id or source:
+- worker_attempt_id;
+- durable_effort_ref;
+- effect_adapter: trait/object handle.
+
+The effect ID is allocated by the adapter from durable effort + attempt + operation fingerprint; it must not depend solely on model-provided optional ToolCallId.
+
+## Experiment-only adapter
+
+Implement an in-memory/filesystem test adapter behind a trait:
+- begin(intent) -> EffectHandle after durable INTENT_RECORDED;
+- mark_dispatched(handle);
+- confirm(handle, outcome/receipt);
+- mark_uncertain(handle, reason);
+- state(handle).
+
+Production default with no adapter preserves current behavior for ordinary non-durable sessions. A future workflow that declares durable-effect safety must fail before dispatch if its required adapter is unavailable.
+
+## First tool
+
+Use a deterministic write-like fixture through ToolExecutor, not a remote provider. Kill the worker at:
+A. after begin before call_internal;
+B. after the underlying file write but before confirm;
+C. after confirm before terminal conversation state.
+
+Replacement attempt must use the same durable_effort_ref and reconcile file hash/existence. For B, the effect is UNCERTAIN until reconciliation proves the write. No second write is issued merely because the transcript lacks ToolOutput.
+
+## Why not instrument ForgeFsWrite first
+
+FsWrite has snapshot/hash semantics that are useful reconciliation evidence, but instrumenting only it would leave Shell/Fetch/Remove/Patch with different safety models. The common executor seam is the product contract; tool-specific reconcilers can live below it.
+
+## Acceptance
+
+Native test must prove exact effect count/postcondition, durable receipt sequence, attempt A/B lineage and fail-closed behavior when reconciliation is unsupported. A contract-probe pass alone is insufficient.
