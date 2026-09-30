@@ -17,3 +17,6 @@ Git compare reports the owned source is 742 commits ahead and not behind that pi
 Reduce the 742-commit delta into behavioral obligations and classify each as UPSTREAMED/COMMODITY, CONTRIBUTE UPSTREAM, THIN OVERLAY/ADAPTER, RETAIN PATCH, or REJECT/SUPERSEDED. Generated docs, branch-protection files, release plumbing and branding do not inflate retained behavioral value.
 
 Because this fork is ahead rather than thousands of commits behind the pinned upstream control, maintenance pressure has a different shape from KCode. That does not establish current upstream freshness: a later upstream head/release must also be frozen before the existence gate closes.
+
+## Owned integration modules — candidate, not yet differentiation
+Frozen HeliosLite contains owned workspace crates `forge_agileplus`, `forge_tracera` and `forge_sharecli`; the pinned upstream control does not surface those names. Their manifests describe delivery-quality scoring, Tracera telemetry transport, and ShareCLI relay behavior. This establishes owned implementation surface, **not that these concerns belong inside the coding CLI core**. The existence gate must compare in-core crates against external adapters/services using the same interfaces. If the behavior composes cleanly outside core, classify THIN OVERLAY/ADAPTER rather than RETAIN PATCH.
