@@ -2,7 +2,7 @@ use std::sync::{Arc, Mutex};
 
 use derive_setters::Setters;
 
-use crate::{ArcSender, ChatResponse, ConversationId, Metrics, TitleFormat, Todo, TodoItem};
+use crate::{ArcSender, ChatResponse, ConversationId, Metrics, TitleFormat, Todo, TodoItem, ToolCallId};
 
 /// Provides additional context for tool calls.
 #[derive(Debug, Clone, Setters)]
@@ -15,6 +15,8 @@ pub struct ToolCallContext {
     parent_id: Option<ConversationId>,
     #[setters(skip)]
     source: Option<String>,
+    #[setters(skip)]
+    tool_call_id: Option<ToolCallId>,
 }
 
 impl ToolCallContext {
@@ -26,6 +28,7 @@ impl ToolCallContext {
             conversation_id: None,
             parent_id: None,
             source: None,
+            tool_call_id: None,
         }
     }
 
@@ -101,6 +104,14 @@ impl ToolCallContext {
     /// Sets the source for this tool call context.
     pub fn set_source(&mut self, source: Option<String>) {
         self.source = source;
+    }
+
+    pub fn tool_call_id(&self) -> Option<&ToolCallId> {
+        self.tool_call_id.as_ref()
+    }
+
+    pub fn set_tool_call_id(&mut self, id: Option<ToolCallId>) {
+        self.tool_call_id = id;
     }
 
     /// Returns all known todos (active and historical completed todos).
