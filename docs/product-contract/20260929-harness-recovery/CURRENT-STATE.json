@@ -37,10 +37,10 @@
     "ontology_reviewed": "DRAFT",
     "accepted_obligations_complete": "OPEN",
     "quality_properties": "PARTIAL",
-    "journeys": "DRAFT",
+    "journeys": "DRAFT_RECOVERY_EFFECT_SLICE_OPEN",
     "stage_projections": "DRAFT",
     "oracle_design_complete": "PARTIAL",
-    "high_risk_experiments_closed": "PARTIAL_ORACLE_CLOSED_DBD_EFFECT_RECOVERY_OPEN",
+    "high_risk_experiments_closed": "PARTIAL_EXTERNAL_EFFECT_RECOVERY_OPEN",
     "implementation_mapping_complete": "OPEN",
     "traceability_structurally_valid": "NOT_RUN",
     "registry_repo_agreement": "PENDING_READBACK",
@@ -50,12 +50,15 @@
     "no_blocking_findings": "FAIL",
     "independent_fresh_review": "NOT_RUN"
   },
-  "next_bound": "Resolve integration custody (#323-#325), DBD/forge_daemon existence (#326-#327), external-effect crash slice, retained delta, source/history/SOTA/traceability and independent review.",
+  "next_bound": "Resolve integration custody (#323-#325), DBD/forge_daemon existence (#326-#327), external-effect crash slice, retained delta, source/history/SOTA/traceability and independent review. External-effect crash-boundary receipt/reconciliation experiment remains required.",
   "blocking_design_unknowns": [
     "#323_SHARECLI_PROCESS_ISOLATION",
     "#324_AGILEPLUS_AUTHORITY_DUPLICATION",
     "#325_TRACERA_TELEMETRY_VS_EVIDENCE",
     "#326_DBD_EXISTENCE_GATE",
     "#327_FORGE_DAEMON_EXISTENCE_GATE"
+  ],
+  "blocking_findings": [
+    "H-F008"
   ]
 }
