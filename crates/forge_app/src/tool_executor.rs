@@ -548,14 +548,14 @@ impl<
         let intent = if let (ToolCatalog::Write(input), Some(recovery)) =
             (&tool_input, self.effect_recovery.as_ref())
         {
-            let conversation = context
-                .conversation_id()
-                .map(|id| format!("{id:?}"))
-                .unwrap_or_else(|| "no-conversation".to_string());
+            let call_id = context
+                .tool_call_id()
+                .ok_or_else(|| anyhow!("effect-protected tool execution requires a stable tool call id"))?;
             Some(EffectIntent {
                 effect_id: format!(
-                    "{}:{}:write:{}",
-                    recovery.durable_effort_ref, conversation, input.file_path
+                    "{}:{}:write",
+                    recovery.durable_effort_ref,
+                    call_id.as_str()
                 ),
                 durable_effort_ref: recovery.durable_effort_ref.clone(),
                 worker_attempt_id: recovery.worker_attempt_id.clone(),
