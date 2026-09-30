@@ -1,6 +1,6 @@
+use async_trait::async_trait;
 use std::path::PathBuf;
 use std::sync::Arc;
-use async_trait::async_trait;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EffectIntent {
@@ -143,7 +143,11 @@ impl<
     /// Construct with an OS-level sandbox policy. Shell and fetch calls
     /// route through the sandbox.
     pub fn with_sandbox(services: Arc<S>, policy: SandboxConfig) -> Self {
-        Self { services, sandbox_policy: Some(policy), effect_recovery: None }
+        Self {
+            services,
+            sandbox_policy: Some(policy),
+            effect_recovery: None,
+        }
     }
 
     fn require_prior_read(
@@ -565,9 +569,9 @@ impl<
         let intent = if let (ToolCatalog::Write(input), Some(recovery)) =
             (&tool_input, self.effect_recovery.as_ref())
         {
-            let call_id = context
-                .tool_call_id()
-                .ok_or_else(|| anyhow!("effect-protected tool execution requires a stable tool call id"))?;
+            let call_id = context.tool_call_id().ok_or_else(|| {
+                anyhow!("effect-protected tool execution requires a stable tool call id")
+            })?;
             Some(EffectIntent {
                 effect_id: format!("{}:{}:write", recovery.durable_effort_ref, call_id.as_str()),
                 durable_effort_ref: recovery.durable_effort_ref.clone(),
@@ -579,11 +583,9 @@ impl<
             None
         };
 
-        let execution_result = execute_effect(
-            self.effect_recovery.as_ref(),
-            intent,
-            || self.call_internal(tool_input.clone(), context),
-        )
+        let execution_result = execute_effect(self.effect_recovery.as_ref(), intent, || {
+            self.call_internal(tool_input.clone(), context)
+        })
         .await;
 
         if let Err(ref error) = execution_result {
@@ -655,7 +657,6 @@ fn parse_shell_command(input: &str) -> (String, Vec<String>) {
     let program = out.remove(0);
     (program, out)
 }
-
 
 #[cfg(test)]
 mod effect_recovery_tests {
@@ -792,5 +793,4 @@ mod effect_recovery_tests {
             ReconcileDecision::StillUncertain
         );
     }
-
 }
