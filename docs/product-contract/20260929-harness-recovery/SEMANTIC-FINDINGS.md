@@ -35,3 +35,9 @@ The current catalog says implemented means shipped and tested and marks the eval
 ## Diagnostic evidence boundary
 
 The local decision-flow probe uses transcribed, scoped logic plus an actual Node child-process termination. Its success means the counterexamples were reproduced in that diagnostic model. It is NOT native CLI execution, a tested patch, platform qualification or an independent fresh review. Native product tests remain NOT_RUN. Source findings remain OPEN until source-bound tests and fixes are independently reviewed.
+
+## H-F008 — Side effect can precede any durable external-effect receipt
+
+`crates/forge_app/src/tool_executor.rs::execute` calls `call_internal` first. Side-effecting branches such as Write/Shell/Patch/Remove perform the service operation inside `call_internal`; only after it returns does the executor send formatted output and convert the operation to `ToolOutput`. `ToolCallContext` carries an optional sender, metrics and conversation/source metadata, but no durable effect ID/state machine or idempotency/reconciliation interface. `ToolCallId` exists at the model-call layer but is optional and is not established here as a downstream idempotency key.
+
+Therefore a crash after the service-side effect commits but before its result is durably attached to development/product state can leave an externally ambiguous outcome. This is a source-level crash-window finding, not proof that duplicate effects have occurred in production. Required resolution: bind side-effect execution to an external-effect receipt with INTENT_RECORDED/DISPATCHED/CONFIRMED/UNCERTAIN/RECONCILED semantics, owned by durable effort or a versioned adapter rather than presentation telemetry. Test kill-before-dispatch, kill-after-effect-before-ack, and kill-after-ack boundaries with idempotent and non-idempotent fixtures.
