@@ -46,9 +46,14 @@
     "registry_repo_agreement": "PENDING_READBACK",
     "invalid_catalogs_excluded": "PROGRAM_POLICY_PLUS_CANDIDATE_ORACLE_ONLY",
     "orphan_analysis": "NOT_RUN",
-    "contradictions_resolved": "OPEN",
+    "contradictions_resolved": "OPEN_INTEGRATION_CUSTODY",
     "no_blocking_findings": "FAIL",
     "independent_fresh_review": "NOT_RUN"
   },
-  "next_bound": "Use qualified candidate as evidence, not product completion. Reduce retained patch set and close source/alternative/journey/traceability gates."
+  "next_bound": "Reduce retained-patch delta; resolve ShareCLI/AgilePlus/Tracera custody; run external-effect crash slice; finish source/history/SOTA/traceability and independent review.",
+  "blocking_design_unknowns": [
+    "#323_SHARECLI_PROCESS_ISOLATION",
+    "#324_AGILEPLUS_AUTHORITY_DUPLICATION",
+    "#325_TRACERA_TELEMETRY_VS_EVIDENCE"
+  ]
 }
