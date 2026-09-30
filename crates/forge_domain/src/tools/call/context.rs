@@ -2,7 +2,9 @@ use std::sync::{Arc, Mutex};
 
 use derive_setters::Setters;
 
-use crate::{ArcSender, ChatResponse, ConversationId, Metrics, TitleFormat, Todo, TodoItem, ToolCallId};
+use crate::{
+    ArcSender, ChatResponse, ConversationId, Metrics, TitleFormat, Todo, TodoItem, ToolCallId,
+};
 
 /// Provides additional context for tool calls.
 #[derive(Debug, Clone, Setters)]
