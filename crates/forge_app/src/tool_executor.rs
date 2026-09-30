@@ -26,14 +26,16 @@ pub struct EffectRecoveryContext {
     pub adapter: Arc<dyn EffectRecoveryAdapter>,
 }
 
+#[cfg(test)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ReconcileDecision {
+enum ReconcileDecision {
     ConfirmedSuccess,
     RetryAllowed,
     StillUncertain,
 }
 
-pub fn reconcile_write_postcondition(
+#[cfg(test)]
+fn reconcile_write_postcondition(
     path: &std::path::Path,
     expected_content: &str,
 ) -> ReconcileDecision {
