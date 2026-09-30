@@ -5,8 +5,8 @@ use anyhow::Context;
 use console::style;
 use forge_domain::{
     Agent, AgentId, AgentInput, ChatResponse, ChatResponseContent, Environment, InputModality,
-    Model, SystemContext, TemplateConfig, ToolCallContext, ToolCallFull, ToolCatalog,
-    ToolCallId, ToolDefinition, ToolKind, ToolName, ToolOutput, ToolResult,
+    Model, SystemContext, TemplateConfig, ToolCallContext, ToolCallFull, ToolCallId, ToolCatalog,
+    ToolDefinition, ToolKind, ToolName, ToolOutput, ToolResult,
 };
 use forge_template::Element;
 use futures::future::join_all;
@@ -253,7 +253,9 @@ impl<S: Services + EnvironmentInfra<Config = forge_config::ForgeConfig>> ToolReg
         if output.is_err() {
             tracing::warn!(tool = %tool_name, "tool call produced an error");
         }
-        ToolResult::new(tool_name).call_id(Some(call_id)).output(output)
+        ToolResult::new(tool_name)
+            .call_id(Some(call_id))
+            .output(output)
     }
 
     pub async fn list(&self) -> anyhow::Result<Vec<ToolDefinition>> {
