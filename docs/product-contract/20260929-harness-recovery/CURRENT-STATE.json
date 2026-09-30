@@ -40,7 +40,7 @@
     "journeys": "DRAFT",
     "stage_projections": "DRAFT",
     "oracle_design_complete": "PARTIAL",
-    "high_risk_experiments_closed": "PARTIAL",
+    "high_risk_experiments_closed": "PARTIAL_ORACLE_CLOSED_DBD_EFFECT_RECOVERY_OPEN",
     "implementation_mapping_complete": "OPEN",
     "traceability_structurally_valid": "NOT_RUN",
     "registry_repo_agreement": "PENDING_READBACK",
@@ -50,10 +50,11 @@
     "no_blocking_findings": "FAIL",
     "independent_fresh_review": "NOT_RUN"
   },
-  "next_bound": "Reduce retained-patch delta; resolve ShareCLI/AgilePlus/Tracera custody; run external-effect crash slice; finish source/history/SOTA/traceability and independent review.",
+  "next_bound": "Resolve ShareCLI/AgilePlus/Tracera custody and DBD existence; run external-effect crash slice; reduce retained fork delta; finish source/history/SOTA/traceability and independent review.",
   "blocking_design_unknowns": [
     "#323_SHARECLI_PROCESS_ISOLATION",
     "#324_AGILEPLUS_AUTHORITY_DUPLICATION",
-    "#325_TRACERA_TELEMETRY_VS_EVIDENCE"
+    "#325_TRACERA_TELEMETRY_VS_EVIDENCE",
+    "#326_DBD_EXISTENCE_GATE"
   ]
 }
