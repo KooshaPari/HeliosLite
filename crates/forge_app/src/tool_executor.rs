@@ -123,7 +123,8 @@ impl<
         Self { services, sandbox_policy: Some(policy), effect_recovery: None }
     }
 
-    pub fn with_effect_recovery(mut self, context: EffectRecoveryContext) -> Self {
+    #[cfg(test)]
+    fn with_effect_recovery(mut self, context: EffectRecoveryContext) -> Self {
         self.effect_recovery = Some(context);
         self
     }
