@@ -6,7 +6,7 @@ use console::style;
 use forge_domain::{
     Agent, AgentId, AgentInput, ChatResponse, ChatResponseContent, Environment, InputModality,
     Model, SystemContext, TemplateConfig, ToolCallContext, ToolCallFull, ToolCatalog,
-    ToolDefinition, ToolKind, ToolName, ToolOutput, ToolResult,
+    ToolCallId, ToolDefinition, ToolKind, ToolName, ToolOutput, ToolResult,
 };
 use forge_template::Element;
 use futures::future::join_all;
