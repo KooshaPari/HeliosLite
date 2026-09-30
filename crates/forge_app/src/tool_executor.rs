@@ -1,5 +1,30 @@
 use std::path::PathBuf;
 use std::sync::Arc;
+use async_trait::async_trait;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EffectIntent {
+    pub effect_id: String,
+    pub durable_effort_ref: String,
+    pub worker_attempt_id: String,
+    pub tool_name: String,
+    pub target_fingerprint: String,
+}
+
+#[async_trait]
+pub trait EffectRecoveryAdapter: Send + Sync {
+    async fn begin(&self, intent: EffectIntent) -> anyhow::Result<()>;
+    async fn mark_dispatched(&self, effect_id: &str) -> anyhow::Result<()>;
+    async fn confirm_success(&self, effect_id: &str) -> anyhow::Result<()>;
+    async fn mark_uncertain(&self, effect_id: &str, reason: &str) -> anyhow::Result<()>;
+}
+
+#[derive(Clone)]
+pub struct EffectRecoveryContext {
+    pub durable_effort_ref: String,
+    pub worker_attempt_id: String,
+    pub adapter: Arc<dyn EffectRecoveryAdapter>,
+}
 
 use anyhow::anyhow;
 use forge_domain::{CodebaseQueryResult, ToolCallContext, ToolCatalog, ToolOutput};
@@ -21,6 +46,7 @@ pub struct ToolExecutor<S> {
     /// calls are routed through `forge_sandbox::Sandbox` instead of the bare
     /// shell. Off by default; enable via `config.sandbox`.
     sandbox_policy: Option<SandboxConfig>,
+    effect_recovery: Option<EffectRecoveryContext>,
 }
 
 impl<
@@ -45,13 +71,18 @@ impl<
 > ToolExecutor<S>
 {
     pub fn new(services: Arc<S>) -> Self {
-        Self { services, sandbox_policy: None }
+        Self { services, sandbox_policy: None, effect_recovery: None }
     }
 
     /// Construct with an OS-level sandbox policy. Shell and fetch calls
     /// route through the sandbox.
     pub fn with_sandbox(services: Arc<S>, policy: SandboxConfig) -> Self {
-        Self { services, sandbox_policy: Some(policy) }
+        Self { services, sandbox_policy: Some(policy), effect_recovery: None }
+    }
+
+    pub fn with_effect_recovery(mut self, context: EffectRecoveryContext) -> Self {
+        self.effect_recovery = Some(context);
+        self
     }
 
     fn require_prior_read(
@@ -470,13 +501,52 @@ impl<
             self.require_prior_read(context, &input.file_path, "overwrite it")?;
         }
 
+        let effect = if let (ToolCatalog::Write(input), Some(recovery)) =
+            (&tool_input, self.effect_recovery.as_ref())
+        {
+            let conversation = context
+                .conversation_id()
+                .map(|id| id.to_string())
+                .unwrap_or_else(|| "no-conversation".to_string());
+            let id = format!(
+                "{}:{}:write:{}",
+                recovery.durable_effort_ref, conversation, input.file_path
+            );
+            let intent = EffectIntent {
+                effect_id: id.clone(),
+                durable_effort_ref: recovery.durable_effort_ref.clone(),
+                worker_attempt_id: recovery.worker_attempt_id.clone(),
+                tool_name: "write".to_string(),
+                target_fingerprint: input.file_path.clone(),
+            };
+            recovery.adapter.begin(intent).await?;
+            recovery.adapter.mark_dispatched(&id).await?;
+            Some((id, Arc::clone(&recovery.adapter)))
+        } else {
+            None
+        };
+
         let execution_result = self.call_internal(tool_input.clone(), context).await;
 
         if let Err(ref error) = execution_result {
             tracing::error!(error = ?error, "Tool execution failed");
+            if let Some((effect_id, adapter)) = effect.as_ref() {
+                let reason = format!("tool execution returned error after dispatch: {error}");
+                let _ = adapter.mark_uncertain(effect_id, &reason).await;
+            }
         }
 
         let operation = execution_result?;
+
+        if let Some((effect_id, adapter)) = effect.as_ref()
+            && let Err(confirm_error) = adapter.confirm_success(effect_id).await
+        {
+            let reason = format!(
+                "tool side effect completed but durable confirmation failed: {confirm_error}"
+            );
+            let _ = adapter.mark_uncertain(effect_id, &reason).await;
+            return Err(anyhow!(reason));
+        }
 
         // Send formatted output message
         if let Some(output) = operation.to_content(&env) {
