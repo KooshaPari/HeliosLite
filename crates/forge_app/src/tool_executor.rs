@@ -146,12 +146,6 @@ impl<
         Self { services, sandbox_policy: Some(policy), effect_recovery: None }
     }
 
-    #[cfg(test)]
-    fn with_effect_recovery(mut self, context: EffectRecoveryContext) -> Self {
-        self.effect_recovery = Some(context);
-        self
-    }
-
     fn require_prior_read(
         &self,
         context: &ToolCallContext,
