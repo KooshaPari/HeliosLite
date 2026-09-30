@@ -21,3 +21,4 @@ jobs:
         with:
           key: effect-recovery-hook
       - run: cargo check -p forge_app
+      - run: cargo test -p forge_app effect_recovery_tests -- --nocapture
