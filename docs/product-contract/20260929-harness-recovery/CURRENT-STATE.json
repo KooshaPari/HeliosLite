@@ -7,20 +7,31 @@
   "mature_product_percent": null,
   "requirement_count_target": null,
   "source_denominator_closed": false,
-  "native_product_tests": "TARGETED_ORACLE_PASS",
+  "native_product_tests": "TARGETED_CANDIDATE_PASS",
   "implementation_candidate": "8451b952ef26f0720ee5e87d25eda6da1bc38700",
+  "qualified_findings": {
+    "H-F001": "FIXED_IN_CANDIDATE_8451b952",
+    "H-F002": "FIXED_IN_CANDIDATE_8451b952",
+    "H-F003": "FIXED_IN_CANDIDATE_8451b952",
+    "H-F004": "FIXED_IN_CANDIDATE_8451b952"
+  },
+  "candidate_evidence": {
+    "dedicated_oracle_run": 36627763151,
+    "oracle_tests": "8/8 passed",
+    "platform_tests": 36627763194,
+    "observed_workflows": "12/12 completed success at candidate head"
+  },
   "acceptance_exclusions": [
-    "Inherited benchmark greens while H-F001..H-F004 are open",
+    "Frozen source remains affected by H-F001..H-F004 until candidate is accepted/merged",
     "Unqualified implemented flags",
     "Generated catalogs",
     "Diagnostic/model-probe success"
   ],
-  "blocking_findings": [],
   "gates": {
     "source_ledger_fully_resolved": "OPEN",
     "alias_history_falsification": "OPEN",
     "sota_research": "PARTIAL",
-    "realistic_alternative_stack": "PROPOSED_NOT_VALIDATED",
+    "realistic_alternative_stack": "DEFINED_NOT_PILOTED",
     "bootstrap_decisions": "PARTIAL",
     "differentiation_survived_attack": "OPEN",
     "ontology_reviewed": "DRAFT",
@@ -29,21 +40,15 @@
     "journeys": "DRAFT",
     "stage_projections": "DRAFT",
     "oracle_design_complete": "PARTIAL",
-    "high_risk_experiments_closed": "PARTIAL_TARGETED_ORACLE_PASS",
+    "high_risk_experiments_closed": "PARTIAL",
     "implementation_mapping_complete": "OPEN",
     "traceability_structurally_valid": "NOT_RUN",
     "registry_repo_agreement": "PENDING_READBACK",
-    "invalid_catalogs_excluded": "PROGRAM_POLICY_ONLY_NOT_ENFORCED_IN_EXISTING_CI",
+    "invalid_catalogs_excluded": "PROGRAM_POLICY_PLUS_CANDIDATE_ORACLE_ONLY",
     "orphan_analysis": "NOT_RUN",
     "contradictions_resolved": "OPEN",
     "no_blocking_findings": "FAIL",
     "independent_fresh_review": "NOT_RUN"
   },
-  "next_bound": "Mine retained behavioral delta and close source/lineage/alternative/journey/trace denominators; independently review #322. No third primary product.",
-  "resolved_candidate_findings": [
-    "H-F001",
-    "H-F002",
-    "H-F003",
-    "H-F004"
-  ]
+  "next_bound": "Use qualified candidate as evidence, not product completion. Reduce retained patch set and close source/alternative/journey/traceability gates."
 }
