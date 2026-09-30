@@ -39,3 +39,13 @@ Exact crate-name comparison against pinned current Forgecode main finds 29 owned
 Other owned-only crates (`forge3d`, audit, drift, graph, mux, paste, plugin, render, repo_map, semantic/similarity/syntax, ShareCLI, TUI, ghostty-kit, helios-bot, etc.) remain source-classification work. No crate count is a differentiation count.
 
 Key correction: earlier name searches suggested no AgilePlus/Tracera/Pine-adjacent implementation. Exact tree/crate inspection falsifies that for HeliosLite: named AgilePlus/Tracera and shell/Windows-terminal implementations do exist. Their existence does **not** establish accepted ownership; it raises a duplication/custody question.
+## Mountedness correction — selected Helios surfaces
+
+Selected manifest/caller tracing shows several high-impact owned-only crates are not merely dormant workspace members:
+- `forge_agileplus` is a direct `forge_main` dependency and `TopLevelCommand::Agileplus` executes its command engine before normal UI startup. This is mounted duplicate product logic, not just a library proposal.
+- `forge_tracera` is wired through `forge_main::telemetry::TraceraTelem`; main constructs it and lifecycle/command/error events can be submitted. However the bridge explicitly treats invalid config and delivery failures as disabled/best-effort. **Therefore it is telemetry, not admissible acceptance evidence.** A failed Tracera sink must never be interpreted as accepted product trace completion.
+- `forge_sandbox` is a `forge_app` dependency, but the separately inspected crate documents platform gaps. Reachability does not establish enforcement.
+- `forge_dbd` is a `forge_repo` dependency and advertises `FORGE_DBD_ENABLED`; actual runtime selection/recovery still needs caller tracing.
+- `forge_pheno_shell` is a `forge_infra` dependency. `forge_pheno_winterminal`, `forge_sdk`, `forge_daemon`, `forge_guardian`, and `forge_cloud` require further mounted-call tracing; root workspace membership alone is insufficient.
+
+Architecture consequence: `forge_agileplus` should not be allowed to become a second authoritative AgilePlus implementation. Preserve any useful CLI projection or scorecard code as an adapter/consumer candidate, but authority and durable work state stay external. `forge_tracera` may remain best-effort observability, but accepted evidence requires a separate acknowledgement/receipt path whose failure is non-green.
