@@ -49,3 +49,11 @@ Selected manifest/caller tracing shows several high-impact owned-only crates are
 - `forge_pheno_shell` is a `forge_infra` dependency. `forge_pheno_winterminal`, `forge_sdk`, `forge_daemon`, `forge_guardian`, and `forge_cloud` require further mounted-call tracing; root workspace membership alone is insufficient.
 
 Architecture consequence: `forge_agileplus` should not be allowed to become a second authoritative AgilePlus implementation. Preserve any useful CLI projection or scorecard code as an adapter/consumer candidate, but authority and durable work state stay external. `forge_tracera` may remain best-effort observability, but accepted evidence requires a separate acknowledgement/receipt path whose failure is non-green.
+## Delta-family sample — pass 2
+GitHub compare reports the owned source 742 commits ahead / 0 behind the pinned current Forgecode control. Its changed-file payload is capped at 300 files, so the following is a **sample, not a full file denominator** and no percentage is computed.
+
+Within the returned 300 files: 183 are under `crates/`; 32 under `.github/`; 18 under `assets/`; 12 under `benchmarks/`; 6 under the landing app; 49 root/other. The crate sample is concentrated in `forge_app` (44 returned paths), `forge_domain` (38), `forge_ci` (29), `forge_config` (12), `forge_dbd` (12), plus distinct embedded/product-adjacent crates.
+
+Implication: a large fraction of visible delta is repository operations, release/security machinery, branding/app collateral, benchmarks, and bundled subproducts—not automatically coding-worker differentiation. The retained set must be semantic and journey-based, not commit/file-count based.
+
+Known custody liabilities now include embedded AgilePlus authority (#324), disconnected ShareCLI process model (#323), and telemetry/evidence ambiguity around Tracera (#325). Those are transition debt until resolved, not positive retained-patch credit.
