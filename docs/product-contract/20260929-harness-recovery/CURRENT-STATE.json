@@ -50,11 +50,12 @@
     "no_blocking_findings": "FAIL",
     "independent_fresh_review": "NOT_RUN"
   },
-  "next_bound": "Resolve ShareCLI/AgilePlus/Tracera custody and DBD existence; run external-effect crash slice; reduce retained fork delta; finish source/history/SOTA/traceability and independent review.",
+  "next_bound": "Resolve integration custody (#323-#325), DBD/forge_daemon existence (#326-#327), external-effect crash slice, retained delta, source/history/SOTA/traceability and independent review.",
   "blocking_design_unknowns": [
     "#323_SHARECLI_PROCESS_ISOLATION",
     "#324_AGILEPLUS_AUTHORITY_DUPLICATION",
     "#325_TRACERA_TELEMETRY_VS_EVIDENCE",
-    "#326_DBD_EXISTENCE_GATE"
+    "#326_DBD_EXISTENCE_GATE",
+    "#327_FORGE_DAEMON_EXISTENCE_GATE"
   ]
 }
