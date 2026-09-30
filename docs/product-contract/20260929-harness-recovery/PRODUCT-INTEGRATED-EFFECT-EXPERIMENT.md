@@ -40,3 +40,14 @@ FsWrite has snapshot/hash semantics that are useful reconciliation evidence, but
 ## Acceptance
 
 Native test must prove exact effect count/postcondition, durable receipt sequence, attempt A/B lineage and fail-closed behavior when reconciliation is unsupported. A contract-probe pass alone is insufficient.
+
+## Attempt-B reconciliation API — pinned
+Replacement recovery is a durable-effort decision before calling `ToolExecutor::execute` again. The executor must not infer retry permission from missing ToolOutput.
+
+Adapter extension:
+- `load(effect_id) -> EffectRecord?`;
+- `reconcile(effect_id, observation) -> CONFIRMED_SUCCESS | CONFIRMED_FAILURE | RETRY_ALLOWED | STILL_UNCERTAIN`.
+
+For Write, persist target path and expected content/hash in the effect intent. Attempt A writes and dies/loses durable confirmation. Attempt B reads/hashes the target before dispatch. Match => RECONCILED_SUCCESS/no write; provable absence/precondition => RETRY_ALLOWED; conflicting or unknowable state => STILL_UNCERTAIN and fail closed.
+
+The current candidate's effect ID uses durable effort + conversation + path because ToolCallContext lacks stable call identity. Before production integration, add a runtime-generated effect/call identity to the context so repeated legitimate writes to the same path cannot alias. Path-only identity is test scaffolding, not accepted mature identity.
