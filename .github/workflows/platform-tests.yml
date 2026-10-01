@@ -1,5 +1,11 @@
 name: Platform Tests
 on:
+  workflow_dispatch:
+    inputs:
+      windows_lsp:
+        description: Run only the Windows LSP portability regression and changed CI lint
+        type: boolean
+        default: true
   push:
     branches:
     - main
@@ -21,12 +27,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
-      matrix:
-        include:
-        - os: macos-latest
-          target: aarch64-apple-darwin
-        - os: windows-latest
-          target: x86_64-pc-windows-msvc
+      matrix: ${{ inputs.windows_lsp && fromJSON('{"include":[{"os":"windows-latest","target":"x86_64-pc-windows-msvc"}]}') || fromJSON('{"include":[{"os":"macos-latest","target":"aarch64-apple-darwin"},{"os":"windows-latest","target":"x86_64-pc-windows-msvc"}]}') }}
     permissions:
       contents: read
     steps:
@@ -172,9 +173,18 @@ jobs:
         # only reliable way to extend PATH.
         echo "$install_dir" >> "$GITHUB_PATH"
 
+    - name: Run Windows LSP portability regression
+      if: ${{ inputs.windows_lsp }}
+      run: cargo test --locked -p forge_lsp --test e2e_rust_analyzer -- --nocapture
+    - name: Check changed CI diagnostic lint
+      if: ${{ inputs.windows_lsp }}
+      run: cargo clippy --locked -p forge_ci --tests --no-deps -- -D warnings
     - name: Run tests
+      if: ${{ !inputs.windows_lsp }}
       run: cargo test --workspace
     - name: Run clippy
+      if: ${{ !inputs.windows_lsp }}
       run: cargo clippy --workspace --all-targets --no-deps -- -D warnings
     - name: Check formatting
+      if: ${{ !inputs.windows_lsp }}
       run: cargo fmt --all -- --check

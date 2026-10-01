@@ -134,7 +134,7 @@ fn release_tags_reach_gh_as_literal_arguments() {
                 assert!(
                     actual.status.success(),
                     "bash fixture failed: {}",
-                    String::from_utf8_lossy(&actual.stderr)
+                    std::str::from_utf8(&actual.stderr).unwrap_or("<non-UTF-8 stderr>")
                 );
                 assert_eq!(String::from_utf8(actual.stdout).unwrap(), tag);
                 release_commands += 1;

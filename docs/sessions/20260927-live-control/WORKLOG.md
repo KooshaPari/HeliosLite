@@ -376,3 +376,24 @@ and drains all affected pending replies when a runtime disappears. A focused
 regression preserves active, queued, known-terminal and other-session requests
 while removing only missing receipts. Final artifact refresh follows this source
 change; no evidence-only source push is needed after that receipt.
+
+### Windows npm launcher portability and final review receipt
+
+Live refresh on October1 confirmed dedicated Linux qualification36628742222 and
+CVP36628741944 succeeded for61efe6e0a; no unchanged Linux rerun is required.
+Independent agent kcode_resume read-only rereview on61efe found no new blocking
+finding in replay expiry/no-reexecution, pending-reply reconciliation or session
+isolation. That reviewer did not rerun tests or submit a standalone PR approval;
+the acceptance-to-polling race is covered by the focused helper regression.
+
+Windows LSP production factory used the bare npm command, but Windows npm installs
+`typescript-language-server.cmd`. Rust executable search permits omitting `.exe`,
+not arbitrary script extensions; use the explicit npm .cmd name on Windows while
+keeping the Unix command unchanged. Source: official Rust Command/process docs,
+https://doc.rust-lang.org/std/process/struct.Command.html and
+https://doc.rust-lang.org/src/std/sys/process/windows.rs.html.
+The existing real rust-analyzer round-trip also initializes TypeScript through
+Server::with_defaults and is the Windows regression gate. Added dispatch-only
+selection of this Windows test plus changed forge_ci diagnostic lint; normal
+platform behavior remains available. Fixed the diagnostic's forbidden lossy UTF8
+helper with checked UTF8. Only free hosted runners; no local Cargo build.
