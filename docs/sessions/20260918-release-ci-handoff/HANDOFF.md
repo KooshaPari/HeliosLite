@@ -702,3 +702,13 @@ tagged, merged, or deleted.
 - The failure sits in the **final** `Run` group (group starts log line 423; zero groups after line 466) — every preceding step (checkout + 6 script groups incl. manifest regeneration / PR prep) PASSED on 09-20. Only the branch push failed.
 - P4 fix `ba7187320` targets exactly this class (delete stale `chore/distribution-<tag>` branch before push; guard at `update-distribution.yml:309`) and **is an ancestor of `d1a84bdf7`** (merge-base verified) — the fix will be live on dispatch.
 - Chain once `hook-d6499f54` grants: `workflow_dispatch` of `update-distribution` at ref `d1a84bdf7` → stale-branch guard exercises → P4 gets its first real-path test. All remaining failure modes sit downstream of previously-passing steps only.
+
+#### 2026-10-01T18:05Z — CORRECTION: hook-d6499f54 was ANSWERED (false), not pending (jcode)
+- Passive inspection (`phinbox inbox --list` + `--show hook-d6499f54f23912e9849be7938d9a3618`) observed the record in full:
+  - `state: "answered"`, `response.value.value: false` — the request **was answered NOT-approved**, not sitting pending as prior entries ("ungranted N days, awaiting approval") implied. Prior pending/ungranted characterizations are corrected by this evidence.
+  - `queued_at_ms` = 2026-09-23T11:19:52Z; `expires_at_ms` = 2026-09-24T11:19:52Z (queued+24h, now long past); `notified_via: []`, `metadata: {}`.
+  - Exact command the record covers: `gh workflow run update-distribution.yml --repo KooshaPari/HeliosLite --ref main -f tag=v2.13.21-h.0.2.9`.
+  - Pending-inbox `--list` (45 entries, back to 2026-09-19) does NOT contain this id — consistent with answered (pending list shows only unanswered).
+- **Ambiguity (explicit):** `answered + value:false` cannot be distinguished from here between (a) a deliberate operator denial and (b) a default-false form submission (field default is `false`). No notification/audit metadata exists to separate them.
+- **Behavior implication (from the elicitate→phinbox shim source):** the request_id is deterministic sha256(title+command) and an answered record is REPLAYED on retry — a retry today would replay **denied** (block, no side effect) or, past the replay window, re-queue a fresh prompt. NOT retrying without a fresh operator instruction: re-queueing an already-answered request would re-ask a decision the operator may have already made.
+- **Path for todo #12 unchanged in shape, changed in meaning:** chat reply `Q2=C` (or any explicit new approval) is now the ONLY path — inbox-waiting will never resolve it. If the 09-23 `false` was a deliberate denial, #12 needs an affirmative new decision, not time.
