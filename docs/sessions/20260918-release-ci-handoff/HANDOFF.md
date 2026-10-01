@@ -719,3 +719,13 @@ tagged, merged, or deleted.
   - **Denial cluster:** all 8 falses: 09-18×2 (probe/dummy commands), 09-20×3 (incl. `git branch -d fork/chore/distribution-v2.13.21-h.0.2.9`), **09-24 10:57 / 10:59 / 11:19** = `gh release create v0.1.0` (Khostty) ×2 + **our `gh workflow run update-distribution.yml ...` at 11:19Z** — three real denials inside 22 minutes reads as an active triage session.
 - **Interpretation (likelihood, not proof):** the 09-24 answer is more consistent with a deliberate "not now" than with an accidental default. Combined with the replay semantics (a retry would re-present/re-block the same answered record), todo #12 requires a fresh affirmative instruction (chat `Q2=C` or equivalent); time alone will not resolve it. Motive for the denial is NOT recorded anywhere and remains unknown.
 - Side observation: approvals stop at 09-27 19:11Z while pending grew to 46 — inbox has accumulated unanswered requests since; nothing can be inferred about intent for those.
+
+##### 2026-10-01T18:16Z — RESOLUTION: distribution purpose ALREADY SATISFIED; dispatch not needed (jcode)
+- Decisive evidence chain (all observed):
+  - Run history: release-event run `35475329388` (tag `v2.13.21-h.0.2.9`) **SUCCESS** 09-19T23:09→~23:44Z → created branch `chore/distribution-v2.13.21-h.0.2.9` + **PR #318**; workflow_dispatch run `35478220664` 09-20T00:14Z failed re-pushing the same branch (the P4-class rejection already documented).
+  - **PR #318 `chore(distribution): update manifests for v2.13.21-h.0.2.9` MERGED 2026-09-20T00:31:16Z**; branch no longer exists on `fork` (`ls-remote` empty).
+  - PR #318 files = exactly the workflow's 3 targets: `distribution/homebrew/forge.rb` (`version "2.13.21-h.0.2.9"` + sha256s), `packaging/homebrew/helioslite.rb` (same version), `distribution/scoop/forge.json` (`"version": "2.13.21-h.0.2.9"`) — all three verified carrying the target version ON `fork/main`.
+  - Workflow `Update Distribution Files` id `345179635` state = `active` ✓; dispatch schema (`workflow_dispatch` input `tag`, required string) matches the recorded command ✓.
+- **Interpretation:** the 09-24T11:19Z denial of the re-dispatch was most plausibly "already done" — PR #318 had merged four days earlier. The re-dispatch would be a no-op (the workflow itself reports `No distribution changes to commit`).
+- **SUPERSEDES prior Q2/C guidance (including the MCQ in the 17:55Z delta):** do NOT dispatch `update-distribution` for this tag. Todo #12's underlying goal is complete; its approval record `hook-d6499f54…` is moot (safe to reject alongside `hook-6921b7cfc…` and `hook-47ff4370…`).
+- P4 (`ba7187320`) retains value as hardening for the NEXT release/re-run cycle; its real-path test arrives naturally then, not via a redundant dispatch.
