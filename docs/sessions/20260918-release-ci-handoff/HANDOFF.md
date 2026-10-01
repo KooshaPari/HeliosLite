@@ -706,7 +706,7 @@ tagged, merged, or deleted.
 #### 2026-10-01T18:05Z — CORRECTION: hook-d6499f54 was ANSWERED (false), not pending (jcode)
 - Passive inspection (`phinbox inbox --list` + `--show hook-d6499f54f23912e9849be7938d9a3618`) observed the record in full:
   - `state: "answered"`, `response.value.value: false` — the request **was answered NOT-approved**, not sitting pending as prior entries ("ungranted N days, awaiting approval") implied. Prior pending/ungranted characterizations are corrected by this evidence.
-  - `queued_at_ms` = 2026-09-23T11:19:52Z; `expires_at_ms` = 2026-09-24T11:19:52Z (queued+24h, now long past); `notified_via: []`, `metadata: {}`.
+  - `queued_at_ms` = 2026-09-24T11:19:52Z (verified via `date -u -r`); `expires_at_ms` = 2026-09-25T11:19:52Z (queued+24h, now long past); `notified_via: []`, `metadata: {}`. (Initial entry said 09-23/09-24 from in-head arithmetic — corrected same day by observed `date` output.)
   - Exact command the record covers: `gh workflow run update-distribution.yml --repo KooshaPari/HeliosLite --ref main -f tag=v2.13.21-h.0.2.9`.
   - Pending-inbox `--list` (45 entries, back to 2026-09-19) does NOT contain this id — consistent with answered (pending list shows only unanswered).
 - **Ambiguity (explicit):** `answered + value:false` cannot be distinguished from here between (a) a deliberate operator denial and (b) a default-false form submission (field default is `false`). No notification/audit metadata exists to separate them.
