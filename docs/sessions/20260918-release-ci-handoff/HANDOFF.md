@@ -691,3 +691,8 @@ tagged, merged, or deleted.
 - **Upstream sync #2 LANDED** — `fork/main` = `65e1b7994` (7 commits → upstream `be1dcb471`; Claude Opus/Sonnet 5.5 support, html2md 0.2.15 pin, JS bumps). Local fmt/check/deny green; post-land main CI OBSERVED **28/28, 0 failures at 16:09Z**. All security pins intact.
 - **Workflow-trigger finding:** branch pushes fire no workflows (ci/cvp `main`-only, lint `main`+`integration/**`); PR route hook-deferred (`hook-47ff4370…`) and now **moot** — landed directly; reject that inbox item.
 - **Todos:** #9 P5 closed/verified (option C tag pushed); #12 distribution still approval-blocked (`hook-d6499f54`, refresh 16:12Z). Open MCQ: **Q3** pin CI toolchain to `1.98` (recommended, not executed).
+
+### 2026-10-01T17:55Z status deltas (jcode)
+- **Q3-A EXECUTED + GREEN** — all workflow toolchains pinned to `rust-toolchain.toml` 1.98; `fork/main` = `d1a84bdf7` = **30/30 checks, 0 failures** (observed 10-01 17:46Z). The ci.yml snapshot tripwire fired at `536a25cac` → model fix in `crates/forge_ci/src/workflows/ci.rs` (`e5e7f6473`) + rustfmt fix-forward (`d1a84bdf7`). Floating-stable rustfmt flip-flop class is CLOSED: fmt gates now run the repo's rustfmt (1.9.0 under 1.98), matching local.
+- **Post-pin nightlies 2/2 accepted** — 09-30 `36717587219` + 10-01 `36870479957`, both success @ `d1a84bdf7`: 0× content-modified, 0 real×32801 (10-01 raw hit classified as a timestamp substring), 153 test-result lines, 3894 passed. `sched_a0cb8a6f` acceptance criteria MET (recorded evidence, watcher may still fire redundantly).
+- **Q2 / todo #12 distribution: `hook-d6499f54` STILL ungranted (11 days; last `update-distribution` run 09-20 failure).** Prior MCQ (A/B/C⭐/D) stands; only action = inbox approval or chat reply.
