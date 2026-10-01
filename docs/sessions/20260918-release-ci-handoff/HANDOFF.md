@@ -729,3 +729,29 @@ tagged, merged, or deleted.
 - **Interpretation:** the 09-24T11:19Z denial of the re-dispatch was most plausibly "already done" — PR #318 had merged four days earlier. The re-dispatch would be a no-op (the workflow itself reports `No distribution changes to commit`).
 - **SUPERSEDES prior Q2/C guidance (including the MCQ in the 17:55Z delta):** do NOT dispatch `update-distribution` for this tag. Todo #12's underlying goal is complete; its approval record `hook-d6499f54…` is moot (safe to reject alongside `hook-6921b7cfc…` and `hook-47ff4370…`).
 - P4 (`ba7187320`) retains value as hardening for the NEXT release/re-run cycle; its real-path test arrives naturally then, not via a redundant dispatch.
+
+#### 2026-10-01T18:40Z — FEEDBACK-LOOP CLOSURE: requirement → concrete check → observed result (jcode)
+Auto-turn gate flagged missing feedback loop + traceability. Full mapping for this session's explicit requirements and changed public outputs:
+
+| # | Requirement / changed public output | Concrete check | Observed result |
+|---|---|---|---|
+| R1 | Q3: no floating-stable toolchain left in any workflow | `rg "toolchain: *stable\|@stable" .github/workflows/` at current main | **0 matches** (clean); residual = fuzz.yml `nightly` + benchmarks.yml `"1.98"` (intentional, observed) |
+| R2 | Q3: generated ci.yml stays byte-identical to `forge_ci` model | `cargo test -p forge_ci` after model edit | **18/18 passed**, generator output byte-identical (observed 09-29→10-01) |
+| R3 | Q3 end-to-end: all gates green on pinned toolchain | check-runs at `d1a84bdf7` | **30 checks, 0 failures, 0 pending** (earlier "FAIL" was my poll's empty-output false positive; disproven by final state) |
+| R4 | Nightly acceptance (stored criteria of `sched_a0cb8a6f`, quoted from `sched_7430a810`: head ≥ `72ff2cab8`, success, 0 `content modified`/`32801`, nonzero `test result: ok`) | raw job logs jobs `109894245632` (09-30 run `36717587219`) + `110396646496` (10-01 run `36870479957`), both @ `d1a84bdf7` (descendant of `65e1b7994`) | **153× `test result: ok` each, `content modified`=0, panicked=0, `test result: FAILED`=0, 3894 passed each**; 09-30 raw ×`32801`=0; 10-01 raw ×`32801`=1 **classified**: nanosecond timestamp substring at log line 214 (`13:41:10.3328016Z`), not an error → **all clauses MET** |
+| R5 | #12: 3 manifests updated to tag | read version fields at current `fork/main` (`2f0a0d4ba`) | `forge.rb` `version "2.13.21-h.0.2.9"` ✓, `helioslite.rb` same ✓, `scoop/forge.json` `"2.13.21-h.0.2.9"` ✓ |
+| R6 | #12: manifest-referenced assets actually reachable (consumer install path) | `curl -sIL` on all 16 extracted URLs (#{version}/$version substituted) | **16/16 HTTP 200** (incl. `forge_dbd-*` debug assets and both repo homepages) |
+| R7 | #12: integrity pins match release-published hashes | fetch 14 `.sha256` sidecars (12 formula + 2 scoop), byte-compare to manifest sha256/hash | **14/14 exact match** (my first scoop pass found "0 sha256 keys" — scoop uses `hash`, not `sha256`; corrected check passed 2/2) |
+| R8 | #12: releases exist in both referenced repos | `gh release view v2.13.21-h.0.2.9` per repo | both repos: tag present, **55 assets** each |
+| R9 | #12: change is on default branch, PR complete | PR #318 `--json files` vs workflow's 3 targets; `ls-remote` branch | PR files = exactly 3 targets, **merged 09-20T00:31:16Z**; branch **gone** |
+| R10 | #12: version-check machinery agrees with manifest (update loop consistency) | live `GET /releases/latest` (both repos) + scoop `checkver` regex applied to observed tag | forgecode latest=`v2.13.21-h.0.2.9`, prerelease=false, regex match→`2.13.21-h.0.2.9` == manifest → **checkver up-to-date=True**; HeliosLite latest same tag. (Formulas carry no livecheck block — observed absence, brew uses native GitHub release detection) |
+| R11 | Post-doc-push main CI health | check-runs at all 6 doc SHAs + tip `2f0a0d4ba` | **0 failures at every SHA**; at 18:36Z tip = 19 success/2 skipped/**6 still running** (ci / lint, Draft Release queued; CVP Workspace tests, 2 benchmarks, Analyze in progress) → **final outcome PENDING, detached poll armed (see below)** |
+| R12 | Q3 approval records state (todo #12 history) | `phinbox inbox --show hook-d6499f54f23912e9849be7938d9a3618` + raw `answered/` store | `state=answered value=false` (queued 09-24T11:19:52Z) + 41 true / 8 false / 3 other → prior "pending-ungranted" entries **corrected** |
+
+**Corrections forced by this evidence pass:**
+1. **"Doc pushes = CI skipped" was WRONG.** `gh run list --commit <short-sha>` returns `[]` (short-SHA quirk) — that empty result misled an earlier claim. check-runs API (authoritative) shows a **full matrix runs on doc-only pushes** (27-28 checks/SHA). Corrected here; supersedes any "6/6 doc-only, CI skipped" statement.
+2. **"Branch pushes trigger NO workflows" refined:** runs ARE created at branch SHAs (observed `ci` **skipped** + `Release Drafter` queued at `61efe6e0a`/`7bf841fb6`/`8451b952e`/`01f481919` = other sessions' `impl/*`/`feat/*` branches at 18:22Z), but jobs don't execute → effective coverage claim (full matrix only via `pull_request → main`) stands; wording corrected from "no workflows" to "runs created, jobs skipped".
+3. The 4 unknown 18:22 SHAs = **parallel sessions' feature branches on the same remote**, not main — `fork/main` stayed `2f0a0d4ba` (race check clean).
+4. `sched_a0cb8a6f` no longer in `schedule list` (consumed); its criteria recovered verbatim from `sched_7430a810`'s stored text and used for R4.
+
+**Still open (honestly):** R11's final tip-CI outcome — detached poll writing `/Users/kooshapari/.jcode/scratch/tipci_watch.json`, wakes session on completion; fallback watcher scheduled.
