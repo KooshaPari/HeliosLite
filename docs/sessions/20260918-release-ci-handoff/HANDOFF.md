@@ -737,7 +737,7 @@ Auto-turn gate flagged missing feedback loop + traceability. Full mapping for th
 |---|---|---|---|
 | R1 | Q3: no floating-stable toolchain left in any workflow | `rg "toolchain: *stable\|@stable" .github/workflows/` at current main | **0 matches** (clean); residual = fuzz.yml `nightly` + benchmarks.yml `"1.98"` (intentional, observed) |
 | R2 | Q3: generated ci.yml stays byte-identical to `forge_ci` model | `cargo test -p forge_ci` after model edit | **18/18 passed**, generator output byte-identical (observed 09-29→10-01) |
-| R3 | Q3 end-to-end: all gates green on pinned toolchain | check-runs at `d1a84bdf7` | **30 checks, 0 failures, 0 pending** (earlier "FAIL" was my poll's empty-output false positive; disproven by final state) |
+| R3 | Q3 end-to-end: all gates green on pinned toolchain | check-runs at `d1a84bdf7` | **30 checks, 0 failures, 0 pending** at observation (earlier "FAIL" was my poll's empty-output false positive; disproven by final state). *Re-checked 20:31Z: 49 checks = 43 success + 6 skipped, 0 failures — count grew as scheduled/cron checks attached over time; verdict unchanged* |
 | R4 | Nightly acceptance (stored criteria of `sched_a0cb8a6f`, quoted from `sched_7430a810`: head ≥ `72ff2cab8`, success, 0 `content modified`/`32801`, nonzero `test result: ok`) | raw job logs jobs `109894245632` (09-30 run `36717587219`) + `110396646496` (10-01 run `36870479957`), both @ `d1a84bdf7` (descendant of `65e1b7994`) | **153× `test result: ok` each, `content modified`=0, panicked=0, `test result: FAILED`=0, 3894 passed each**; 09-30 raw ×`32801`=0; 10-01 raw ×`32801`=1 **classified**: nanosecond timestamp substring at log line 214 (`13:41:10.3328016Z`), not an error → **all clauses MET** |
 | R5 | #12: 3 manifests updated to tag | read version fields at current `fork/main` (`2f0a0d4ba`) | `forge.rb` `version "2.13.21-h.0.2.9"` ✓, `helioslite.rb` same ✓, `scoop/forge.json` `"2.13.21-h.0.2.9"` ✓ |
 | R6 | #12: manifest-referenced assets actually reachable (consumer install path) | `curl -sIL` on all 16 extracted URLs (#{version}/$version substituted) | **16/16 HTTP 200** (incl. `forge_dbd-*` debug assets and both repo homepages) |
@@ -766,3 +766,23 @@ Observed end state for tip `081905205` (full `08190520541dae8bac0176866369cfe1aa
 - **Observation history: 0 failures at every one of the 8 observed SHAs** (6 doc SHAs + `d1a84bdf7` + `081905205`) across all polls this session.
 
 **Mechanisms closed with this verdict:** poll `319799u8c8` + fallback `sched_3b98c689` both retired after recording. **Regress stop:** this very record-push spawns yet another matrix on the new tip; R11's requirement (one complete post-doc-push cycle observed final + green) is satisfied at `081905205`, so no new watcher is armed — the 8-SHA zero-failure pattern stands as the recorded evidence.
+
+#### 2026-10-01T20:35Z — FULL MAPPED-CHECK RE-RUN over the whole result: 12/12 PASS (jcode)
+Gate demanded fresh re-execution of every mapped check over the entire result. All rows re-run 20:30–20:35Z, observed:
+
+| # | Re-run check | Observed now |
+|---|---|---|
+| R1 | `rg "toolchain: *stable\|@stable" .github/workflows/` | 0 matches |
+| R2 | `cargo test -p forge_ci` | 18 passed / 0 failed |
+| R3 | check-runs `d1a84bdf7` | 49 = 43 success + 6 skipped, **0 failures** (was 30 at first observation; cron checks attached since — cell above corrected) |
+| R4 | raw logs jobs `109894245632` + `110396646496` re-fetched (344KB/344KB) | 153× `test result: ok` each, 0 FAILED, 0 content-modified, 0 panicked; 10-01 ×`32801`=1 **classified at source**: line 214 `2026-10-01T13:41:10.3328016Z` — `32801` = digit run inside the nanosecond timestamp of a `* [new branch]` fetch line |
+| R5 | version fields, 3 manifests at current main | 3/3 = `2.13.21-h.0.2.9` |
+| R6 | HEAD/GET all 16 extracted manifest URLs | 16/16 HTTP 200 |
+| R7 | 14 pins vs live `.sha256` sidecars | 14/14 byte-match |
+| R8 | `gh release view` both referenced repos (`KooshaPari/HeliosLite`, `KooshaPari/forgecode`) | tag present, 55 assets each, prerelease=false |
+| R9 | PR #318 + remote head branch | MERGED `2026-09-20T00:31:16Z`, files = exactly 3 targets, branch 0 refs (gone) |
+| R10 | scoop `checkver` regex vs live `releases/latest` both repos | extracts `2.13.21-h.0.2.9` == manifest → up-to-date **True** both |
+| R11 | recorded final + current tip `cf26e536e` | `081905205` final 26/2/0 (above); `cf26e536e` mid-flight = 24 checks, **0 failures** |
+| R12 | `phinbox inbox --show hook-d6499f54…` | `state=answered`, `value=false` |
+
+Changed public outputs all re-observed: 3 manifests (R5–R7), toolchain pins (R1), generator (R2), workflows/CI (R3/R11), nightly acceptance (R4), distribution machinery (R8–R10), approval record (R12).
