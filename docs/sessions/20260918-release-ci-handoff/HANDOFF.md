@@ -754,4 +754,15 @@ Auto-turn gate flagged missing feedback loop + traceability. Full mapping for th
 3. The 4 unknown 18:22 SHAs = **parallel sessions' feature branches on the same remote**, not main — `fork/main` stayed `2f0a0d4ba` (race check clean).
 4. `sched_a0cb8a6f` no longer in `schedule list` (consumed); its criteria recovered verbatim from `sched_7430a810`'s stored text and used for R4.
 
-**Still open (honestly):** R11's final tip-CI outcome — detached poll writing `/Users/kooshapari/.jcode/scratch/tipci_watch.json`, wakes session on completion; fallback watcher scheduled.
+**Still open (honestly):** ~~R11's final tip-CI outcome~~ → **RESOLVED 2026-10-01T20:24Z — see R11-FINAL entry below.**
+
+#### 2026-10-01T20:24Z — R11 FINAL: tip doc-push CI verdict = GREEN (jcode)
+Observed end state for tip `081905205` (full `08190520541dae8bac0176866369cfe1aa386d54`, pushed 18:39–18:40Z), measured 20:23:30Z from check-runs + per-run job APIs:
+
+- **Check-runs: 29 total = 26 completed/success + 2 completed/skipped + 1 queued; hard failures = 0, cancelled = 0, timed_out = 0.**
+- **Workflow level: 15 runs at the SHA — all 14 push-triggered runs completed/success** (`ci` ×2, Platform Tests, `cvp`, Performance Benchmarks, CodeQL, Cargo Deny, OpenSSF Scorecard, Trunk Check, Trufflehog, Github Label Sync, Release Drafter, autofix.ci); the sole queued item is run `36918273044` `Close Stale Issues and PR` = **`event=schedule` cron run** (created 19:59Z) attaching its check to default-branch head — outside the push matrix, non-blocking.
+- `cvp` run `36908487974` = **5/5 jobs green** (Clippy+format, PhenoShared cross-consumption, Full workspace build, Workspace tests, Coverage). `CVP: Coverage` job created 19:41:47Z (downstream of Workspace tests), sat queued 31 min (ubuntu runner scarcity, not a stuck job — picked runner `1001115218` at ~20:12, completed by 20:23).
+- Superseded SHA `2f0a0d4ba` (old poll `tipci_watch.json`): 23 success/2 skipped/**2 cancelled** (benchmark windows+macos) — cancellation was **concurrency supersede** when `081905205` pushed, not failures (benchmarks ran green at the new tip). Old poll's classification of `cancelled` as failure was wrong; new poll separates `hard_failures` vs `cancelled_superseded`.
+- **Observation history: 0 failures at every one of the 8 observed SHAs** (6 doc SHAs + `d1a84bdf7` + `081905205`) across all polls this session.
+
+**Mechanisms closed with this verdict:** poll `319799u8c8` + fallback `sched_3b98c689` both retired after recording. **Regress stop:** this very record-push spawns yet another matrix on the new tip; R11's requirement (one complete post-doc-push cycle observed final + green) is satisfied at `081905205`, so no new watcher is armed — the 8-SHA zero-failure pattern stands as the recorded evidence.
