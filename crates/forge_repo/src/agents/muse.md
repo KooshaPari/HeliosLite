@@ -5,6 +5,7 @@ description: "Strategic planning agent that analyzes codebases and creates compr
 reasoning:
   enabled: true
 tools:
+  - followup
   - sem_search
   - sage
   - search

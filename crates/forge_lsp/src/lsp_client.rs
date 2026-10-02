@@ -221,8 +221,13 @@ impl ProcessLspClient {
     /// legacy/non-LSP command-server; we talk JSON-RPC here, so we
     /// require an LSP-speaking server.
     pub fn typescript_language_server() -> Result<Self, String> {
+        let executable = if cfg!(windows) {
+            "typescript-language-server.cmd"
+        } else {
+            "typescript-language-server"
+        };
         Self::spawn(
-            Path::new("typescript-language-server"),
+            Path::new(executable),
             &["--stdio"],
             "typescript-language-server",
         )

@@ -1,3 +1,5 @@
+mod interaction_stream;
+pub use interaction_stream::spawn_interaction_stream;
 mod agent;
 mod agent_executor;
 mod agent_provider_resolver;

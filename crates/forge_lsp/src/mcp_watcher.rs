@@ -191,7 +191,16 @@ impl McpWatcher {
         ) {
             return false;
         }
-        event.paths.iter().any(|p| p == watched)
+        let canonical_parent = watched
+            .parent()
+            .and_then(|parent| parent.canonicalize().ok());
+        event.paths.iter().any(|path| {
+            path == watched
+                || (path.file_name() == watched.file_name()
+                    && canonical_parent.is_some()
+                    && path.parent().and_then(|parent| parent.canonicalize().ok())
+                        == canonical_parent)
+        })
     }
 
     /// Spawn the watcher onto the current Tokio runtime. Returns a

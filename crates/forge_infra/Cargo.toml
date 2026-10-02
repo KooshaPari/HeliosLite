@@ -58,6 +58,7 @@ phenotype-observability.workspace = true
 phenotype-telemetry.workspace = true
 
 [dev-dependencies]
+uuid.workspace = true
 tokio = { workspace = true, features = ["macros", "rt", "time", "test-util"] }
 serial_test = "4.0"
 fake = { version = "5.1.0", features = ["derive"] }

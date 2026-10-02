@@ -1,3 +1,5 @@
+mod cancellable;
+pub use cancellable::{PromptAnswer, prompt_cancellable};
 mod confirm;
 mod input;
 mod multi;

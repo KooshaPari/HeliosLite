@@ -18,6 +18,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
+name = "agent-client-protocol-schema"
+version = "1.9.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1d595a79e1665d02c91c7dd1bedd118501e75cc0a3d5b1651b5150ec4c5c1e0d"
+dependencies = [
+ "anyhow",
+ "derive_more",
+ "serde",
+ "serde_json",
+ "serde_with",
+ "strum",
+]
+
+[[package]]
 name = "aho-corasick"
 version = "1.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2940,6 +2954,7 @@ dependencies = [
  "tonic",
  "tracing",
  "url",
+ "uuid",
 ]
 
 [[package]]
@@ -2979,6 +2994,7 @@ dependencies = [
 name = "forge_main"
 version = "2.13.21"
 dependencies = [
+ "agent-client-protocol-schema",
  "anyhow",
  "arboard",
  "async-recursion",
@@ -3048,6 +3064,7 @@ dependencies = [
  "update-informer",
  "ureq",
  "url",
+ "uuid",
  "windows-sys 0.61.2",
 ]
 
@@ -8301,12 +8318,10 @@ dependencies = [
 
 [[package]]
 name = "rustyline"
-version = "18.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "53f6a737db68eb1a8ccff86b584b2fc13eca6a7bb6f78ebc7c529547e3ab9684"
+version = "18.0.0"
+source = "git+https://github.com/kkawakam/rustyline.git?rev=f2bbcc5cdf7b99dfe7d97af03976b111bc6fd256#f2bbcc5cdf7b99dfe7d97af03976b111bc6fd256"
 dependencies = [
  "bitflags 2.11.0",
- "cfg-if",
  "clipboard-win",
  "home",
  "libc",
@@ -8491,6 +8506,7 @@ version = "1.0.151"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c841b55ecdae098c80dcae9cf767f6f8a0c2cdb3416bbef72181df4d0fe73f14"
 dependencies = [
+ "indexmap 2.14.2",
  "itoa",
  "memchr",
  "serde",
@@ -8978,6 +8994,9 @@ name = "strum"
 version = "0.28.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9628de9b8791db39ceda2b119bbe13134770b56c138ec1d3af810d045c04f9bd"
+dependencies = [
+ "strum_macros",
+]
 
 [[package]]
 name = "strum_macros"

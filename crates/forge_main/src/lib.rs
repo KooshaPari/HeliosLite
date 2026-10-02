@@ -1,3 +1,5 @@
+#[cfg(unix)]
+pub mod acp;
 pub mod banner;
 mod cli;
 mod completer;
@@ -8,6 +10,7 @@ mod error;
 mod highlighter;
 mod info;
 mod input;
+pub mod live_control;
 mod logs;
 mod model;
 mod oauth_callback;

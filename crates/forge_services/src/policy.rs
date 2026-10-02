@@ -11,21 +11,7 @@ use forge_app::{
     DirectoryReaderInfra, EnvironmentInfra, FileInfoInfra, FileReaderInfra, FileWriterInfra,
     PolicyDecision, PolicyService, UserInfra,
 };
-use strum_macros::{Display, EnumIter};
-
-/// User response for permission confirmation requests
-#[derive(Debug, Clone, PartialEq, Eq, Display, EnumIter, strum_macros::EnumString)]
-pub enum PolicyPermission {
-    /// Accept the operation
-    #[strum(to_string = "Accept")]
-    Accept,
-    /// Reject the operation
-    #[strum(to_string = "Reject")]
-    Reject,
-    /// Accept the operation and remember this choice for similar operations
-    #[strum(to_string = "Accept and Remember")]
-    AcceptAndRemember,
-}
+pub use forge_domain::PolicyPermission;
 
 #[derive(Clone)]
 pub struct ForgePolicyService<I> {
@@ -204,7 +190,7 @@ where
 
                 match self
                     .infra
-                    .select_one_enum::<PolicyPermission>(&confirmation_msg)
+                    .confirm_permission(&confirmation_msg, operation)
                     .await?
                 {
                     Some(PolicyPermission::Accept) => Ok(PolicyDecision { allowed: true, path }),
