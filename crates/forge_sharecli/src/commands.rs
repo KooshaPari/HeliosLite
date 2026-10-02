@@ -64,12 +64,16 @@ pub enum Command {
         /// JSON payload to publish. Bare strings are wrapped as JSON strings.
         #[arg(long)]
         payload: String,
+        /// Running relay address owned by `share serve`.
+        #[arg(long, default_value = "127.0.0.1:8765")]
+        relay: String,
     },
-    /// List the topics currently registered in a fresh hub (always empty).
-    ///
-    /// Exists so the subcommand tree has a diagnostic leaf and `clap` help
-    /// stays complete. A live `serve` process is the real registry.
-    Topics,
+    /// List topics from the running relay process.
+    Topics {
+        /// Running relay address owned by `share serve`.
+        #[arg(long, default_value = "127.0.0.1:8765")]
+        relay: String,
+    },
     /// Attach an in-process session to the relay as a pure ingestion
     /// endpoint.
     ///
@@ -92,6 +96,9 @@ pub enum Command {
         /// attribute events to a specific session.
         #[arg(long)]
         session_id: Option<String>,
+        /// Running relay address owned by `share serve`.
+        #[arg(long, default_value = "127.0.0.1:8765")]
+        relay: String,
     },
 }
 
@@ -134,21 +141,28 @@ pub fn run_command(cmd: &Command) -> Result<Option<String>, CliError> {
             run_serve_blocking(addr)?;
             Ok(None)
         }
-        Command::Publish { topic, payload } => {
-            let hub = ShareHub::new();
+        Command::Publish { topic, payload, relay } => {
             let value: serde_json::Value = serde_json::from_str(payload)
                 .unwrap_or_else(|_| serde_json::Value::String(payload.clone()));
-            let n = hub
-                .publish(crate::ShareMessage::new(topic.clone(), value))
-                .map_err(|e| CliError::Validation(e.to_string()))?;
-            Ok(Some(format!("published to {n} receiver(s)\n")))
+            let topic = topic.clone();
+            let relay = relay.clone();
+            let receivers = run_on_dedicated_thread(move |rt| {
+                rt.block_on(publish_remote(&relay, &topic, value))
+            })??;
+            Ok(Some(format!("published to {receivers} receiver(s)\n")))
         }
-        Command::Topics => Ok(Some(String::new())),
-        Command::Attach { topic, bind, session_id } => {
+        Command::Topics { relay } => {
+            let relay = relay.clone();
+            let topics = run_on_dedicated_thread(move |rt| rt.block_on(topics_remote(&relay)))??;
+            let json = serde_json::to_string(&topics)
+                .map_err(|e| CliError::Serve(e.to_string()))?;
+            Ok(Some(format!("{json}\n")))
+        }
+        Command::Attach { topic, bind, session_id, relay } => {
             let topic = topic.clone();
             let bind = bind.clone();
-            let session_id_outer = session_id;
-            run_attach_blocking(&topic, &bind, session_id_outer.as_deref())?;
+            let relay = relay.clone();
+            run_attach_blocking(&topic, &bind, session_id.as_deref(), &relay)?;
             Ok(None)
         }
     }
@@ -183,14 +197,14 @@ fn run_serve_blocking(addr: SocketAddr) -> Result<(), CliError> {
 }
 
 /// Mirror of [`run_serve_blocking`] for the `attach` subcommand.
-fn run_attach_blocking(topic: &str, bind: &str, session_id: Option<&str>) -> Result<(), CliError> {
+fn run_attach_blocking(topic: &str, bind: &str, session_id: Option<&str>, relay: &str) -> Result<(), CliError> {
     match tokio::runtime::Handle::try_current() {
         Err(_) => {
             let rt = tokio::runtime::Builder::new_multi_thread()
                 .enable_all()
                 .build()
                 .map_err(|e| CliError::Serve(format!("failed to build runtime: {e}")))?;
-            rt.block_on(attach(topic, bind, session_id))
+            rt.block_on(attach(topic, bind, session_id, relay))
         }
         // `topic`/`bind`/`session_id` are short-lived borrows
         // owned by the caller; clone them into `String`/`Option<String>`
@@ -199,8 +213,9 @@ fn run_attach_blocking(topic: &str, bind: &str, session_id: Option<&str>) -> Res
             let topic = topic.to_owned();
             let bind = bind.to_owned();
             let session_id = session_id.map(str::to_owned);
+            let relay = relay.to_owned();
             run_on_dedicated_thread(move |rt| {
-                rt.block_on(attach(&topic, &bind, session_id.as_deref()))
+                rt.block_on(attach(&topic, &bind, session_id.as_deref(), &relay))
             })
             .and_then(|inner| inner)
         }
@@ -340,221 +355,120 @@ async fn peekable_read(
 ///   cap so a silent client cannot wedge a connection slot indefinitely.
 /// * On `tokio::signal::ctrl_c`, prints `attach: shutting down`, drops
 ///   the listener and hub, and returns `Ok(())`.
-async fn attach(topic: &str, bind: &str, session_id: Option<&str>) -> Result<(), CliError> {
-    // Register the topic eagerly so it shows up on hub introspection before
-    // any subscriber attaches — mirrors what `transport::sse::handle_sse_get`
-    // does for inbound SSE sessions.
-    let hub = Arc::new(ShareHub::new());
-    hub.register_topic(topic)
-        .map_err(|e| CliError::Validation(e.to_string()))?;
+async fn publish_remote(relay: &str, topic: &str, payload: serde_json::Value) -> Result<usize, CliError> {
+    let mut stream = TcpStream::connect(relay).await
+        .map_err(|e| CliError::Serve(format!("connect relay {relay}: {e}")))?;
+    let body = serde_json::to_vec(&ShareMessage::new(topic.to_string(), payload))
+        .map_err(|e| CliError::Validation(format!("serialize message: {e}")))?;
+    let request = format!("POST /publish/{topic} HTTP/1.1\r\nHost: {relay}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len());
+    stream.write_all(request.as_bytes()).await.map_err(|e| CliError::Serve(format!("write relay request: {e}")))?;
+    stream.write_all(&body).await.map_err(|e| CliError::Serve(format!("write relay body: {e}")))?;
+    stream.shutdown().await.map_err(|e| CliError::Serve(format!("finish relay request: {e}")))?;
+    let mut response = Vec::new();
+    tokio::io::AsyncReadExt::read_to_end(&mut stream, &mut response).await
+        .map_err(|e| CliError::Serve(format!("read relay response: {e}")))?;
+    parse_publish_response(&response)
+}
 
-    let addr: SocketAddr = bind
-        .parse()
-        .map_err(|e| CliError::Serve(format!("invalid --bind {bind}: {e}")))?;
-
-    let listener = tokio::net::TcpListener::bind(addr)
-        .await
-        .map_err(|e| CliError::Serve(format!("bind {addr}: {e}")))?;
-    let actual = listener
-        .local_addr()
-        .map_err(|e| CliError::Serve(format!("local_addr: {e}")))?;
-
-    // Startup line on stdout, flushed before we yield to the runtime.
-    // Printers that watch the parent process expect this before the
-    // process blocks in `accept`.
-    {
-        let mut out = io::stdout().lock();
-        let _ = writeln!(out, "attach: listening on {actual} for topic {topic}");
-        let _ = out.flush();
+fn parse_http_body(response: &[u8]) -> Result<&[u8], CliError> {
+    let Some(split) = response.windows(4).position(|w| w == b"\r\n\r\n") else {
+        return Err(CliError::Serve("relay returned malformed HTTP response".into()));
+    };
+    let head = std::str::from_utf8(&response[..split])
+        .map_err(|e| CliError::Serve(format!("relay response header utf8: {e}")))?;
+    if !head.starts_with("HTTP/1.1 2") {
+        return Err(CliError::Serve(format!("relay rejected request: {}", head.lines().next().unwrap_or("unknown status"))));
     }
-    info!(addr = %actual, topic = %topic, "forge share attach: listening");
+    Ok(&response[split + 4..])
+}
 
-    // Race the accept loop against SIGINT.
+fn parse_publish_response(response: &[u8]) -> Result<usize, CliError> {
+    let value: serde_json::Value = serde_json::from_slice(parse_http_body(response)?)
+        .map_err(|e| CliError::Serve(format!("relay publish response json: {e}")))?;
+    value.get("receivers").and_then(serde_json::Value::as_u64).map(|n| n as usize)
+        .ok_or_else(|| CliError::Serve("relay publish response missing receivers".into()))
+}
+
+async fn topics_remote(relay: &str) -> Result<Vec<String>, CliError> {
+    let mut stream = TcpStream::connect(relay).await
+        .map_err(|e| CliError::Serve(format!("connect relay {relay}: {e}")))?;
+    let request = format!("GET /topics HTTP/1.1\r\nHost: {relay}\r\nConnection: close\r\n\r\n");
+    stream.write_all(request.as_bytes()).await.map_err(|e| CliError::Serve(format!("write topics request: {e}")))?;
+    stream.shutdown().await.map_err(|e| CliError::Serve(format!("finish topics request: {e}")))?;
+    let mut response = Vec::new();
+    tokio::io::AsyncReadExt::read_to_end(&mut stream, &mut response).await
+        .map_err(|e| CliError::Serve(format!("read topics response: {e}")))?;
+    serde_json::from_slice(parse_http_body(&response)?)
+        .map_err(|e| CliError::Serve(format!("relay topics response json: {e}")))
+}
+
+async fn attach(topic: &str, bind: &str, session_id: Option<&str>, relay: &str) -> Result<(), CliError> {
+    let addr: SocketAddr = bind.parse().map_err(|e| CliError::Serve(format!("invalid --bind {bind}: {e}")))?;
+    let listener = tokio::net::TcpListener::bind(addr).await.map_err(|e| CliError::Serve(format!("bind {addr}: {e}")))?;
+    let actual = listener.local_addr().map_err(|e| CliError::Serve(format!("local_addr: {e}")))?;
+    { let mut out = io::stdout().lock(); let _ = writeln!(out, "attach: listening on {actual} for topic {topic}; relay {relay}"); let _ = out.flush(); }
+    info!(addr = %actual, topic = %topic, relay = %relay, "forge share attach: listening");
     let accept_topic = topic.to_string();
     let accept_session = session_id.map(str::to_owned);
+    let relay = relay.to_string();
     let accept = async {
         loop {
-            let (stream, peer) = match listener.accept().await {
-                Ok(p) => p,
-                Err(e) => {
-                    warn!(error = %e, "attach: accept failed");
-                    continue;
-                }
-            };
-            let hub = Arc::clone(&hub);
-            let topic_inner = accept_topic.clone();
-            let session_inner = accept_session.clone();
+            let (stream, peer) = match listener.accept().await { Ok(p)=>p, Err(e)=>{ warn!(error=%e,"attach: accept failed"); continue; } };
+            let topic_inner=accept_topic.clone(); let session_inner=accept_session.clone(); let relay_inner=relay.clone();
             tokio::spawn(async move {
-                if let Err(e) = ingest_connection(hub, topic_inner, session_inner, stream).await {
-                    debug!(%peer, error = %e, "attach: connection ended with error");
+                if let Err(e)=ingest_connection(relay_inner,topic_inner,session_inner,stream).await {
+                    warn!(%peer,error=%e,"attach: relay ingestion failed");
                 }
             });
         }
     };
-
-    tokio::select! {
-        _ = signal::ctrl_c() => {
-            println!("attach: shutting down");
-            drop(listener);
-            drop(hub);
-            Ok(())
-        }
-        _ = accept => {
-            // `accept` only returns if the listener is closed by some
-            // out-of-band path; unreachable in practice.
-            Ok(())
-        }
-    }
+    tokio::select! { _ = signal::ctrl_c()=>{ println!("attach: shutting down"); drop(listener); Ok(()) }, _ = accept => Ok(()) }
 }
 
-/// Drain newline-delimited JSON from a single inbound TCP connection.
-///
-/// Each line is parsed as JSON; a valid line is wrapped in a `ShareMessage`
-/// and published to `topic`. Malformed lines are logged at `debug` and
-/// skipped — the connection keeps reading until EOF or a hard I/O error.
-///
-/// We bound each `read_line` to 5 seconds so a silent client cannot pin a
-/// spawned task forever; idle disconnects produce a `TimedOut` and return.
-async fn ingest_connection(
-    hub: Arc<ShareHub>,
-    topic: String,
-    session_id: Option<String>,
-    stream: TcpStream,
-) -> io::Result<()> {
-    let (read_half, mut write_half) = stream.into_split();
-    let mut reader = BufReader::new(read_half);
-    let mut line = String::new();
-
+async fn ingest_connection(relay: String, topic: String, session_id: Option<String>, stream: TcpStream) -> Result<(), CliError> {
+    let (read_half, mut write_half)=stream.into_split();
+    let mut reader=BufReader::new(read_half); let mut line=String::new();
     loop {
         line.clear();
-        let read =
-            match tokio::time::timeout(Duration::from_secs(5), reader.read_line(&mut line)).await {
-                Ok(Ok(n)) => n,
-                Ok(Err(e)) => return Err(e),
-                Err(_) => {
-                    debug!(topic = %topic, "attach: client idle; closing connection");
-                    let _ = write_half.shutdown().await;
-                    return Ok(());
-                }
-            };
-        if read == 0 {
-            // EOF — peer closed cleanly.
-            let _ = write_half.shutdown().await;
-            return Ok(());
-        }
-
-        let trimmed = line.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-
-        let value: serde_json::Value = match serde_json::from_str(trimmed) {
-            Ok(v) => v,
-            Err(e) => {
-                warn!(topic = %topic, error = %e, raw = %trimmed, "attach: skipping malformed line");
-                continue;
-            }
+        let read=match tokio::time::timeout(Duration::from_secs(5),reader.read_line(&mut line)).await {
+            Ok(Ok(n))=>n, Ok(Err(e))=>return Err(CliError::Serve(e.to_string())),
+            Err(_)=>{ debug!(topic=%topic,"attach: client idle; closing connection"); let _=write_half.shutdown().await; return Ok(()); }
         };
-
-        let payload = match session_id.as_deref() {
-            Some(sid) => serde_json::json!({ "session_id": sid, "event": value }),
-            None => serde_json::json!({ "event": value }),
-        };
-
-        // We swallow publish errors (no live subscribers is the normal
-        // case for `attach`) — only log if the message itself is invalid.
-        match hub.publish(ShareMessage::new(topic.clone(), payload)) {
-            Ok(n) => {
-                debug!(topic = %topic, receivers = n, "attach: published");
-            }
-            Err(e) => {
-                warn!(topic = %topic, error = %e, "attach: publish rejected");
-            }
-        }
+        if read==0 { let _=write_half.shutdown().await; return Ok(()); }
+        let trimmed=line.trim(); if trimmed.is_empty(){continue;}
+        let value:serde_json::Value=match serde_json::from_str(trimmed){Ok(v)=>v,Err(e)=>{warn!(topic=%topic,error=%e,raw=%trimmed,"attach: skipping malformed line");continue;}};
+        let payload=match session_id.as_deref(){Some(sid)=>serde_json::json!({"session_id":sid,"event":value}),None=>serde_json::json!({"event":value})};
+        let receivers=publish_remote(&relay,&topic,payload).await?;
+        debug!(topic=%topic,receivers,"attach: relayed");
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::net::SocketAddr;
-    use tokio::io::AsyncWriteExt;
-    use tokio::net::TcpStream;
+    use std::sync::Arc;
 
-    // Required unit test — drives the ingest path end-to-end:
-    //   bind 127.0.0.1:0, open a TCP connection, write a single JSON line,
-    //   verify a subscriber on the topic receives a ShareMessage whose
-    //   payload contains the original JSON object.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn attach_ingest_publishes_to_subscriber() {
-        let topic = "session-events";
+    async fn remote_publish_reaches_subscriber_in_relay_process() {
+        let hub=Arc::new(ShareHub::new()); let topic="cross-process";
+        let mut subscriber=hub.subscribe(topic).expect("subscribe");
+        let listener=tokio::net::TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let addr=listener.local_addr().expect("addr"); let relay_hub=Arc::clone(&hub);
+        let server=tokio::spawn(async move { let (stream,_)=listener.accept().await.expect("accept"); crate::transport::sse::serve_sse(relay_hub,stream).await.expect("serve"); });
+        let receivers=publish_remote(&addr.to_string(),topic,serde_json::json!({"hello":1})).await.expect("publish");
+        assert_eq!(receivers,1);
+        let msg=tokio::time::timeout(Duration::from_secs(2),subscriber.recv()).await.expect("timeout").expect("recv");
+        assert_eq!(msg.payload,serde_json::json!({"hello":1}));
+        server.await.expect("join");
+    }
 
-        // 1) Bind listener on an ephemeral port.
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-            .await
-            .expect("bind");
-        let addr: SocketAddr = listener.local_addr().expect("local_addr");
-
-        // 2) Stand up a hub + subscriber before any connect, mirroring the
-        //    ordering a real client would observe.
-        let hub = Arc::new(ShareHub::new());
-        hub.register_topic(topic).expect("register");
-        let mut sub = hub.subscribe(topic).expect("subscribe");
-
-        // 3) Spawn the same accept/ingest pair `attach()` uses, but with a
-        //    bounded lifetime so the test deterministically terminates:
-        //    1 accepted connection then the task exits.
-        let topic_owned = topic.to_string();
-        let hub_for_server = Arc::clone(&hub);
-        let server = tokio::spawn(async move {
-            // Accept exactly one connection.
-            let (stream, _peer) = listener.accept().await.expect("accept");
-            let _ = ingest_connection(
-                hub_for_server,
-                topic_owned,
-                Some("test-session".to_string()),
-                stream,
-            )
-            .await;
-            // Close the listener so a second accept never fires.
-            drop(listener);
-        });
-
-        // 4) Open a client connection and write one newline-delimited
-        //    JSON line.
-        let mut client = TcpStream::connect(addr).await.expect("connect");
-        client
-            .write_all(b"{\"hello\":1}\n")
-            .await
-            .expect("write line");
-        // Half-close so the server-side `read_line` returns EOF after the
-        // single line we've sent.
-        client.shutdown().await.expect("shutdown client");
-
-        // 5) Subscriber must observe a ShareMessage whose payload contains
-        //    `hello: 1`, wrapped under `event` (with our `session_id`).
-        let msg = tokio::time::timeout(Duration::from_secs(2), sub.recv())
-            .await
-            .expect("sub recv timed out")
-            .expect("sub recv");
-        assert_eq!(msg.topic, topic);
-        let event = msg
-            .payload
-            .get("event")
-            .expect("payload should carry an `event` envelope");
-        let hello = event
-            .get("hello")
-            .expect("`event` payload should carry `hello`");
-        assert_eq!(hello, &serde_json::json!(1));
-        assert_eq!(
-            msg.payload.get("session_id"),
-            Some(&serde_json::json!("test-session"))
-        );
-
-        // 6) Let the server task drain its write-half shutdown + exit.
-        tokio::time::timeout(Duration::from_secs(2), server)
-            .await
-            .expect("server task join")
-            .expect("server task");
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn topics_reads_running_relay_registry() {
+        let hub=Arc::new(ShareHub::new()); hub.register_topic("alpha").unwrap(); hub.register_topic("beta").unwrap();
+        let listener=tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap(); let addr=listener.local_addr().unwrap(); let relay_hub=Arc::clone(&hub);
+        let server=tokio::spawn(async move { let (stream,_)=listener.accept().await.unwrap(); crate::transport::sse::serve_sse(relay_hub,stream).await.unwrap(); });
+        let mut topics=topics_remote(&addr.to_string()).await.unwrap(); topics.sort();
+        assert_eq!(topics,vec!["alpha".to_string(),"beta".to_string()]);
+        server.await.unwrap();
     }
 }

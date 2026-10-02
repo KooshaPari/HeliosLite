@@ -1,0 +1,48 @@
+name: ShareCLI Cross-Process Relay
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "crates/forge_sharecli/**"
+      - ".github/workflows/sharecli-cross-process.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  sharecli-relay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: sharecli-cross-process
+      - name: Check ShareCLI
+        run: cargo check -p forge_sharecli
+      - name: Run cross-process relay tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +e
+          output="$(cargo test -p forge_sharecli --lib commands::tests:: -- --nocapture 2>&1)"
+          test_status=$?
+          set -e
+          printf '%s\n' "$output"
+          if [ "$test_status" -ne 0 ]; then
+            echo "ShareCLI targeted test command failed with exit $test_status" >&2
+            exit "$test_status"
+          fi
+          if grep -Eq 'running 0 tests|0 passed; 0 failed;.*filtered out' <<<"$output"; then
+            echo "ShareCLI targeted tests did not execute" >&2
+            exit 1
+          fi
+          grep -q 'remote_publish_reaches_subscriber_in_relay_process ... ok' <<<"$output"
+          grep -q 'topics_reads_running_relay_registry ... ok' <<<"$output"
+          grep -Eq '2 passed; 0 failed' <<<"$output"
