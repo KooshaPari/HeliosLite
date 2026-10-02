@@ -1,0 +1,24 @@
+{
+  "observed_on": "2026-09-29",
+  "product": "KooshaPari/HeliosLite",
+  "source_snapshot": "536a25cac1dc21ac97bbc86c7e9af74bd5932780",
+  "recursive_tree_truncated": false,
+  "total_entries": 1895,
+  "total_blobs": 1512,
+  "counts": {
+    "github": 49,
+    "workflows": 24,
+    "docs": 90,
+    "tests_path_heuristic": 65,
+    "benchmarks": 59,
+    "crates": 1049,
+    "scripts": 10,
+    "migrations": 39,
+    "manifests": 67,
+    "markdown": 216,
+    "rust": 699,
+    "typescript": 28,
+    "yaml": 62
+  },
+  "warning": "Counts are deterministic path inventory, not semantic source resolution. The tests count is a path-name heuristic and must not be used as a verified test denominator."
+}
