@@ -786,3 +786,8 @@ Gate demanded fresh re-execution of every mapped check over the entire result. A
 | R12 | `phinbox inbox --show hook-d6499f54…` | `state=answered`, `value=false` |
 
 Changed public outputs all re-observed: 3 manifests (R5–R7), toolchain pins (R1), generator (R2), workflows/CI (R3/R11), nightly acceptance (R4), distribution machinery (R8–R10), approval record (R12).
+
+### 2026-10-02T19:09Z status deltas (jcode)
+- **Nightly 10-02 (`37009887365`) ACCEPTED from raw logs** — job `110846829283` @ `9acde30e9` (344KB): 153× `test result: ok`, 0 `FAILED`, 0 content-modified, 0 panicked, **0×`32801`** (clean — no classification needed); run success, head ≥ `72ff2cab8` → stored watcher criteria all met. **5 consecutive green nightlies (09-28 → 10-02).**
+- **Tip matrix at `9acde30e9` FINAL: 36 checks = 33 success + 3 skipped + 0 failures** (observed 10-02 19:07Z). Trailing-24h failed runs = 0; dependabot open = 0; `local == remote == 9acde30e9` (no parallel-session movement since 10-01).
+- Ambient verifiers `sched_83d9ab24` / `sched_ec336732` (10-01 22:21Z) remain queued past-due — harmless: their premises (R11 verdict recorded+pushed ✓, target watcher consumed ✓) already hold, so they self-pass when they fire.
