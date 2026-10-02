@@ -1,0 +1,24 @@
+name: Effect Recovery Hook
+
+on:
+  pull_request:
+    paths:
+      - "crates/forge_app/src/tool_executor.rs"
+      - ".github/workflows/effect-recovery-hook.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  effect-recovery-hook:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: effect-recovery-hook
+      - run: cargo check -p forge_app
+      - run: cargo test -p forge_app effect_recovery_tests -- --nocapture
