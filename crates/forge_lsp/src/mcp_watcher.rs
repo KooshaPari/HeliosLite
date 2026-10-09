@@ -191,7 +191,21 @@ impl McpWatcher {
         ) {
             return false;
         }
-        event.paths.iter().any(|p| p == watched)
+        event.paths.iter().any(|p| Self::paths_match(p, watched))
+    }
+
+    /// Compare an fs-event path against the watched path, tolerating the
+    /// symlink resolution the OS backend applies.
+    ///
+    /// macOS FSEvents reports fully resolved paths, so a watched path under
+    /// `/var/folders/...` (the default user temp dir, and the CI runner's
+    /// `$TMPDIR`) comes back as `/private/var/folders/...`. A bare `==` then
+    /// never matches and the watcher observes zero reloads. Normalising the
+    /// *parent* directory (which is where the `/var -> /private/var` link
+    /// lives) while keeping the final component resolves this and still works
+    /// for `Remove` events, where the file itself no longer exists.
+    fn paths_match(a: &Path, b: &Path) -> bool {
+        a == b || normalize_parent(a) == normalize_parent(b)
     }
 
     /// Spawn the watcher onto the current Tokio runtime. Returns a
@@ -312,6 +326,19 @@ impl McpWatcherHandle {
     /// Whether the underlying task has been asked to stop.
     pub fn is_stopped(&self) -> bool {
         self.stop.load(Ordering::SeqCst)
+    }
+}
+
+/// Resolve symlinks in the *parent* directory of `p`, keeping the final
+/// component verbatim. This makes path comparison backend-agnostic (macOS
+/// FSEvents resolves `/var` to `/private/var`) while still working when the
+/// leaf file has just been removed and can no longer be canonicalised.
+fn normalize_parent(p: &Path) -> PathBuf {
+    match (p.parent(), p.file_name()) {
+        (Some(dir), Some(name)) if !dir.as_os_str().is_empty() => {
+            std::fs::canonicalize(dir).map_or_else(|_| p.to_path_buf(), |c| c.join(name))
+        }
+        _ => p.to_path_buf(),
     }
 }
 

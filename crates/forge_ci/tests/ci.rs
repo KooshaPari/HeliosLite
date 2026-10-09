@@ -81,6 +81,30 @@ fn signing_is_serialized_before_release_provenance() {
     }
 }
 
+/// Locate a POSIX shell able to run the workflow's `run:` scripts.
+///
+/// On Windows a bare `bash` resolves through `CreateProcess`'s search order,
+/// which hits `System32\bash.exe` — the WSL launcher — before `PATH`. That
+/// stub exits non-zero when no distribution is installed, so the release-tag
+/// quoting check failed spuriously on `windows-latest`. GitHub's Windows image
+/// ships Git Bash, so prefer that absolute path; fall back to `bash` on PATH.
+fn posix_shell() -> std::path::PathBuf {
+    #[cfg(windows)]
+    {
+        for candidate in [
+            r"C:\Program Files\Git\bin\bash.exe",
+            r"C:\Program Files\Git\usr\bin\bash.exe",
+            r"C:\Program Files (x86)\Git\bin\bash.exe",
+        ] {
+            let path = std::path::Path::new(candidate);
+            if path.exists() {
+                return path.to_path_buf();
+            }
+        }
+    }
+    std::path::PathBuf::from("bash")
+}
+
 fn generated_workflow_path(name: &str) -> std::path::PathBuf {
     std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../..")
@@ -118,7 +142,7 @@ fn release_tags_reach_gh_as_literal_arguments() {
                     .replace("${{ matrix.pattern }}", "*apple-darwin*");
                 // Exercise the actual rendered shell without network or filesystem writes.
                 let script = format!("mkdir() {{ :; }}\ngh() {{ printf '%s' \"$3\"; }}\n{script}");
-                let actual = std::process::Command::new("bash")
+                let actual = std::process::Command::new(posix_shell())
                     .args(["-c", &script])
                     .env("RELEASE_TAG", tag)
                     .output()
