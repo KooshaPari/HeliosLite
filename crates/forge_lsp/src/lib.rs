@@ -40,6 +40,7 @@ pub mod rename;
 pub mod rustc;
 pub mod server;
 pub mod service;
+pub mod spawn;
 pub mod tsc;
 
 pub use completion::{CompletionItem, CompletionKind, CompletionProvider};

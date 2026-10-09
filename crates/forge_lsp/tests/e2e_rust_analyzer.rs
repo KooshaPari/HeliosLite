@@ -82,9 +82,9 @@ fn find_rust_analyzer() -> Option<std::path::PathBuf> {
     // Verify the candidate responds to `--version`. A rustup shim for
     // a missing component answers "Unknown binary ..." and exits
     // non-zero; we want to treat that as "not installed" rather than
-    // as a broken LSP round-trip.
-    let probe = std::process::Command::new(&candidate)
-        .arg("--version")
+    // as a broken LSP round-trip. Routed through the portable spawner so
+    // a `.cmd`/`.bat` shim (should one ever resolve here) still runs.
+    let probe = forge_lsp::spawn::build_command(Path::new(&candidate), &["--version"])
         .output()
         .ok()?;
     if !probe.status.success() {
@@ -99,12 +99,11 @@ fn find_rust_analyzer() -> Option<std::path::PathBuf> {
 /// `Server::with_defaults` spawns *both* `rust-analyzer` and
 /// `typescript-language-server` during the handshake, so the round-trip can
 /// only run when both are actually executable. On Windows npm installs a
-/// `typescript-language-server.cmd` shim; `where` finds it (PATHEXT-aware) but
-/// `CreateProcess` — and therefore `std::process::Command` — cannot execute a
-/// batch file directly, so the `--version` probe fails and the test skips
-/// honestly instead of panicking with `failed to spawn`. Teaching the
-/// production spawner to wrap `.cmd`/`.bat` shims in `cmd /C` is a separate
-/// change (tracked as a follow-up).
+/// `typescript-language-server.cmd` shim; `where` finds it (PATHEXT-aware) and
+/// `forge_lsp::spawn::build_command` runs it through `cmd /C`, so both the
+/// probe below and the production spawner can execute it. The test therefore
+/// runs the real round-trip on Windows with npm-installed prereqs, and only
+/// skips when a server is genuinely absent.
 fn find_typescript_language_server() -> Option<std::path::PathBuf> {
     let cmd = if cfg!(windows) { "where" } else { "which" };
     let output = std::process::Command::new(cmd)
@@ -121,11 +120,9 @@ fn find_typescript_language_server() -> Option<std::path::PathBuf> {
         .find(|line| !line.is_empty())?
         .to_string();
 
-    // Same two-stage probe as `find_rust_analyzer`: a candidate that cannot
-    // answer `--version` (e.g. a `.cmd` shim Rust cannot exec) is treated as
-    // unavailable so the test skips cleanly.
-    let probe = std::process::Command::new(&candidate)
-        .arg("--version")
+    // Same two-stage probe as `find_rust_analyzer`; routed through the
+    // portable spawner so a Windows `.cmd` shim runs via `cmd /C`.
+    let probe = forge_lsp::spawn::build_command(Path::new(&candidate), &["--version"])
         .output()
         .ok()?;
     if !probe.status.success() {
