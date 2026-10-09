@@ -4091,6 +4091,9 @@ impl<A: API + ConsoleWriter + 'static, F: Fn(ForgeConfig) -> A + Send + Sync> UI
     /// - `Ok(Some((ModelId, ProviderId)))` if a model was selected, carrying
     ///   both the model and the provider it belongs to
     /// - `Ok(None)` if selection was canceled
+    // `async_recursion` injects `#[must_use]` on the generated wrapper, whose
+    // return type is already `#[must_use]`; the clippy lint is a false positive.
+    #[allow(clippy::double_must_use)]
     #[async_recursion::async_recursion]
     async fn select_model(
         &mut self,
@@ -4845,6 +4848,9 @@ impl<A: API + ConsoleWriter + 'static, F: Fn(ForgeConfig) -> A + Send + Sync> UI
     // When `provider_filter` is `Some`, only models from that provider are
     // shown. The model and provider returned by the selector are always set
     // as one atomic operation.
+    // `async_recursion` injects `#[must_use]` on the generated wrapper, whose
+    // return type is already `#[must_use]`; the clippy lint is a false positive.
+    #[allow(clippy::double_must_use)]
     #[async_recursion::async_recursion]
     async fn on_model_selection(
         &mut self,

@@ -1,3 +1,8 @@
+// clippy 1.99 raises `redundant_field_names` against the `diesel::QueryableByName`
+// derive's generated struct initializers, pointing at the field-declaration span
+// (the diagnostic carries no macro-expansion context) and suggesting a rewrite
+// that would not compile. Allow it at module scope.
+#![allow(clippy::redundant_field_names)]
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::Arc;

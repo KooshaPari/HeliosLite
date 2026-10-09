@@ -7,7 +7,7 @@ const GENERATED_WORKFLOWS: [&str; 7] = [
     "ci.yml",
     "labels.yml",
     "release-drafter.yml",
-    "release.yml",
+    "helioslite-release.yml",
     "stale.yml",
 ];
 
@@ -157,7 +157,7 @@ fn generated_workflows_are_parseable_and_identify_forge_ci_generator() {
         );
     }
 
-    let release = std::fs::read_to_string(generated_workflow_path("release.yml"))
+    let release = std::fs::read_to_string(generated_workflow_path("helioslite-release.yml"))
         .expect("generated release workflow");
     assert!(release.contains("attest_release_assets:"));
     assert!(release.contains("needs: build_release"));
@@ -211,7 +211,7 @@ fn test_release_drafter() {
 
 #[test]
 fn test_release_workflow() {
-    let expected = include_str!("../../../.github/workflows/release.yml");
+    let expected = include_str!("../../../.github/workflows/helioslite-release.yml");
     let generated = workflow::release_publish_yaml().unwrap();
     assert!(!generated.contains("npm_release"));
     assert!(!generated.contains("homebrew_release"));

@@ -74,6 +74,12 @@ impl<S: AgentService + EnvironmentInfra<Config = forge_config::ForgeConfig>> Orc
     }
 
     // Helper function to get all tool results from a vector of tool calls
+    //
+    // `async_recursion` injects `#[must_use]` onto the non-async wrapper it
+    // generates, but that wrapper returns a boxed `Future`, which the compiler
+    // already treats as `#[must_use]`. The resulting `clippy::double_must_use`
+    // is a false positive against the macro-generated attribute.
+    #[allow(clippy::double_must_use)]
     #[tracing::instrument(skip(self, tool_calls, tool_context), fields(tool_count = tool_calls.len()))]
     #[async_recursion]
     async fn execute_tool_calls(

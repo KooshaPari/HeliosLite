@@ -131,6 +131,9 @@ where
     }
 
     /// Get or create policies, prompting user if needed
+    // `async_recursion` injects `#[must_use]` on the generated wrapper, whose
+    // return type is already `#[must_use]`; the clippy lint is a false positive.
+    #[allow(clippy::double_must_use)]
     #[async_recursion::async_recursion]
     async fn get_or_create_policies(&self) -> anyhow::Result<(PolicyConfig, Option<PathBuf>)>
     where

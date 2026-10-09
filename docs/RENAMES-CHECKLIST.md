@@ -70,7 +70,7 @@ the human side of the operation can drive them to completion.
 
 - [x] `.github/workflows/release.yml` → `.github/workflows/helioslite-release.yml` (with `name:` updated) — **done in this PR**
 - [x] Deprecation alias `.github/workflows/release.yml` that dispatches to `helioslite-release.yml` — **done in this PR**
-- [ ] **CRITICAL:** update the `forge_ci` private workflow model so it does **NOT** clobber the deprecation alias on next regeneration. Currently any `forge_ci` regeneration will overwrite the alias and the renamed file. The deprecation alias has a header comment warning about this.
+- [x] **CRITICAL:** update the `forge_ci` private workflow model so it does **NOT** clobber the deprecation alias on next regeneration. — **done in n5-ci-hygiene**: `release_publish()` now emits the canonical workflow to `helioslite-release.yml` and no longer writes `release.yml` (option (b): dropped from the emit list). `crates/forge_ci/tests/ci.rs` snapshots `helioslite-release.yml`; the alias is hand-maintained.
 
 ## Bundle metadata (Gate 4 — publish-side)
 
