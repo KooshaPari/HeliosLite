@@ -189,7 +189,7 @@ jobs:
           # only reliable way to extend PATH.
           echo "$install_dir" >> "$GITHUB_PATH"
       - name: Run workspace tests
-        run: cargo test --workspace 2>&1
+        run: cargo test --workspace --all-features 2>&1
 
   # ── Gate 4: Lint ─────────────────────────────────────────────
   lint:
