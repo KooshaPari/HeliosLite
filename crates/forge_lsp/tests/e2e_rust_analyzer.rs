@@ -94,15 +94,62 @@ fn find_rust_analyzer() -> Option<std::path::PathBuf> {
     Some(std::path::PathBuf::from(candidate))
 }
 
+/// Locate a spawnable `typescript-language-server` on the current host.
+///
+/// `Server::with_defaults` spawns *both* `rust-analyzer` and
+/// `typescript-language-server` during the handshake, so the round-trip can
+/// only run when both are actually executable. On Windows npm installs a
+/// `typescript-language-server.cmd` shim; `where` finds it (PATHEXT-aware) but
+/// `CreateProcess` — and therefore `std::process::Command` — cannot execute a
+/// batch file directly, so the `--version` probe fails and the test skips
+/// honestly instead of panicking with `failed to spawn`. Teaching the
+/// production spawner to wrap `.cmd`/`.bat` shims in `cmd /C` is a separate
+/// change (tracked as a follow-up).
+fn find_typescript_language_server() -> Option<std::path::PathBuf> {
+    let cmd = if cfg!(windows) { "where" } else { "which" };
+    let output = std::process::Command::new(cmd)
+        .arg("typescript-language-server")
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let stdout = output.stdout.to_str_lossy();
+    let candidate = stdout
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())?
+        .to_string();
+
+    // Same two-stage probe as `find_rust_analyzer`: a candidate that cannot
+    // answer `--version` (e.g. a `.cmd` shim Rust cannot exec) is treated as
+    // unavailable so the test skips cleanly.
+    let probe = std::process::Command::new(&candidate)
+        .arg("--version")
+        .output()
+        .ok()?;
+    if !probe.status.success() {
+        return None;
+    }
+
+    Some(std::path::PathBuf::from(candidate))
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn e2e_definition_round_trip_against_real_rust_analyzer() {
     // ----------------------------------------------------------------
-    // Skip path — rust-analyzer not on PATH. Print the documented
-    // message and exit successfully so CI stays green on minimal
-    // build agents.
+    // Skip path — a required language server is not runnable here.
+    // `Server::with_defaults` spawns both `rust-analyzer` and
+    // `typescript-language-server`, so the round-trip needs both. Print
+    // the documented message and exit successfully so CI stays green on
+    // minimal build agents.
     // ----------------------------------------------------------------
     if find_rust_analyzer().is_none() {
         eprintln!("e2e: skipping, rust-analyzer not on PATH");
+        return;
+    }
+    if find_typescript_language_server().is_none() {
+        eprintln!("e2e: skipping, typescript-language-server not runnable");
         return;
     }
 
