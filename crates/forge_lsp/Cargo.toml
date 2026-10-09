@@ -20,6 +20,10 @@ clap = { workspace = true }
 # tree (inotify / FSEvents / ReadDirectoryChangesW shims) for the rest
 # of the workspace.
 notify = "8"
+# Portable `.cmd`/`.bat` subprocess construction (`build_command`) — the
+# canonical copy lives in `forge_pheno_shell` so `forge_lsp` and
+# `forge_infra` share one implementation instead of drifting copies.
+forge_pheno_shell = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3"

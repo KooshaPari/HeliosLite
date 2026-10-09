@@ -1,6 +1,7 @@
 use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::future::Future;
+use std::path::Path;
 use std::sync::{Arc, OnceLock, RwLock};
 use std::time::Duration;
 
@@ -172,13 +173,23 @@ impl ForgeMcpClient {
         let config = self.get_resolved_config()?;
         let client = match config {
             McpServerConfig::Stdio(stdio) => {
-                let mut cmd = Command::new(stdio.command.clone());
+                // Route the configured command through the shared
+                // `build_command` helper so a Windows npm `.cmd`/`.bat` shim
+                // (e.g. `npx`, `uvx`) is launched via `cmd /C` rather than
+                // failing with `program not found`. Unix is byte-identical to
+                // a direct `Command::new`.
+                let args: Vec<&str> = stdio.args.iter().map(String::as_str).collect();
+                let std_cmd = forge_pheno_shell::subprocess::build_command(
+                    Path::new(stdio.command.as_str()),
+                    &args,
+                );
+                let mut cmd = Command::from(std_cmd);
 
                 for (key, value) in &stdio.env {
                     cmd.env(key, value);
                 }
 
-                cmd.args(&stdio.args).kill_on_drop(true);
+                cmd.kill_on_drop(true);
 
                 // Use builder pattern to capture stderr
                 let (transport, stderr) = TokioChildProcess::builder(cmd)

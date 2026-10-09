@@ -2975,6 +2975,7 @@ dependencies = [
  "async-trait",
  "bstr",
  "clap",
+ "forge_pheno_shell",
  "notify",
  "serde",
  "serde_derive",

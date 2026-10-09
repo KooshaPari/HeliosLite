@@ -6,7 +6,6 @@
 //! `node_modules/.bin/tsc`.
 
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use crate::diagnostic::{Diagnostic, DiagnosticSeverity};
 use crate::provider::{DiagnosticsProvider, DiagnosticsResult};
@@ -47,10 +46,7 @@ impl DiagnosticsProvider for TscProvider {
         // JSON output. If a tsconfig.json exists at workspace_root,
         // tsc picks it up automatically.
         let tsc_bin = resolve_tsc_bin(workspace_root);
-        let output = match Command::new(&tsc_bin)
-            .arg("--noEmit")
-            .arg("--pretty")
-            .arg("false")
+        let output = match crate::spawn::build_command(&tsc_bin, &["--noEmit", "--pretty", "false"])
             .current_dir(workspace_root)
             .env("FORGE_LSP_FILE", path.display().to_string())
             .output()
@@ -94,7 +90,20 @@ impl DiagnosticsProvider for TscProvider {
 /// Resolve the `tsc` binary. Prefer the workspace-local
 /// `node_modules/.bin/tsc` (most reliable for project-configured
 /// paths), then fall back to a bare `tsc` on PATH.
+///
+/// On Windows the local npm launcher is `tsc.cmd` (a batch shim); the
+/// extension-less `tsc` file npm also writes there is a POSIX shell script
+/// that Windows cannot execute. We therefore prefer `tsc.cmd` on Windows so
+/// that `spawn::build_command` can wrap it in `cmd /C`. The bare-`tsc`
+/// fallback is resolved through `PATH` + `PATHEXT` by `build_command`.
 fn resolve_tsc_bin(workspace_root: &Path) -> PathBuf {
+    #[cfg(windows)]
+    {
+        let local_cmd = workspace_root.join("node_modules/.bin/tsc.cmd");
+        if local_cmd.exists() {
+            return local_cmd;
+        }
+    }
     let local = workspace_root.join("node_modules/.bin/tsc");
     if local.exists() {
         return local;
