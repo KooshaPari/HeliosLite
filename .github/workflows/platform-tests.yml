@@ -173,8 +173,7 @@ jobs:
         echo "$install_dir" >> "$GITHUB_PATH"
 
     - name: Run tests
-      run: cargo test --workspace
-      continue-on-error: true
+      run: cargo test --workspace --all-features
     - name: Run clippy
       run: cargo clippy --workspace --all-targets --no-deps -- -D warnings
     - name: Check formatting

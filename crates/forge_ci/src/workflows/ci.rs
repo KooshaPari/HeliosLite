@@ -6,6 +6,63 @@ use crate::workflow_model::{Event, Job, Level, Permissions, Push, Step, Workflow
 // must not rerun CI even when the all-targets opt-in label is already present.
 const CI_EVENT_GUARD: &str = "github.event_name != 'pull_request' || (github.event.action != 'labeled' && github.event.action != 'unlabeled') || github.event.label.name == 'ci: build all targets'";
 
+// Mirror the hand-maintained test.yml prereq installs so the coverage job
+// exercises the real rust-analyzer + typescript-language-server LSP round-trip
+// instead of the early-exit skip path. Comments are preserved verbatim because
+// they document the observed failure modes (runs 35339166638, 35336692859).
+const INSTALL_TS_SERVER: &str = r#"set -euo pipefail
+# forge_lsp::Server::with_defaults spawns BOTH rust-analyzer and
+# typescript-language-server, and crates/forge_lsp/tests/
+# e2e_rust_analyzer.rs exercises that production path whenever
+# rust-analyzer is available. Without the TS server the test panics
+# with `failed to spawn "typescript-language-server"` (run
+# 35339166638, ubuntu). Installing it keeps the e2e test real instead
+# of weakening it.
+npm install -g typescript-language-server typescript
+typescript-language-server --version"#;
+
+const INSTALL_RUST_ANALYZER: &str = r#"set -euo pipefail
+# Install into a dedicated dir, NEVER into $HOME/.cargo/bin: on
+# rustup-based setups `$HOME/.cargo/bin/rust-analyzer` is a symlink to
+# the `rustup` binary, so `> "$bin"` follows it and overwrites rustup
+# itself. Every shim (cargo, rustc, cargo-clippy, ...) then becomes the
+# rust-analyzer binary, producing nonsense like
+# `unexpected argument: "clippy"` (run 35336692859) and
+# `rustc -vV` printing `rust-analyzer 0.3.3049-standalone`
+# (run 35334658326).
+install_dir="$RUNNER_TEMP/rust-analyzer-bin"
+mkdir -p "$install_dir"
+case "$(uname -s)/$(uname -m)" in
+  Linux/x86_64)  asset="rust-analyzer-x86_64-unknown-linux-gnu"  bin="$install_dir/rust-analyzer" ;;
+  Linux/aarch64) asset="rust-analyzer-aarch64-unknown-linux-gnu" bin="$install_dir/rust-analyzer" ;;
+  Darwin/x86_64) asset="rust-analyzer-x86_64-apple-darwin"       bin="$install_dir/rust-analyzer" ;;
+  Darwin/arm64)  asset="rust-analyzer-aarch64-apple-darwin"      bin="$install_dir/rust-analyzer" ;;
+  MINGW*|MSYS*|CYGWIN*|Windows_NT/x86_64)
+    asset="rust-analyzer-x86_64-pc-windows-msvc"
+    bin="$install_dir/rust-analyzer.exe" ;;
+  MINGW*|MSYS*|CYGWIN*|Windows_NT/aarch64)
+    asset="rust-analyzer-aarch64-pc-windows-msvc"
+    bin="$install_dir/rust-analyzer.exe" ;;
+  *) echo "::error::unsupported platform: $(uname -s)/$(uname -m)" >&2; exit 1 ;;
+esac
+url="https://github.com/rust-lang/rust-analyzer/releases/latest/download/${asset}"
+# rm first so a stale symlink can never be followed by the redirect.
+rm -f "$bin"
+if [[ "$bin" == *.exe ]]; then
+  tmp="$(mktemp -d)/${asset}.zip"
+  curl -fsSL "${url}.zip" -o "$tmp"
+  unzip -q -o "$tmp" -d "$install_dir"
+  rm -rf "$(dirname "$tmp")"
+else
+  curl -fsSL "${url}.gz" | gunzip -c - > "$bin"
+  chmod +x "$bin"
+fi
+"$bin" --version
+# Put only the isolated dir on PATH for later steps. $GITHUB_PATH is the
+# canonical GH Actions mechanism and, on the windows-2022 image, the
+# only reliable way to extend PATH.
+echo "$install_dir" >> "$GITHUB_PATH""#;
+
 /// Regenerate the CI workflow from its private workflow model.
 pub fn generate_ci_workflow() {
     super::generate_private_workflow(ci_workflow(), "ci.yml");
@@ -24,11 +81,21 @@ fn ci_workflow() -> Workflow {
             "d23441a48e516b6c34aea4fa41551a30e30af803",
         ))
         .add_step(setup_protoc())
+        .add_step(
+            Step::new("Install typescript-language-server")
+                .shell("bash")
+                .run(INSTALL_TS_SERVER),
+        )
         .add_step(Step::new("Setup Rust Toolchain").uses(
             "actions-rust-lang",
             "setup-rust-toolchain",
             "166cdcfd11aee3cb47222f9ddb555ce30ddb9659",
         ))
+        .add_step(
+            Step::new("Install rust-analyzer")
+                .shell("bash")
+                .run(INSTALL_RUST_ANALYZER),
+        )
         .add_step(Step::new("Install cargo-llvm-cov").run("cargo install cargo-llvm-cov"))
         .add_step(
             Step::new("Generate coverage")
