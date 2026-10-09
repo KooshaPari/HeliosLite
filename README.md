@@ -6,7 +6,7 @@
 <p align="center"><em>AI-enhanced terminal development environment — agentic coding CLI/TUI with ZSH plugin support.</em></p>
 <p align="center"><sub>Terminal-Forge palette · <a href="assets/brand/README.md">brand assets &amp; tokens</a> · <a href="docs/VISUAL_SPEC.md">visual spec</a> · theme.rs wired (PR #86) · <a href="docs/assets/identity/">visual identity demo</a> — <em>Phenotype-org addition on top of upstream <a href="https://github.com/tailcallhq/forgecode">tailcallhq/forgecode</a></em></sub></p>
 
-[![AI slop inside](https://sladge.net/badge.svg)](https://sladge.net) [![GitHub Downloads (all assets, all releases)](https://img.shields.io/github/downloads/KooshaPari/forgecode/total)](https://github.com/KooshaPari/forgecode/releases)
+[![AI slop inside](https://sladge.net/badge.svg)](https://sladge.net) [![GitHub Downloads (all assets, all releases)](https://img.shields.io/github/downloads/KooshaPari/heliosLite/total)](https://github.com/KooshaPari/heliosLite/releases)
 
 ---
 
@@ -59,8 +59,8 @@ uncompressed/empty/oversized/agent-initiated/integrity).
 |-------|-------|
 | Default branch | `main` |
 | Language | Rust (2021 edition) |
-| Binary | `forge` (from `crates/forge_main`) |
-| Version | 2.10.0 |
+| Binary | `helioslite` (from `crates/forge_main`) |
+| Version | 2.13.21 |
 | License | MIT / Apache-2.0 |
 
 ## Architecture
@@ -107,28 +107,28 @@ terminal, not against it (see [FR-014](FUNCTIONAL_REQUIREMENTS.md)):
 - **Motion.** Animated brand assets (the SMIL CRT mark) ship a
   `prefers-reduced-motion` fallback (see `assets/tokens.css`).
 
-## Install forge-dev
+## Install helioslite
 
-Grab the latest `forge-dev` binary for your platform:
+Grab the latest `helioslite` binary for your platform:
 
 ```sh
-curl -sSfL https://github.com/KooshaPari/forgecode/releases/latest/download/install.sh | sh
+curl -sSfL https://github.com/KooshaPari/heliosLite/releases/latest/download/install.sh | sh
 ```
 
 This downloads the correct binary for your OS and architecture (macOS ARM/Intel,
-Linux x86_64/ARM64, Windows x86_64), installs it to `/usr/local/bin/forge-dev`
-(or `~/.local/bin/forge-dev` if `/usr/local/bin` is not writable), and makes it
+Linux x86_64/ARM64, Windows x86_64), installs it to `/usr/local/bin/helioslite`
+(or `~/.local/bin/helioslite` if `/usr/local/bin` is not writable), and makes it
 executable.
 
 > **Source builds:** To build from source instead, use `cargo build --release
-> --features dev-binary --bin forge-dev`. The `forge-dev` binary is the
+> --features dev-binary --bin helioslite`. The `helioslite` binary is the
 > fork-specific build of the CLI with Phenotype enhancements.
 
 ## Quick Start
 
 ```sh
 # Run the CLI
-cargo run --bin forge-dev --features dev-binary
+cargo run --bin helioslite --features dev-binary
 
 # Tests (prefers cargo-nextest; falls back to cargo test)
 cargo nextest run    # or: cargo test

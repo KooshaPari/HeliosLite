@@ -151,8 +151,8 @@ diesel = { version = "2.3.7", features = ["sqlite"] }
 # Terminal-Forge visual identity (proposed 2026-07-06 by vision-pillar).
 # Phenotype-org addition (not present in upstream tailcallhq/forgecode).
 # Icon source of truth: ../../assets/brand/forgecode-icon.svg.
-name = "forgecode"
-identifier = "ai.kooshapari.forgecode"
+name = "helioslite"
+identifier = "ai.kooshapari.helioslite"
 icon = ["../../assets/icons/forgecode.iconset"]
 resources = []
 category = "DeveloperTool"
