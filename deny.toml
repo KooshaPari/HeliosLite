@@ -50,4 +50,5 @@ unknown-git = "deny"
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
 allow-git = [
     "https://github.com/KooshaPari/PhenoShared.git",
+    "https://github.com/kkawakam/rustyline.git",
 ]

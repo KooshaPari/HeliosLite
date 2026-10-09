@@ -107,6 +107,15 @@ impl Cli {
 
 #[derive(Subcommand, Debug, Clone)]
 pub enum TopLevelCommand {
+    /// Serve the Agent Client Protocol v1 on stdin/stdout.
+    Acp,
+    /// Own a detached live session runtime (internal ACP launcher).
+    #[command(hide = true)]
+    LiveHost {
+        session: String,
+        #[arg(long)]
+        create: bool,
+    },
     /// Manage agents.
     Agent(AgentCommandGroup),
 

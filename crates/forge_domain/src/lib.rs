@@ -1,3 +1,7 @@
+mod interaction;
+pub use interaction::*;
+mod chat_event;
+pub use chat_event::*;
 mod agent;
 mod attachment;
 mod auth;

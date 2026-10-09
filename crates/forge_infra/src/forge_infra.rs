@@ -268,6 +268,16 @@ impl CommandInfra for ForgeInfra {
 
 #[async_trait::async_trait]
 impl UserInfra for ForgeInfra {
+    async fn confirm_permission(
+        &self,
+        message: &str,
+        operation: &forge_domain::PermissionOperation,
+    ) -> anyhow::Result<Option<forge_domain::PolicyPermission>> {
+        self.inquire_service
+            .confirm_permission(message, operation)
+            .await
+    }
+
     async fn prompt_question(&self, question: &str) -> anyhow::Result<Option<String>> {
         self.inquire_service.prompt_question(question).await
     }

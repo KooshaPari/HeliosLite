@@ -305,6 +305,7 @@ fn format_mcp_headers(server: &forge_domain::McpServerConfig) -> Option<String> 
 }
 
 pub struct UI<A: ConsoleWriter, F: Fn(ForgeConfig) -> A> {
+    live_sessions: std::collections::HashMap<ConversationId, crate::live_control::LiveControl>,
     markdown: MarkdownFormat,
     state: UIState,
     api: Arc<F::Output>,
@@ -542,6 +543,7 @@ impl<A: API + ConsoleWriter + 'static, F: Fn(ForgeConfig) -> A + Send + Sync> UI
         let command = Arc::new(ForgeCommandManager::default());
         let spinner = SharedSpinner::new(SpinnerManager::new(api.clone()));
         Ok(Self {
+            live_sessions: std::collections::HashMap::new(),
             state: UIState::new(env.clone()),
             api,
             new_api: Arc::new(f),
@@ -605,7 +607,13 @@ impl<A: API + ConsoleWriter + 'static, F: Fn(ForgeConfig) -> A + Send + Sync> UI
     }
 
     pub async fn run(&mut self) {
-        match self.run_inner().await {
+        let result = self.run_inner().await;
+        for (_, runtime) in self.live_sessions.drain() {
+            if let Err(error) = runtime.shutdown().await {
+                tracing::error!(error = ?error, "live session shutdown failed");
+            }
+        }
+        match result {
             Ok(_) => {}
             Err(error) => {
                 // Check if this is a cursor position error (non-fatal)
@@ -815,6 +823,10 @@ impl<A: API + ConsoleWriter + 'static, F: Fn(ForgeConfig) -> A + Send + Sync> UI
 
     async fn handle_subcommands(&mut self, subcommand: TopLevelCommand) -> anyhow::Result<()> {
         match subcommand {
+            TopLevelCommand::Acp | TopLevelCommand::LiveHost { .. } => {
+                anyhow::bail!("ACP commands must be dispatched before UI initialization")
+            }
+
             TopLevelCommand::Test(test_group) => {
                 let runner = crate::TestRunner::new()?;
                 let result = match test_group.command {
@@ -5077,6 +5089,11 @@ impl<A: API + ConsoleWriter + 'static, F: Fn(ForgeConfig) -> A + Send + Sync> UI
 
         // Always set the conversation id in state
         self.state.conversation_id = Some(id);
+        if let std::collections::hash_map::Entry::Vacant(entry) = self.live_sessions.entry(id) {
+            let control = crate::live_control::LiveControl::start(self.api.clone(), id)?;
+            self.console.register_live(&control.handle);
+            entry.insert(control);
+        }
 
         Ok(id)
     }
@@ -5219,12 +5236,25 @@ impl<A: API + ConsoleWriter + 'static, F: Fn(ForgeConfig) -> A + Send + Sync> UI
     }
 
     async fn on_chat(&mut self, chat: ChatRequest) -> Result<()> {
-        let mut stream = self.api.chat(chat).await?;
+        let session = chat.conversation_id;
+        if let std::collections::hash_map::Entry::Vacant(entry) = self.live_sessions.entry(session)
+        {
+            let control = crate::live_control::LiveControl::start(self.api.clone(), session)?;
+            self.console.register_live(&control.handle);
+            entry.insert(control);
+        }
+        let mut stream = self
+            .live_sessions
+            .get(&session)
+            .ok_or_else(|| anyhow::anyhow!("live session owner missing"))?
+            .handle
+            .local_prompt(chat)
+            .await?;
 
         // Always use streaming content writer
         let mut writer = StreamingWriter::new(self.spinner.clone(), self.api.clone());
 
-        while let Some(message) = stream.next().await {
+        while let Some(message) = stream.recv().await {
             match message {
                 Ok(message) => {
                     self.emit_stream_json(&message)?;
@@ -5253,29 +5283,21 @@ impl<A: API + ConsoleWriter + 'static, F: Fn(ForgeConfig) -> A + Send + Sync> UI
         if !self.cli.stream_json && self.cli.stream_json_log.is_none() {
             return Ok(());
         }
-        let kind = match message {
-            ChatResponse::TaskMessage { .. } => "message",
-            ChatResponse::TaskReasoning { .. } => "reasoning",
-            ChatResponse::TaskComplete => "complete",
-            ChatResponse::ToolCallStart { .. } => "tool_start",
-            ChatResponse::ToolCallEnd(..) => "tool_end",
-            ChatResponse::RetryAttempt { .. } => "retry",
-            ChatResponse::Interrupt { .. } => "interrupt",
-        };
-        let line = serde_json::json!({
-            "type": kind,
-            "empty": message.is_empty(),
-        });
+        let line = forge_domain::ChatEvent::from(message);
         let s = serde_json::to_string(&line)?;
         if self.cli.stream_json {
             println!("{s}");
         }
         if let Some(path) = &self.cli.stream_json_log {
             use std::io::Write;
-            let mut f = std::fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(path)?;
+            let mut options = std::fs::OpenOptions::new();
+            options.create(true).append(true);
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::OpenOptionsExt;
+                options.mode(0o600);
+            }
+            let mut f = options.open(path)?;
             writeln!(f, "{s}")?;
         }
         Ok(())

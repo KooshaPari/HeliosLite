@@ -253,3 +253,24 @@ fn debug_impl_does_not_leak_callback() {
     assert!(dbg.contains("McpWatcher"));
     assert!(dbg.contains("<Fn>"));
 }
+
+#[cfg(unix)]
+#[test]
+fn event_matches_canonical_parent_alias_without_matching_other_files() {
+    let temporary = TempDir::new().unwrap();
+    let real = temporary.path().join("real");
+    std::fs::create_dir(&real).unwrap();
+    let alias = temporary.path().join("alias");
+    std::os::unix::fs::symlink(&real, &alias).unwrap();
+    let watched = alias.join("mcp.toml");
+    let event = Event {
+        kind: EventKind::Remove(notify::event::RemoveKind::File),
+        paths: vec![real.join("mcp.toml")],
+        attrs: Default::default(),
+    };
+    assert!(McpWatcher::event_should_reload(&event, &watched));
+    assert!(!McpWatcher::event_should_reload(
+        &event,
+        &alias.join("other.toml")
+    ));
+}

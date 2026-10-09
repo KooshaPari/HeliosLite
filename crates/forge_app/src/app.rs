@@ -440,12 +440,25 @@ impl<S: Services + EnvironmentInfra<Config = forge_config::ForgeConfig>> ForgeAp
         .hook(Arc::new(hook));
 
         // Create and return the stream
-        let stream = MpscStream::spawn(
+        let stream = crate::spawn_interaction_stream(
             |tx: tokio::sync::mpsc::Sender<Result<ChatResponse, anyhow::Error>>| {
                 async move {
                     // Execute dispatch and always save conversation afterwards
                     let mut orch = orch.sender(tx.clone());
-                    let dispatch_result = orch.run().await;
+                    let dispatch_result = if let Some(mut context) =
+                        forge_domain::InteractionContext::current()
+                    {
+                        if *context.cancel.borrow() {
+                            Err(anyhow::anyhow!("turn cancelled"))
+                        } else {
+                            tokio::select! {
+                                result = orch.run() => result,
+                                _ = context.cancel.changed() => Err(anyhow::anyhow!("turn cancelled")),
+                            }
+                        }
+                    } else {
+                        orch.run().await
+                    };
 
                     // Always save conversation using get_conversation()
                     let conversation = orch.get_conversation().clone();

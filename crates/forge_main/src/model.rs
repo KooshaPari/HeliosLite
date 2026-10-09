@@ -4,7 +4,7 @@ use clap::error::ErrorKind;
 use clap::{Parser, Subcommand};
 use forge_api::{AgentInfo, Model, Template};
 use forge_domain::UserCommand;
-use strum::{EnumProperty, IntoEnumIterator};
+use strum::{EnumProperty as StrumEnumProperty, IntoEnumIterator};
 use strum_macros::{EnumIter, EnumProperty};
 
 use crate::info::Info;
