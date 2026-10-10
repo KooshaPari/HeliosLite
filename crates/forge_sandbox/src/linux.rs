@@ -29,10 +29,10 @@ impl LinuxBackend {
 }
 
 fn detect_landlock() -> bool {
-    // Landlock landed in Linux 5.13.  Without uname parsing in std, we just
-    // assume yes and let `prctl` fail later if it's not — the spawn path
-    // catches that and propagates BackendUnavailable.
-    true
+    // Truthful fail-closed reporting: setup_landlock() below does not yet
+    // install a Landlock ruleset, even with the feature enabled. Until real
+    // rules are applied and probed, this backend must never claim enforcement.
+    false
 }
 
 #[async_trait]

@@ -1,0 +1,30 @@
+name: Sandbox Truthfulness
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "crates/forge_sandbox/**"
+      - ".github/workflows/sandbox-truthfulness.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  linux-truthfulness:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: sandbox-truthfulness
+      - name: Check sandbox crate
+        run: cargo check -p forge_sandbox
+      - name: Run sandbox truthfulness tests
+        run: cargo test -p forge_sandbox --lib sandbox_tests -- --nocapture
