@@ -24,6 +24,7 @@ import {
 import { parseCliArgs } from "./parse.js";
 import { executeTask, type TaskExecutionResult } from "./task-executor.js";
 import { processValidations, type ValidationResult } from "./verification.js";
+import { strictExitCode } from "./result-policy.js";
 import { createTempDir, parseCsvAsync } from "./utils.js";
 
 const execAsync = promisify(exec);
@@ -265,9 +266,12 @@ async function main() {
           hasEarlyExit = true;
         }
 
-        // If execution failed or timed out, stop executing remaining commands
-        if (executionResult.error) {
-          lastError = executionResult.error;
+        // Timeouts are terminal even if partial output happened to satisfy a
+        // validator. Never allow timeout evidence to flow into a normal pass.
+        if (executionResult.isTimeout || executionResult.error) {
+          lastError =
+            executionResult.error ??
+            `Task timed out after ${task.timeout ?? "configured"}s`;
           hasTimeout = executionResult.isTimeout;
 
           logger.warn(
@@ -379,13 +383,8 @@ async function main() {
     "Evaluation completed",
   );
 
-  // Exit with error code if any task failed (excluding timeouts and validation failures)
-  if (failCount > 0) {
-    process.exit(1);
-  }
-  
-  // Exit successfully - ensures process terminates even with open handles
-  process.exit(0);
+  // Strict gate mode: every non-pass terminal state is non-zero.
+  process.exit(strictExitCode(results));
 }
 
 main().catch((error) => {
