@@ -1,0 +1,64 @@
+{
+  "program": "HARNESS-MATURE-20260929",
+  "product": "KooshaPari/HeliosLite",
+  "source_snapshot": "536a25cac1dc21ac97bbc86c7e9af74bd5932780",
+  "status": "BLOCKED_INCOMPLETE",
+  "specification_design_percent": null,
+  "mature_product_percent": null,
+  "requirement_count_target": null,
+  "source_denominator_closed": false,
+  "native_product_tests": "TARGETED_CANDIDATE_PASS",
+  "implementation_candidate": "8451b952ef26f0720ee5e87d25eda6da1bc38700",
+  "qualified_findings": {
+    "H-F001": "FIXED_IN_CANDIDATE_8451b952",
+    "H-F002": "FIXED_IN_CANDIDATE_8451b952",
+    "H-F003": "FIXED_IN_CANDIDATE_8451b952",
+    "H-F004": "FIXED_IN_CANDIDATE_8451b952"
+  },
+  "candidate_evidence": {
+    "dedicated_oracle_run": 36627763151,
+    "oracle_tests": "8/8 passed",
+    "platform_tests": 36627763194,
+    "observed_workflows": "12/12 completed success at candidate head"
+  },
+  "acceptance_exclusions": [
+    "Frozen source remains affected by H-F001..H-F004 until candidate is accepted/merged",
+    "Unqualified implemented flags",
+    "Generated catalogs",
+    "Diagnostic/model-probe success"
+  ],
+  "gates": {
+    "source_ledger_fully_resolved": "OPEN",
+    "alias_history_falsification": "OPEN",
+    "sota_research": "PARTIAL",
+    "realistic_alternative_stack": "DEFINED_NOT_PILOTED",
+    "bootstrap_decisions": "PARTIAL",
+    "differentiation_survived_attack": "OPEN",
+    "ontology_reviewed": "DRAFT",
+    "accepted_obligations_complete": "OPEN",
+    "quality_properties": "PARTIAL",
+    "journeys": "DRAFT_RECOVERY_EFFECT_SLICE_OPEN",
+    "stage_projections": "DRAFT",
+    "oracle_design_complete": "PARTIAL",
+    "high_risk_experiments_closed": "PARTIAL_EXTERNAL_EFFECT_RECOVERY_OPEN",
+    "implementation_mapping_complete": "OPEN",
+    "traceability_structurally_valid": "NOT_RUN",
+    "registry_repo_agreement": "PENDING_READBACK",
+    "invalid_catalogs_excluded": "PROGRAM_POLICY_PLUS_CANDIDATE_ORACLE_ONLY",
+    "orphan_analysis": "NOT_RUN",
+    "contradictions_resolved": "OPEN_INTEGRATION_CUSTODY",
+    "no_blocking_findings": "FAIL",
+    "independent_fresh_review": "NOT_RUN"
+  },
+  "next_bound": "Resolve integration custody (#323-#325), DBD/forge_daemon existence (#326-#327), external-effect crash slice, retained delta, source/history/SOTA/traceability and independent review. External-effect crash-boundary receipt/reconciliation experiment remains required.",
+  "blocking_design_unknowns": [
+    "#323_SHARECLI_PROCESS_ISOLATION",
+    "#324_AGILEPLUS_AUTHORITY_DUPLICATION",
+    "#325_TRACERA_TELEMETRY_VS_EVIDENCE",
+    "#326_DBD_EXISTENCE_GATE",
+    "#327_FORGE_DAEMON_EXISTENCE_GATE"
+  ],
+  "blocking_findings": [
+    "H-F008"
+  ]
+}
