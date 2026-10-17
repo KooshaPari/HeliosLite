@@ -153,7 +153,7 @@ diesel = { version = "2.3.7", features = ["sqlite"] }
 # Icon source of truth: ../../assets/brand/forgecode-icon.svg.
 name = "helioslite"
 identifier = "ai.kooshapari.helioslite"
-icon = ["../../assets/icons/forgecode.iconset"]
+icon = ["../../assets/icons/helioslite.iconset"]
 resources = []
 category = "DeveloperTool"
 short_description = "AI-enhanced terminal development environment"
