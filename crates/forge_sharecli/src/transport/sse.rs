@@ -69,6 +69,12 @@ async fn dispatch(
     let path = req.path.clone();
     let path_ref = path.split('?').next().unwrap_or(path.as_str());
 
+    if path_ref == "/topics" {
+        let mut topics = hub.topics();
+        topics.sort();
+        let body = serde_json::to_vec(&topics).map_err(io::Error::other)?;
+        return write_simple(writer, 200, "OK", &body).await;
+    }
     if let Some(topic) = path_ref.strip_prefix("/sse/").filter(|t| !t.is_empty()) {
         return handle_sse_get(hub, topic, writer).await;
     }
