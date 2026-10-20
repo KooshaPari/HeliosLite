@@ -1,3 +1,8 @@
+// clippy 1.99 raises `redundant_field_names` against the `diesel::QueryableByName`
+// derive's generated struct initializers, pointing at the field-declaration span
+// (the diagnostic carries no macro-expansion context) and suggesting a rewrite
+// that would not compile. Allow it at crate scope; see forge_infra/src/env.rs.
+#![allow(clippy::redundant_field_names)]
 mod agent;
 mod agent_definition;
 mod codec;

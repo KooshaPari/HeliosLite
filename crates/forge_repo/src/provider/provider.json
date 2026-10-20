@@ -385,30 +385,6 @@
         ]
       },
       {
-        "id": "gpt-4.5-preview",
-        "name": "GPT-4.5 Preview",
-        "description": "Preview of next-generation GPT-4.5 model",
-        "context_length": 128000,
-        "tools_supported": true,
-        "supports_parallel_tool_calls": true,
-        "input_modalities": [
-          "text",
-          "image"
-        ]
-      },
-      {
-        "id": "gpt-4.5-preview-2025-02-27",
-        "name": "GPT-4.5 Preview (2025-02-27)",
-        "description": "GPT-4.5 Preview snapshot from February 2025",
-        "context_length": 128000,
-        "tools_supported": true,
-        "supports_parallel_tool_calls": true,
-        "input_modalities": [
-          "text",
-          "image"
-        ]
-      },
-      {
         "id": "gpt-3.5-turbo",
         "name": "GPT-3.5 Turbo",
         "description": "Fast and affordable model for most tasks",
@@ -428,29 +404,6 @@
         "supports_parallel_tool_calls": true,
         "input_modalities": [
           "text"
-        ]
-      },
-      {
-        "id": "gpt-3.5-turbo-1106",
-        "name": "GPT-3.5 Turbo (1106)",
-        "description": "GPT-3.5 Turbo model snapshot from November 2023",
-        "context_length": 16385,
-        "tools_supported": true,
-        "supports_parallel_tool_calls": true,
-        "input_modalities": [
-          "text"
-        ]
-      },
-      {
-        "id": "chatgpt-4o-latest",
-        "name": "ChatGPT-4o Latest",
-        "description": "Latest ChatGPT model with continuous updates",
-        "context_length": 128000,
-        "tools_supported": true,
-        "supports_parallel_tool_calls": true,
-        "input_modalities": [
-          "text",
-          "image"
         ]
       },
       {
@@ -530,19 +483,6 @@
         ]
       },
       {
-        "id": "gpt-5-chat-latest",
-        "name": "GPT-5 Chat Latest",
-        "description": "Latest GPT-5 optimized for chat",
-        "context_length": 200000,
-        "tools_supported": true,
-        "supports_parallel_tool_calls": true,
-        "supports_reasoning": true,
-        "input_modalities": [
-          "text",
-          "image"
-        ]
-      },
-      {
         "id": "gpt-5.1",
         "name": "GPT-5.1",
         "description": "Enhanced GPT-5 with improved capabilities",
@@ -556,35 +496,9 @@
         ]
       },
       {
-        "id": "gpt-5.1-chat-latest",
-        "name": "GPT-5.1 Chat Latest",
-        "description": "Latest GPT-5.1 optimized for chat",
-        "context_length": 200000,
-        "tools_supported": true,
-        "supports_parallel_tool_calls": true,
-        "supports_reasoning": true,
-        "input_modalities": [
-          "text",
-          "image"
-        ]
-      },
-      {
         "id": "gpt-5.2",
         "name": "GPT-5.2",
         "description": "Latest iteration of GPT-5 series",
-        "context_length": 200000,
-        "tools_supported": true,
-        "supports_parallel_tool_calls": true,
-        "supports_reasoning": true,
-        "input_modalities": [
-          "text",
-          "image"
-        ]
-      },
-      {
-        "id": "gpt-5.2-chat-latest",
-        "name": "GPT-5.2 Chat Latest",
-        "description": "Latest GPT-5.2 optimized for chat",
         "context_length": 200000,
         "tools_supported": true,
         "supports_parallel_tool_calls": true,
@@ -1773,19 +1687,6 @@
         ]
       },
       {
-        "id": "gemini-3.1-flash-lite-preview",
-        "name": "Gemini 3.1 Flash Lite Preview",
-        "description": "Google's most cost-efficient Gemini model, optimized for low latency use cases for high-volume, cost-sensitive LLM traffic.",
-        "context_length": 1000000,
-        "tools_supported": true,
-        "supports_parallel_tool_calls": true,
-        "supports_reasoning": true,
-        "input_modalities": [
-          "text",
-          "image"
-        ]
-      },
-      {
         "id": "gemini-3.1-pro-preview",
         "name": "Gemini 3.1 Pro Preview",
         "description": "Most capable Gemini model with advanced reasoning",
@@ -1879,18 +1780,6 @@
         "id": "gemini-1.5-flash",
         "name": "Gemini 1.5 Flash",
         "description": "Fast and efficient Gemini 1.5 model",
-        "context_length": 1000000,
-        "tools_supported": true,
-        "supports_parallel_tool_calls": true,
-        "input_modalities": [
-          "text",
-          "image"
-        ]
-      },
-      {
-        "id": "gemini-1.5-flash-8b",
-        "name": "Gemini 1.5 Flash 8B",
-        "description": "Compact and efficient Gemini 1.5 model",
         "context_length": 1000000,
         "tools_supported": true,
         "supports_parallel_tool_calls": true,
@@ -2371,18 +2260,6 @@
         ]
       },
       {
-        "id": "anthropic.claude-3-5-sonnet-20240620-v1:0",
-        "name": "Claude Sonnet 3.5",
-        "description": "",
-        "context_length": 200000,
-        "tools_supported": true,
-        "supports_parallel_tool_calls": true,
-        "input_modalities": [
-          "text",
-          "image"
-        ]
-      },
-      {
         "id": "mistral.ministral-3-8b-instruct",
         "name": "Ministral 3 8B",
         "description": "",
@@ -2794,19 +2671,6 @@
         ]
       },
       {
-        "id": "us.anthropic.claude-opus-4-20250514-v1:0",
-        "name": "Claude Opus 4 (US)",
-        "description": "",
-        "context_length": 200000,
-        "tools_supported": true,
-        "supports_parallel_tool_calls": true,
-        "supports_reasoning": true,
-        "input_modalities": [
-          "text",
-          "image"
-        ]
-      },
-      {
         "id": "eu.anthropic.claude-sonnet-4-20250514-v1:0",
         "name": "Claude Sonnet 4 (EU)",
         "description": "",
@@ -3068,18 +2932,6 @@
         ]
       },
       {
-        "id": "anthropic.claude-3-haiku-20240307-v1:0",
-        "name": "Claude Haiku 3",
-        "description": "",
-        "context_length": 200000,
-        "tools_supported": true,
-        "supports_parallel_tool_calls": true,
-        "input_modalities": [
-          "text",
-          "image"
-        ]
-      },
-      {
         "id": "eu.anthropic.claude-opus-4-5-20251101-v1:0",
         "name": "Claude Opus 4.5 (EU)",
         "description": "",
@@ -3130,36 +2982,10 @@
         ]
       },
       {
-        "id": "amazon.nova-premier-v1:0",
-        "name": "Nova Premier",
-        "description": "",
-        "context_length": 1000000,
-        "tools_supported": true,
-        "supports_parallel_tool_calls": true,
-        "supports_reasoning": true,
-        "input_modalities": [
-          "text",
-          "image"
-        ]
-      },
-      {
         "id": "anthropic.claude-sonnet-4-6",
         "name": "Claude Sonnet 4.6",
         "description": "",
         "context_length": 1000000,
-        "tools_supported": true,
-        "supports_parallel_tool_calls": true,
-        "supports_reasoning": true,
-        "input_modalities": [
-          "text",
-          "image"
-        ]
-      },
-      {
-        "id": "anthropic.claude-opus-4-20250514-v1:0",
-        "name": "Claude Opus 4",
-        "description": "",
-        "context_length": 200000,
         "tools_supported": true,
         "supports_parallel_tool_calls": true,
         "supports_reasoning": true,
@@ -3453,87 +3279,9 @@
         ]
       },
       {
-        "id": "claude-3-7-sonnet@20250219",
-        "name": "Claude Sonnet 3.7",
-        "description": "Enhanced third generation Claude model with improved performance",
-        "context_length": 200000,
-        "tools_supported": true,
-        "supports_parallel_tool_calls": true,
-        "supports_reasoning": true,
-        "input_modalities": [
-          "text",
-          "image"
-        ]
-      },
-      {
         "id": "claude-3-5-sonnet-v2@20241022",
         "name": "Claude Sonnet 3.5 v2",
         "description": "Most intelligent model through Amazon Bedrock",
-        "context_length": 200000,
-        "tools_supported": true,
-        "supports_parallel_tool_calls": true,
-        "supports_reasoning": true,
-        "input_modalities": [
-          "text",
-          "image"
-        ]
-      },
-      {
-        "id": "claude-3-5-haiku@20241022",
-        "name": "Claude Haiku 3.5",
-        "description": "Fast third generation Claude model optimized for efficiency",
-        "context_length": 200000,
-        "tools_supported": true,
-        "supports_parallel_tool_calls": true,
-        "supports_reasoning": true,
-        "input_modalities": [
-          "text",
-          "image"
-        ]
-      },
-      {
-        "id": "claude-3-5-sonnet@20240620",
-        "name": "Claude Sonnet 3.5",
-        "description": "Advanced third generation Claude model",
-        "context_length": 200000,
-        "tools_supported": true,
-        "supports_parallel_tool_calls": true,
-        "supports_reasoning": true,
-        "input_modalities": [
-          "text",
-          "image"
-        ]
-      },
-      {
-        "id": "claude-3-haiku@20240307",
-        "name": "Claude Haiku 3",
-        "description": "Third generation fast Claude model",
-        "context_length": 200000,
-        "tools_supported": true,
-        "supports_parallel_tool_calls": false,
-        "supports_reasoning": true,
-        "input_modalities": [
-          "text",
-          "image"
-        ]
-      },
-      {
-        "id": "claude-3-sonnet@20240229",
-        "name": "Claude Sonnet 3",
-        "description": "Third generation balanced Claude model",
-        "context_length": 200000,
-        "tools_supported": true,
-        "supports_parallel_tool_calls": true,
-        "supports_reasoning": true,
-        "input_modalities": [
-          "text",
-          "image"
-        ]
-      },
-      {
-        "id": "claude-3-opus@20240229",
-        "name": "Claude Opus 3",
-        "description": "Third generation most powerful Claude model",
         "context_length": 200000,
         "tools_supported": true,
         "supports_parallel_tool_calls": true,
@@ -3572,19 +3320,6 @@
         "id": "gemini-3.1-pro-preview",
         "name": "Gemini 3.1 Pro Preview",
         "description": "Most capable Gemini model with advanced reasoning",
-        "context_length": 1000000,
-        "tools_supported": true,
-        "supports_parallel_tool_calls": true,
-        "supports_reasoning": true,
-        "input_modalities": [
-          "text",
-          "image"
-        ]
-      },
-      {
-        "id": "gemini-3.1-flash-lite-preview",
-        "name": "Gemini 3.1 Flash Lite Preview",
-        "description": "Cost-efficient Gemini model optimized for high-volume, low latency use cases",
         "context_length": 1000000,
         "tools_supported": true,
         "supports_parallel_tool_calls": true,
@@ -4062,19 +3797,6 @@
         "id": "claude-opus-4-5",
         "name": "Claude Opus 4.5",
         "description": "Most powerful Claude model",
-        "context_length": 200000,
-        "tools_supported": true,
-        "supports_parallel_tool_calls": true,
-        "supports_reasoning": true,
-        "input_modalities": [
-          "text",
-          "image"
-        ]
-      },
-      {
-        "id": "claude-opus-4-1",
-        "name": "Claude Opus 4.1",
-        "description": "Powerful Claude model for complex tasks",
         "context_length": 200000,
         "tools_supported": true,
         "supports_parallel_tool_calls": true,
@@ -4577,18 +4299,6 @@
         "name": "Nemotron 3 Ultra Free",
         "description": "",
         "context_length": 1000000,
-        "tools_supported": true,
-        "supports_parallel_tool_calls": true,
-        "supports_reasoning": true,
-        "input_modalities": [
-          "text"
-        ]
-      },
-      {
-        "id": "north-mini-code-free",
-        "name": "North Mini Code Free",
-        "description": "",
-        "context_length": 256000,
         "tools_supported": true,
         "supports_parallel_tool_calls": true,
         "supports_reasoning": true,

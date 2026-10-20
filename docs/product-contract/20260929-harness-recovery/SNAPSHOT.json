@@ -1,0 +1,23 @@
+{
+  "program": "HARNESS-MATURE-20260929",
+  "observed_on": "2026-09-29",
+  "product": "KooshaPari/HeliosLite",
+  "repository_id": 1226104769,
+  "default_branch": "main",
+  "source_snapshot": "536a25cac1dc21ac97bbc86c7e9af74bd5932780",
+  "source_tree": "fb5ffb3ce9bb4482e6536abcd5376d284c837e1c",
+  "specification_branch": "spec/harness-mature-recovery-20260929",
+  "implementation_candidate": null,
+  "registry_snapshot": "85d7cd00cf59c379c05b740e8130a85b0d5bd31b",
+  "related_snapshots": {
+    "KooshaPari/KCode": "046ea2af5e01e84449f65d086510b51152360215",
+    "KooshaPari/HeliosCLI": "8c2bf4b0d3a062d28b30bfd0826e0c7983ac1886",
+    "KooshaPari/HeliosLab": "a73ee736425a9985f35633ed88767c006132927b",
+    "KooshaPari/PhenoShared_default": "d24b13edbb76741b8063f4f7f3369d1b7310ca5b",
+    "KooshaPari/PhenoShared_manifest_pin": "b2d06d5376c1e94e207c679f402597103a5a10a4"
+  },
+  "dependency_pin_provenance": "Cargo.toml workspace.dependencies pins phenotype-health, phenotype-observability and phenotype-telemetry to b2d06d53; commit expanded through GitHub. Cargo.lock reconciliation and selected build graph remain open.",
+  "external_reference": {"tailcallhq/forgecode": "be1dcb4717a4d3bd811478353c5b0de535891a15"},
+  "atomic_multi_repo_snapshot": false,
+  "scope_limit": "Connector observations made separately; later default-branch movement is not silently substituted. Native product execution has not been performed."
+}

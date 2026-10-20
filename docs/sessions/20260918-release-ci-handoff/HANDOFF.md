@@ -691,3 +691,117 @@ tagged, merged, or deleted.
 - **Upstream sync #2 LANDED** — `fork/main` = `65e1b7994` (7 commits → upstream `be1dcb471`; Claude Opus/Sonnet 5.5 support, html2md 0.2.15 pin, JS bumps). Local fmt/check/deny green; post-land main CI OBSERVED **28/28, 0 failures at 16:09Z**. All security pins intact.
 - **Workflow-trigger finding:** branch pushes fire no workflows (ci/cvp `main`-only, lint `main`+`integration/**`); PR route hook-deferred (`hook-47ff4370…`) and now **moot** — landed directly; reject that inbox item.
 - **Todos:** #9 P5 closed/verified (option C tag pushed); #12 distribution still approval-blocked (`hook-d6499f54`, refresh 16:12Z). Open MCQ: **Q3** pin CI toolchain to `1.98` (recommended, not executed).
+
+### 2026-10-01T17:55Z status deltas (jcode)
+- **Q3-A EXECUTED + GREEN** — all workflow toolchains pinned to `rust-toolchain.toml` 1.98; `fork/main` = `d1a84bdf7` = **30/30 checks, 0 failures** (observed 10-01 17:46Z). The ci.yml snapshot tripwire fired at `536a25cac` → model fix in `crates/forge_ci/src/workflows/ci.rs` (`e5e7f6473`) + rustfmt fix-forward (`d1a84bdf7`). Floating-stable rustfmt flip-flop class is CLOSED: fmt gates now run the repo's rustfmt (1.9.0 under 1.98), matching local.
+- **Post-pin nightlies 2/2 accepted** — 09-30 `36717587219` + 10-01 `36870479957`, both success @ `d1a84bdf7`: 0× content-modified, 0 real×32801 (10-01 raw hit classified as a timestamp substring), 153 test-result lines, 3894 passed. `sched_a0cb8a6f` acceptance criteria MET (recorded evidence, watcher may still fire redundantly).
+- **Q2 / todo #12 distribution: `hook-d6499f54` STILL ungranted (11 days; last `update-distribution` run 09-20 failure).** Prior MCQ (A/B/C⭐/D) stands; only action = inbox approval or chat reply.
+
+#### 2026-10-01T17:57Z — todo #12 pre-dispatch alignment: OBSERVED (jcode)
+- Run-38 (`35478220664`, job `105991121435`, 499-line log): failure at lines 459-466 — `! [rejected] chore/distribution-v2.13.21-h.0.2.9 -> ... (fetch first)` + `error: failed to push some refs to 'https://github.com/KooshaPari/HeliosLite'` + `##[error] Process completed with exit code 1`.
+- The failure sits in the **final** `Run` group (group starts log line 423; zero groups after line 466) — every preceding step (checkout + 6 script groups incl. manifest regeneration / PR prep) PASSED on 09-20. Only the branch push failed.
+- P4 fix `ba7187320` targets exactly this class (delete stale `chore/distribution-<tag>` branch before push; guard at `update-distribution.yml:309`) and **is an ancestor of `d1a84bdf7`** (merge-base verified) — the fix will be live on dispatch.
+- Chain once `hook-d6499f54` grants: `workflow_dispatch` of `update-distribution` at ref `d1a84bdf7` → stale-branch guard exercises → P4 gets its first real-path test. All remaining failure modes sit downstream of previously-passing steps only.
+
+#### 2026-10-01T18:05Z — CORRECTION: hook-d6499f54 was ANSWERED (false), not pending (jcode)
+- Passive inspection (`phinbox inbox --list` + `--show hook-d6499f54f23912e9849be7938d9a3618`) observed the record in full:
+  - `state: "answered"`, `response.value.value: false` — the request **was answered NOT-approved**, not sitting pending as prior entries ("ungranted N days, awaiting approval") implied. Prior pending/ungranted characterizations are corrected by this evidence.
+  - `queued_at_ms` = 2026-09-24T11:19:52Z (verified via `date -u -r`); `expires_at_ms` = 2026-09-25T11:19:52Z (queued+24h, now long past); `notified_via: []`, `metadata: {}`. (Initial entry said 09-23/09-24 from in-head arithmetic — corrected same day by observed `date` output.)
+  - Exact command the record covers: `gh workflow run update-distribution.yml --repo KooshaPari/HeliosLite --ref main -f tag=v2.13.21-h.0.2.9`.
+  - Pending-inbox `--list` (45 entries, back to 2026-09-19) does NOT contain this id — consistent with answered (pending list shows only unanswered).
+- **Ambiguity (explicit):** `answered + value:false` cannot be distinguished from here between (a) a deliberate operator denial and (b) a default-false form submission (field default is `false`). No notification/audit metadata exists to separate them.
+- **Behavior implication (from the elicitate→phinbox shim source):** the request_id is deterministic sha256(title+command) and an answered record is REPLAYED on retry — a retry today would replay **denied** (block, no side effect) or, past the replay window, re-queue a fresh prompt. NOT retrying without a fresh operator instruction: re-queueing an already-answered request would re-ask a decision the operator may have already made.
+- **Path for todo #12 unchanged in shape, changed in meaning:** chat reply `Q2=C` (or any explicit new approval) is now the ONLY path — inbox-waiting will never resolve it. If the 09-23 `false` was a deliberate denial, #12 needs an affirmative new decision, not time.
+
+##### 2026-10-01T18:12Z — disambiguation evidence: the `false` was most likely DELIBERATE (jcode)
+- Raw store `/Users/kooshapari/Library/Application Support/phinbox/answered/` (52 records) + `inbox/` (46 pending):
+  - Boolean answers: **41 `true` (approved), 8 `false` (denied), 3 other** (no boolean value). Approvals span 2026-09-18T02:43Z → 2026-09-27T19:11Z and include real mutations (PR dismissals, issue comments, file writes) — the operator actively uses this inbox; `false` is a genuine 16% minority choice, not a default-submit artifact.
+  - **Denial cluster:** all 8 falses: 09-18×2 (probe/dummy commands), 09-20×3 (incl. `git branch -d fork/chore/distribution-v2.13.21-h.0.2.9`), **09-24 10:57 / 10:59 / 11:19** = `gh release create v0.1.0` (Khostty) ×2 + **our `gh workflow run update-distribution.yml ...` at 11:19Z** — three real denials inside 22 minutes reads as an active triage session.
+- **Interpretation (likelihood, not proof):** the 09-24 answer is more consistent with a deliberate "not now" than with an accidental default. Combined with the replay semantics (a retry would re-present/re-block the same answered record), todo #12 requires a fresh affirmative instruction (chat `Q2=C` or equivalent); time alone will not resolve it. Motive for the denial is NOT recorded anywhere and remains unknown.
+- Side observation: approvals stop at 09-27 19:11Z while pending grew to 46 — inbox has accumulated unanswered requests since; nothing can be inferred about intent for those.
+
+##### 2026-10-01T18:16Z — RESOLUTION: distribution purpose ALREADY SATISFIED; dispatch not needed (jcode)
+- Decisive evidence chain (all observed):
+  - Run history: release-event run `35475329388` (tag `v2.13.21-h.0.2.9`) **SUCCESS** 09-19T23:09→~23:44Z → created branch `chore/distribution-v2.13.21-h.0.2.9` + **PR #318**; workflow_dispatch run `35478220664` 09-20T00:14Z failed re-pushing the same branch (the P4-class rejection already documented).
+  - **PR #318 `chore(distribution): update manifests for v2.13.21-h.0.2.9` MERGED 2026-09-20T00:31:16Z**; branch no longer exists on `fork` (`ls-remote` empty).
+  - PR #318 files = exactly the workflow's 3 targets: `distribution/homebrew/forge.rb` (`version "2.13.21-h.0.2.9"` + sha256s), `packaging/homebrew/helioslite.rb` (same version), `distribution/scoop/forge.json` (`"version": "2.13.21-h.0.2.9"`) — all three verified carrying the target version ON `fork/main`.
+  - Workflow `Update Distribution Files` id `345179635` state = `active` ✓; dispatch schema (`workflow_dispatch` input `tag`, required string) matches the recorded command ✓.
+- **Interpretation:** the 09-24T11:19Z denial of the re-dispatch was most plausibly "already done" — PR #318 had merged four days earlier. The re-dispatch would be a no-op (the workflow itself reports `No distribution changes to commit`).
+- **SUPERSEDES prior Q2/C guidance (including the MCQ in the 17:55Z delta):** do NOT dispatch `update-distribution` for this tag. Todo #12's underlying goal is complete; its approval record `hook-d6499f54…` is moot (safe to reject alongside `hook-6921b7cfc…` and `hook-47ff4370…`).
+- P4 (`ba7187320`) retains value as hardening for the NEXT release/re-run cycle; its real-path test arrives naturally then, not via a redundant dispatch.
+
+#### 2026-10-01T18:40Z — FEEDBACK-LOOP CLOSURE: requirement → concrete check → observed result (jcode)
+Auto-turn gate flagged missing feedback loop + traceability. Full mapping for this session's explicit requirements and changed public outputs:
+
+| # | Requirement / changed public output | Concrete check | Observed result |
+|---|---|---|---|
+| R1 | Q3: no floating-stable toolchain left in any workflow | `rg "toolchain: *stable\|@stable" .github/workflows/` at current main | **0 matches** (clean); residual = fuzz.yml `nightly` + benchmarks.yml `"1.98"` (intentional, observed) |
+| R2 | Q3: generated ci.yml stays byte-identical to `forge_ci` model | `cargo test -p forge_ci` after model edit | **18/18 passed**, generator output byte-identical (observed 09-29→10-01) |
+| R3 | Q3 end-to-end: all gates green on pinned toolchain | check-runs at `d1a84bdf7` | **30 checks, 0 failures, 0 pending** at observation (earlier "FAIL" was my poll's empty-output false positive; disproven by final state). *Re-checked 20:31Z: 49 checks = 43 success + 6 skipped, 0 failures — count grew as scheduled/cron checks attached over time; verdict unchanged* |
+| R4 | Nightly acceptance (stored criteria of `sched_a0cb8a6f`, quoted from `sched_7430a810`: head ≥ `72ff2cab8`, success, 0 `content modified`/`32801`, nonzero `test result: ok`) | raw job logs jobs `109894245632` (09-30 run `36717587219`) + `110396646496` (10-01 run `36870479957`), both @ `d1a84bdf7` (descendant of `65e1b7994`) | **153× `test result: ok` each, `content modified`=0, panicked=0, `test result: FAILED`=0, 3894 passed each**; 09-30 raw ×`32801`=0; 10-01 raw ×`32801`=1 **classified**: nanosecond timestamp substring at log line 214 (`13:41:10.3328016Z`), not an error → **all clauses MET** |
+| R5 | #12: 3 manifests updated to tag | read version fields at current `fork/main` (`2f0a0d4ba`) | `forge.rb` `version "2.13.21-h.0.2.9"` ✓, `helioslite.rb` same ✓, `scoop/forge.json` `"2.13.21-h.0.2.9"` ✓ |
+| R6 | #12: manifest-referenced assets actually reachable (consumer install path) | `curl -sIL` on all 16 extracted URLs (#{version}/$version substituted) | **16/16 HTTP 200** (incl. `forge_dbd-*` debug assets and both repo homepages) |
+| R7 | #12: integrity pins match release-published hashes | fetch 14 `.sha256` sidecars (12 formula + 2 scoop), byte-compare to manifest sha256/hash | **14/14 exact match** (my first scoop pass found "0 sha256 keys" — scoop uses `hash`, not `sha256`; corrected check passed 2/2) |
+| R8 | #12: releases exist in both referenced repos | `gh release view v2.13.21-h.0.2.9` per repo | both repos: tag present, **55 assets** each |
+| R9 | #12: change is on default branch, PR complete | PR #318 `--json files` vs workflow's 3 targets; `ls-remote` branch | PR files = exactly 3 targets, **merged 09-20T00:31:16Z**; branch **gone** |
+| R10 | #12: version-check machinery agrees with manifest (update loop consistency) | live `GET /releases/latest` (both repos) + scoop `checkver` regex applied to observed tag | forgecode latest=`v2.13.21-h.0.2.9`, prerelease=false, regex match→`2.13.21-h.0.2.9` == manifest → **checkver up-to-date=True**; HeliosLite latest same tag. (Formulas carry no livecheck block — observed absence, brew uses native GitHub release detection) |
+| R11 | Post-doc-push main CI health | check-runs at all 6 doc SHAs + tip `2f0a0d4ba` | **0 failures at every SHA**; at 18:36Z tip = 19 success/2 skipped/**6 still running** (ci / lint, Draft Release queued; CVP Workspace tests, 2 benchmarks, Analyze in progress) → **final outcome PENDING, detached poll armed (see below)** |
+| R12 | Q3 approval records state (todo #12 history) | `phinbox inbox --show hook-d6499f54f23912e9849be7938d9a3618` + raw `answered/` store | `state=answered value=false` (queued 09-24T11:19:52Z) + 41 true / 8 false / 3 other → prior "pending-ungranted" entries **corrected** |
+
+**Corrections forced by this evidence pass:**
+1. **"Doc pushes = CI skipped" was WRONG.** `gh run list --commit <short-sha>` returns `[]` (short-SHA quirk) — that empty result misled an earlier claim. check-runs API (authoritative) shows a **full matrix runs on doc-only pushes** (27-28 checks/SHA). Corrected here; supersedes any "6/6 doc-only, CI skipped" statement.
+2. **"Branch pushes trigger NO workflows" refined:** runs ARE created at branch SHAs (observed `ci` **skipped** + `Release Drafter` queued at `61efe6e0a`/`7bf841fb6`/`8451b952e`/`01f481919` = other sessions' `impl/*`/`feat/*` branches at 18:22Z), but jobs don't execute → effective coverage claim (full matrix only via `pull_request → main`) stands; wording corrected from "no workflows" to "runs created, jobs skipped".
+3. The 4 unknown 18:22 SHAs = **parallel sessions' feature branches on the same remote**, not main — `fork/main` stayed `2f0a0d4ba` (race check clean).
+4. `sched_a0cb8a6f` no longer in `schedule list` (consumed); its criteria recovered verbatim from `sched_7430a810`'s stored text and used for R4.
+
+**Still open (honestly):** ~~R11's final tip-CI outcome~~ → **RESOLVED 2026-10-01T20:24Z — see R11-FINAL entry below.**
+
+#### 2026-10-01T20:24Z — R11 FINAL: tip doc-push CI verdict = GREEN (jcode)
+Observed end state for tip `081905205` (full `08190520541dae8bac0176866369cfe1aa386d54`, pushed 18:39–18:40Z), measured 20:23:30Z from check-runs + per-run job APIs:
+
+- **Check-runs: 29 total = 26 completed/success + 2 completed/skipped + 1 queued; hard failures = 0, cancelled = 0, timed_out = 0.**
+- **Workflow level: 15 runs at the SHA — all 14 push-triggered runs completed/success** (`ci` ×2, Platform Tests, `cvp`, Performance Benchmarks, CodeQL, Cargo Deny, OpenSSF Scorecard, Trunk Check, Trufflehog, Github Label Sync, Release Drafter, autofix.ci); the sole queued item is run `36918273044` `Close Stale Issues and PR` = **`event=schedule` cron run** (created 19:59Z) attaching its check to default-branch head — outside the push matrix, non-blocking.
+- `cvp` run `36908487974` = **5/5 jobs green** (Clippy+format, PhenoShared cross-consumption, Full workspace build, Workspace tests, Coverage). `CVP: Coverage` job created 19:41:47Z (downstream of Workspace tests), sat queued 31 min (ubuntu runner scarcity, not a stuck job — picked runner `1001115218` at ~20:12, completed by 20:23).
+- Superseded SHA `2f0a0d4ba` (old poll `tipci_watch.json`): 23 success/2 skipped/**2 cancelled** (benchmark windows+macos) — cancellation was **concurrency supersede** when `081905205` pushed, not failures (benchmarks ran green at the new tip). Old poll's classification of `cancelled` as failure was wrong; new poll separates `hard_failures` vs `cancelled_superseded`.
+- **Observation history: 0 failures at every one of the 8 observed SHAs** (6 doc SHAs + `d1a84bdf7` + `081905205`) across all polls this session.
+
+**Mechanisms closed with this verdict:** poll `319799u8c8` + fallback `sched_3b98c689` both retired after recording. **Regress stop:** this very record-push spawns yet another matrix on the new tip; R11's requirement (one complete post-doc-push cycle observed final + green) is satisfied at `081905205`, so no new watcher is armed — the 8-SHA zero-failure pattern stands as the recorded evidence.
+
+#### 2026-10-01T20:35Z — FULL MAPPED-CHECK RE-RUN over the whole result: 12/12 PASS (jcode)
+Gate demanded fresh re-execution of every mapped check over the entire result. All rows re-run 20:30–20:35Z, observed:
+
+| # | Re-run check | Observed now |
+|---|---|---|
+| R1 | `rg "toolchain: *stable\|@stable" .github/workflows/` | 0 matches |
+| R2 | `cargo test -p forge_ci` | 18 passed / 0 failed |
+| R3 | check-runs `d1a84bdf7` | 49 = 43 success + 6 skipped, **0 failures** (was 30 at first observation; cron checks attached since — cell above corrected) |
+| R4 | raw logs jobs `109894245632` + `110396646496` re-fetched (344KB/344KB) | 153× `test result: ok` each, 0 FAILED, 0 content-modified, 0 panicked; 10-01 ×`32801`=1 **classified at source**: line 214 `2026-10-01T13:41:10.3328016Z` — `32801` = digit run inside the nanosecond timestamp of a `* [new branch]` fetch line |
+| R5 | version fields, 3 manifests at current main | 3/3 = `2.13.21-h.0.2.9` |
+| R6 | HEAD/GET all 16 extracted manifest URLs | 16/16 HTTP 200 |
+| R7 | 14 pins vs live `.sha256` sidecars | 14/14 byte-match |
+| R8 | `gh release view` both referenced repos (`KooshaPari/HeliosLite`, `KooshaPari/forgecode`) | tag present, 55 assets each, prerelease=false |
+| R9 | PR #318 + remote head branch | MERGED `2026-09-20T00:31:16Z`, files = exactly 3 targets, branch 0 refs (gone) |
+| R10 | scoop `checkver` regex vs live `releases/latest` both repos | extracts `2.13.21-h.0.2.9` == manifest → up-to-date **True** both |
+| R11 | recorded final + current tip `cf26e536e` | `081905205` final 26/2/0 (above); `cf26e536e` mid-flight = 24 checks, **0 failures** |
+| R12 | `phinbox inbox --show hook-d6499f54…` | `state=answered`, `value=false` |
+
+Changed public outputs all re-observed: 3 manifests (R5–R7), toolchain pins (R1), generator (R2), workflows/CI (R3/R11), nightly acceptance (R4), distribution machinery (R8–R10), approval record (R12).
+
+### 2026-10-02T19:09Z status deltas (jcode)
+- **Nightly 10-02 (`37009887365`) ACCEPTED from raw logs** — job `110846829283` @ `9acde30e9` (344KB): 153× `test result: ok`, 0 `FAILED`, 0 content-modified, 0 panicked, **0×`32801`** (clean — no classification needed); run success, head ≥ `72ff2cab8` → stored watcher criteria all met. **5 consecutive green nightlies (09-28 → 10-02).**
+- **Tip matrix at `9acde30e9` FINAL: 36 checks = 33 success + 3 skipped + 0 failures** (observed 10-02 19:07Z). Trailing-24h failed runs = 0; dependabot open = 0; `local == remote == 9acde30e9` (no parallel-session movement since 10-01).
+- Ambient verifiers `sched_83d9ab24` / `sched_ec336732` (10-01 22:21Z) remain queued past-due — harmless: their premises (R11 verdict recorded+pushed ✓, target watcher consumed ✓) already hold, so they self-pass when they fire.
+
+### 2026-10-10T08:40Z status deltas (jcode) — 10-09/10 delta: upstream sync, CI hygiene + hardening chain, nightly streak 12, disk cycles 3-4
+
+- **1. Upstream sync LANDED** — `fork/main` `fadb32bda` → `ac549dd1f20` (Oct-9 04:29Z) merging origin/main `51ba233bc8` (35 commits: renovate dep bumps `gix` 0.89 / `toml_edit` 0.25.16 / `diesel` 2.3.14 + provider.json deprecations). `provider.json` 3-way merge removed **22 upstream-deprecated model ids (−290 lines, removals-only)**; all HeliosLite additions kept. `cargo fmt` 0, forge_repo provider `295/0/1`. Report: `~/.jcode/scratch/upstream_sync_20261009.md`.
+- **2. CI hygiene** — `ac549dd1f20` → `6e5b8fa94` (Oct-9 ~05:26Z): 6 red checks, **all Class A pre-existing from `fadb32bda`** — clippy 1.99 `double_must_use` ×4 sites + Gate 4 `release.yml` generator emitting canonical `helioslite-release.yml` (completes CRITICAL Gate 4 checklist item). Post-fix: **0 failures**. Report: `~/.jcode/scratch/ci_hygiene_20261009.md`.
+- **3. Gate hardening n6** — `6e5b8fa94` → `cf11b3c37` (Oct-9 06:00Z): platform-tests `--all-features` + removed `continue-on-error` (now gating); cvp Gate 3 + coverage job install RA/TS (via `forge_ci` generator, byte-parity 18 tests green). E2E dossier gaps **#4/#5/#6 CLOSED**. Report: `~/.jcode/scratch/gate_hardening_20261009.md`.
+- **4. Platform fixes n7** — `cf11b3c37` → `5b2eafe47` + `239a57824` (Oct-9): root causes = mcp_watcher path equality `/private/var` vs `/var` (**NOT** an FSEvents flake), WSL bash stub, and a 4th hidden failure (`TS-server .cmd` shim). Platform Tests run `37894506734` **green**. Report: `~/.jcode/scratch/platform_test_fix_20261009.md`.
+- **5. Follow-ups n9+n10** — `239a57824` → `007068dbb` (`spawn.rs` `build_command` Windows PATH+PATHEXT + `cmd /C`; cvp Gate 3 `--all-features`) → **`2053b2890`** (helper lifted to `forge_pheno_shell`; `tsc.rs` + `mcp_client.rs` same-class). **Windows real e2e proven:** run `37897798594` launched `e2e_rust_analyzer.exe`, 0 skip-markers, gating step success; CVP job `113725537195` log shows `cargo test --workspace --all-features` + e2e running. Report: `~/.jcode/scratch/followups_20261009.md`.
+- **6. Nightly streak = 12** (Sep 28 → Oct 9): Oct-9 run `37937780060` @ `2053b2890` **ACCEPTED** — 153 ok / 0 FAILED / 0 content-modified / 0×`32801` / 0 panics; raw log `r4_job_37937780060.log`; verdict `~/.jcode/scratch/nightly_oct9_20261009.md`. **Note:** nightly cron fires **13:30Z (06:30 PDT)**, not 06:30Z.
+- **7. Tip state** — `2053b2890` = **36 checks: 33 success / 3 skipped / 0 fail** (re-observed 2026-10-10 07:16Z); 0 non-success runs since Oct-9 07:00Z.
+- **8. Host disk** — 4 reclaim cycles (10-02 180G / 10-08 131G / 10-09 34G / 10-10 44G incl. new category stale `~/.forge` DB backups 27.6G); ledger `~/.jcode/scratch/disk_watch_log.md` + triage §6-9; live targets **~109G HOLD** (operator-review threshold noted); watches `sched_221925c2` (Oct-11 08:00Z) + nightly-acceptance `sched_6472577c` (14:15Z).
+- **9. E2E dossier gaps** — **#1/#2/#4/#7 CLOSED** (incl. #4 from item 3): 17-crate doctest sweep (36 fences, 39 doctests, 26 ignored, 0 failed; +2 vs nightly-24 within tolerance; 3 dead-fence candidates). Verdicts: `~/.jcode/scratch/doctest_sweep_20261009.md` + `e2e_local_20261008.md` (updated).
+
+**Routing note:** `mimo-v2.6-flash` route failures (3 workers, 10-08/09) → `deepseek-v4.1-flash` served all subsequent dispatches; routing memory logged.

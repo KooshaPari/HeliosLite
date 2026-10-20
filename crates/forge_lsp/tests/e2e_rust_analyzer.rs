@@ -82,9 +82,47 @@ fn find_rust_analyzer() -> Option<std::path::PathBuf> {
     // Verify the candidate responds to `--version`. A rustup shim for
     // a missing component answers "Unknown binary ..." and exits
     // non-zero; we want to treat that as "not installed" rather than
-    // as a broken LSP round-trip.
-    let probe = std::process::Command::new(&candidate)
-        .arg("--version")
+    // as a broken LSP round-trip. Routed through the portable spawner so
+    // a `.cmd`/`.bat` shim (should one ever resolve here) still runs.
+    let probe = forge_lsp::spawn::build_command(Path::new(&candidate), &["--version"])
+        .output()
+        .ok()?;
+    if !probe.status.success() {
+        return None;
+    }
+
+    Some(std::path::PathBuf::from(candidate))
+}
+
+/// Locate a spawnable `typescript-language-server` on the current host.
+///
+/// `Server::with_defaults` spawns *both* `rust-analyzer` and
+/// `typescript-language-server` during the handshake, so the round-trip can
+/// only run when both are actually executable. On Windows npm installs a
+/// `typescript-language-server.cmd` shim; `where` finds it (PATHEXT-aware) and
+/// `forge_lsp::spawn::build_command` runs it through `cmd /C`, so both the
+/// probe below and the production spawner can execute it. The test therefore
+/// runs the real round-trip on Windows with npm-installed prereqs, and only
+/// skips when a server is genuinely absent.
+fn find_typescript_language_server() -> Option<std::path::PathBuf> {
+    let cmd = if cfg!(windows) { "where" } else { "which" };
+    let output = std::process::Command::new(cmd)
+        .arg("typescript-language-server")
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let stdout = output.stdout.to_str_lossy();
+    let candidate = stdout
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())?
+        .to_string();
+
+    // Same two-stage probe as `find_rust_analyzer`; routed through the
+    // portable spawner so a Windows `.cmd` shim runs via `cmd /C`.
+    let probe = forge_lsp::spawn::build_command(Path::new(&candidate), &["--version"])
         .output()
         .ok()?;
     if !probe.status.success() {
@@ -97,12 +135,18 @@ fn find_rust_analyzer() -> Option<std::path::PathBuf> {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn e2e_definition_round_trip_against_real_rust_analyzer() {
     // ----------------------------------------------------------------
-    // Skip path — rust-analyzer not on PATH. Print the documented
-    // message and exit successfully so CI stays green on minimal
-    // build agents.
+    // Skip path — a required language server is not runnable here.
+    // `Server::with_defaults` spawns both `rust-analyzer` and
+    // `typescript-language-server`, so the round-trip needs both. Print
+    // the documented message and exit successfully so CI stays green on
+    // minimal build agents.
     // ----------------------------------------------------------------
     if find_rust_analyzer().is_none() {
         eprintln!("e2e: skipping, rust-analyzer not on PATH");
+        return;
+    }
+    if find_typescript_language_server().is_none() {
+        eprintln!("e2e: skipping, typescript-language-server not runnable");
         return;
     }
 

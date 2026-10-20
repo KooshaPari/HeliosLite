@@ -181,7 +181,7 @@ jobs:
       run: cargo clippy --locked -p forge_ci --tests --no-deps -- -D warnings
     - name: Run tests
       if: ${{ !inputs.windows_lsp }}
-      run: cargo test --workspace
+      run: cargo test --workspace --all-features
     - name: Run clippy
       if: ${{ !inputs.windows_lsp }}
       run: cargo clippy --workspace --all-targets --no-deps -- -D warnings

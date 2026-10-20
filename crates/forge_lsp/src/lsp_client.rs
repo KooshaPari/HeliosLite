@@ -22,12 +22,14 @@
 
 use std::io::{Read, Write};
 use std::path::Path;
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, Weak};
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+
+use crate::spawn::build_command;
 
 // ---------------------------------------------------------------------------
 // JSON-RPC envelope
@@ -185,9 +187,8 @@ impl ProcessLspClient {
     /// Spawn the binary at `bin` with `args`. The child's stdio is piped
     /// for JSON-RPC framing.
     pub fn spawn(bin: &Path, args: &[&str], name: &'static str) -> Result<Self, String> {
-        let mut cmd = Command::new(bin);
-        cmd.args(args)
-            .stdin(Stdio::piped())
+        let mut cmd = build_command(bin, args);
+        cmd.stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null());
         let mut child = cmd

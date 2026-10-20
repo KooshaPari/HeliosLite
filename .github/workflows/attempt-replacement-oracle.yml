@@ -1,0 +1,19 @@
+name: Attempt Replacement Oracle
+
+on:
+  pull_request:
+    paths:
+      - "docs/product-contract/20260929-harness-recovery/diagnostics/attempt_replacement_oracle.py"
+      - ".github/workflows/attempt-replacement-oracle.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  attempt-replacement-oracle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 docs/product-contract/20260929-harness-recovery/diagnostics/attempt_replacement_oracle.py

@@ -76,6 +76,31 @@ fn event_should_reload_matches_watched_path() {
 }
 
 #[test]
+fn event_should_reload_matches_through_resolved_parent_symlink() {
+    // macOS FSEvents reports fully resolved paths, so a file under
+    // `/var/folders/...` (the default user temp dir and the CI runner's
+    // `$TMPDIR`) is reported as `/private/var/folders/...`. Assert the
+    // watcher still recognises the event when the backend canonicalises the
+    // parent directory. On hosts whose temp dir has no symlink the two paths
+    // are identical, so this is trivially true; on macOS CI it exercises the
+    // historical zero-reload bug directly.
+    let tmp = TempDir::new().unwrap();
+    let target = write_file(&tmp, "mcp.toml", "a = 1\n");
+    let resolved = std::fs::canonicalize(tmp.path())
+        .expect("temp dir canonicalises")
+        .join("mcp.toml");
+    let evt = Event {
+        kind: EventKind::Modify(notify::event::ModifyKind::Any),
+        paths: vec![resolved],
+        attrs: Default::default(),
+    };
+    assert!(
+        McpWatcher::event_should_reload(&evt, &target),
+        "event with resolved parent must match the watched path"
+    );
+}
+
+#[test]
 fn event_should_reload_ignores_unrelated_paths() {
     let tmp = TempDir::new().unwrap();
     let target = write_file(&tmp, "mcp.toml", "a = 1\n");

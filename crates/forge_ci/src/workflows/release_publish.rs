@@ -9,8 +9,13 @@ const ARTIFACT_UPLOAD: &str = "ea165f8d65b6e75b540449e92b4886f43607fa02";
 /// Assets are never published by build jobs. Each target stages an artifact;
 /// signing replaces macOS/Windows artifacts, SBOM and provenance consume that
 /// staged set, and the final job is the sole release publisher.
+///
+/// Gate 4 of `docs/RENAMES-STRATEGY.md`: the canonical workflow file is
+/// `helioslite-release.yml`. The legacy `.github/workflows/release.yml` is a
+/// hand-maintained deprecation alias and is intentionally **not** emitted here
+/// (see `docs/RENAMES-CHECKLIST.md`), so regeneration can never clobber it.
 pub fn release_publish() {
-    super::generate_private_workflow(release_workflow(), "release.yml");
+    super::generate_private_workflow(release_workflow(), "helioslite-release.yml");
 }
 
 /// Render the release workflow without modifying the checked-in fixture.
@@ -105,7 +110,7 @@ fn release_workflow() -> Workflow {
                 .env("RELEASE_TAG", "${{ github.event.release.tag_name }}")
                 .run("set -euo pipefail\ngh release upload \"$RELEASE_TAG\" release-assets/* --repo \"${{ github.repository }}\" --clobber"),
         );
-    Workflow::new("Multi Channel Release")
+    Workflow::new("HeliosLite Multi-Channel Release")
         .on(Event::default().release(["published"]))
         .permissions(Permissions::default().contents(Level::Read))
         .add_job("build_release", release_build_job.into_job())

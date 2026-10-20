@@ -59,9 +59,27 @@ mod sandbox_tests {
     #[test]
     fn sandbox_dispatch_returns_a_backend() {
         let sandbox = crate::backend::Sandbox::for_platform();
-        // On every supported platform, for_platform() returns *something*.
         let _ = sandbox.name();
-        // enforces_isolation may be false (passthrough) — we don't assert.
+        // A selected platform backend may claim enforcement only when it
+        // actually has an implemented enforcing backend.
+        if !sandbox.enforces_isolation() {
+            assert_eq!(sandbox.name(), "disabled");
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn linux_stub_never_reports_sandboxed_true() {
+        let sandbox = crate::backend::Sandbox::for_platform();
+        assert!(!sandbox.enforces_isolation());
+        assert_eq!(sandbox.name(), "disabled");
+        let config = SandboxConfig::builder()
+            .command("sh")
+            .args(vec!["-c".to_string(), "echo truthful".to_string()])
+            .build();
+        let output = sandbox.run(&config).await.expect("disabled fallback runs");
+        assert!(!output.sandboxed);
+        assert!(output.stdout.contains("truthful"));
     }
 
     #[test]

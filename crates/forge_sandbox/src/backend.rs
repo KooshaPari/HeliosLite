@@ -43,19 +43,25 @@ impl Sandbox {
     pub fn for_platform() -> Self {
         #[cfg(target_os = "linux")]
         {
-            if let Ok(backend) = crate::linux::LinuxBackend::new() {
+            if let Ok(backend) = crate::linux::LinuxBackend::new()
+                && backend.enforces_isolation()
+            {
                 return Sandbox::Linux(backend);
             }
         }
         #[cfg(target_os = "macos")]
         {
-            if let Ok(backend) = crate::macos::MacOsBackend::new() {
+            if let Ok(backend) = crate::macos::MacOsBackend::new()
+                && backend.enforces_isolation()
+            {
                 return Sandbox::MacOS(backend);
             }
         }
         #[cfg(target_os = "windows")]
         {
-            if let Ok(backend) = crate::windows::WindowsBackend::new() {
+            if let Ok(backend) = crate::windows::WindowsBackend::new()
+                && backend.enforces_isolation()
+            {
                 return Sandbox::Windows(backend);
             }
         }
