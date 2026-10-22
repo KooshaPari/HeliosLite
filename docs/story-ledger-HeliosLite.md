@@ -1,6 +1,6 @@
 # HeliosLite - story ledger
 
-Extracted genesis (2024-12-08) to 2026-10-19: 4939 commits, 134 merges, 99 active weeks, peak week 2026-W37 (230 commits).
+Extracted genesis (2024-12-08) to 2026-10-21: 4941 commits, 135 merges, 99 active weeks, peak week 2026-W37 (230 commits).
 
 Full ledger (all repos) lives in PhenoRegistry `ledger/`; raw per-commit JSONL on desk storage.
 
@@ -12,88 +12,88 @@ Full ledger (all repos) lives in PhenoRegistry `ledger/`; raw per-commit JSONL o
 - areas: src(13), (root)(8), assets(1)
 
 ## 2024-W50: 27 commits
-- areas: src(61), (root)(17), tests(3), example(2)
+- areas: src(64), (root)(17), tests(3), example(2)
 
 ## 2024-W51: 213 commits
-- areas: crates(663), (root)(61), src(36), .github(2)
+- areas: crates(689), (root)(61), src(44), .github(2)
 
 ## 2024-W52: 177 commits
-- areas: crates(622), (root)(34)
+- areas: crates(717), (root)(34)
 
 ## 2025-W01: 168 commits
-- areas: crates(597), (root)(29)
+- areas: crates(621), (root)(29)
 
 ## 2025-W02: 131 commits
-- areas: crates(467), (root)(41), .github(8), docs(1)
+- areas: crates(499), (root)(41), .github(8), docs(1)
 
 ## 2025-W03: 118 commits
-- areas: crates(549), (root)(31), .github(2), docs(2)
+- areas: crates(651), (root)(31), .github(2), docs(2)
 
 ## 2025-W04: 53 commits
-- areas: crates(252), (root)(15), docs(1)
+- areas: crates(253), (root)(15), docs(1)
 
 ## 2025-W05: 79 commits
-- areas: crates(268), .github(29), (root)(17), docs(1)
+- areas: crates(271), .github(29), (root)(17), docs(1)
 
 ## 2025-W06: 53 commits
-- areas: crates(241), (root)(32), .github(7), prompt(3)
+- areas: crates(248), (root)(32), .github(7), prompt(3)
 
 ## 2025-W07: 19 commits
-- areas: crates(171), (root)(10), templates(8), .github(3)
+- areas: crates(184), (root)(10), templates(8), .github(3)
 
 ## 2025-W08: 14 commits
-- areas: crates(267), templates(15), (root)(8), .github(2)
+- areas: crates(385), templates(27), (root)(8), .github(2)
 
 ## 2025-W09: 22 commits
-- areas: crates(98), (root)(17), docs(13), templates(7)
+- areas: crates(104), (root)(17), docs(14), templates(12)
 
 ## 2025-W10: 23 commits
 - areas: crates(186), (root)(19), templates(5), .config(3)
 
 ## 2025-W11: 28 commits
-- areas: crates(156), (root)(24), templates(11), .github(7)
+- areas: crates(158), (root)(24), templates(12), .github(7)
 
 ## 2025-W12: 24 commits
-- areas: crates(213), templates(24), (root)(19), .github(10)
+- areas: crates(336), templates(24), (root)(19), .github(10)
 
 ## 2025-W13: 10 commits
 - areas: crates(63), plans(4), (root)(2), templates(2)
 
 ## 2025-W14: 23 commits
-- areas: crates(88), (root)(15), docs(15), templates(10)
+- areas: crates(89), (root)(15), docs(15), templates(11)
 
 ## 2025-W15: 12 commits
-- areas: crates(87), (root)(9), templates(4), plans(1)
+- areas: crates(88), (root)(9), templates(4), plans(1)
 
 ## 2025-W16: 15 commits
-- areas: crates(152), (root)(15), templates(13), docs(2)
+- areas: crates(157), (root)(15), templates(13), docs(2)
 
 ## 2025-W17: 18 commits
 - areas: crates(161), (root)(15), templates(11), docs(1)
 
 ## 2025-W18: 17 commits
-- areas: crates(126), (root)(9), templates(6), plans(2)
+- areas: crates(127), (root)(9), templates(6), plans(2)
 
 ## 2025-W19: 16 commits
 - areas: crates(104), (root)(10), templates(3), .github(2)
 
 ## 2025-W20: 32 commits
-- areas: crates(144), .github(12), (root)(11), templates(2)
+- areas: crates(171), .github(14), (root)(11), templates(2)
 
 ## 2025-W21: 10 commits
-- areas: crates(100), (root)(4)
+- areas: crates(104), (root)(4)
 
 ## 2025-W22: 26 commits
 - areas: crates(148), (root)(8), templates(2)
 
 ## 2025-W23: 14 commits
-- areas: crates(244), (root)(7), templates(5), plans(1)
+- areas: crates(255), (root)(7), templates(5), plans(1)
 
 ## 2025-W24: 55 commits
-- areas: crates(548), (root)(26), docs(21), templates(10)
+- areas: crates(569), (root)(26), docs(21), templates(18)
 
 ## 2025-W25: 21 commits
-- areas: crates(188), (root)(9), .github(1)
+- areas: crates(225), (root)(9), .github(1)
 
 ## 2025-W26: 8 commits
 - areas: crates(18), (root)(4)
@@ -105,19 +105,19 @@ Full ledger (all repos) lives in PhenoRegistry `ledger/`; raw per-commit JSONL o
 - areas: crates(103), .github(8), (root)(7)
 
 ## 2025-W29: 21 commits
-- areas: crates(197), (root)(15), .github(9)
+- areas: crates(200), (root)(15), .github(10)
 
 ## 2025-W30: 29 commits
-- areas: crates(127), (root)(12), .github(3), templates(1)
+- areas: crates(150), (root)(12), .github(3), templates(1)
 
 ## 2025-W31: 21 commits
 - areas: crates(89), (root)(15), .github(2), templates(2)
 
 ## 2025-W32: 21 commits
-- areas: crates(187), (root)(19), templates(14), .github(3)
+- areas: crates(231), (root)(19), templates(14), .github(3)
 
 ## 2025-W33: 27 commits
-- areas: crates(166), templates(14), (root)(14), .github(4)
+- areas: crates(201), templates(14), (root)(14), .github(4)
 
 ## 2025-W34: 29 commits
 - areas: crates(195), (root)(10), templates(4)
@@ -126,7 +126,7 @@ Full ledger (all repos) lives in PhenoRegistry `ledger/`; raw per-commit JSONL o
 - areas: crates(30), (root)(5), templates(3), .github(1)
 
 ## 2025-W36: 26 commits
-- areas: crates(131), templates(22), (root)(19), .devcontainer(6)
+- areas: crates(131), templates(34), (root)(19), .devcontainer(6)
 
 ## 2025-W37: 33 commits
 - areas: crates(202), (root)(20), .github(8), zsh-plugin(5)
@@ -138,7 +138,7 @@ Full ledger (all repos) lives in PhenoRegistry `ledger/`; raw per-commit JSONL o
 - areas: crates(23), shell-plugin(5)
 
 ## 2025-W40: 35 commits
-- areas: crates(202), (root)(19), shell-plugin(13), .github(4)
+- areas: crates(205), (root)(19), shell-plugin(13), .github(4)
 
 ## 2025-W41: 22 commits
 - areas: crates(67), (root)(4), templates(3), shell-plugin(2)
@@ -150,31 +150,31 @@ Full ledger (all repos) lives in PhenoRegistry `ledger/`; raw per-commit JSONL o
 - areas: crates(146), (root)(6), .github(3), .forge(3)
 
 ## 2025-W44: 23 commits
-- areas: crates(217), shell-plugin(5), (root)(3)
+- areas: crates(237), shell-plugin(5), (root)(3)
 
 ## 2025-W45: 40 commits
-- areas: crates(242), shell-plugin(12), (root)(12), templates(3)
+- areas: crates(258), shell-plugin(12), (root)(12), templates(3)
 
 ## 2025-W46: 10 commits
 - areas: crates(35), shell-plugin(1), templates(1)
 
 ## 2025-W47: 12 commits
-- areas: crates(102), (root)(5), shell-plugin(3), templates(1)
+- areas: crates(109), (root)(5), shell-plugin(3), templates(1)
 
 ## 2025-W48: 51 commits
-- areas: crates(292), shell-plugin(34), benchmarks(30), .forge(21)
+- areas: crates(293), shell-plugin(35), benchmarks(30), .forge(21)
 
 ## 2025-W49: 33 commits
-- areas: crates(214), benchmarks(20), shell-plugin(18), (root)(15)
+- areas: crates(224), benchmarks(22), shell-plugin(18), (root)(15)
 
 ## 2025-W50: 22 commits
-- areas: crates(118), benchmarks(7), shell-plugin(3), (root)(3)
+- areas: crates(119), benchmarks(7), shell-plugin(3), (root)(3)
 
 ## 2025-W51: 25 commits
-- areas: crates(86), shell-plugin(14), (root)(8), benchmarks(1)
+- areas: crates(86), shell-plugin(14), (root)(8), scripts(2)
 
 ## 2025-W52: 27 commits
-- areas: crates(156), .github(9), (root)(6), shell-plugin(4)
+- areas: crates(174), .github(9), (root)(6), shell-plugin(4)
 
 ## 2026-W01: 31 commits
 - areas: crates(112), shell-plugin(18), (root)(5), .github(3)
@@ -183,7 +183,7 @@ Full ledger (all repos) lives in PhenoRegistry `ledger/`; raw per-commit JSONL o
 - areas: crates(105), (root)(4)
 
 ## 2026-W03: 20 commits
-- areas: crates(208), (root)(6), benchmarks(2), templates(2)
+- areas: crates(209), (root)(6), benchmarks(2), templates(2)
 
 ## 2026-W04: 24 commits
 - areas: crates(49), shell-plugin(12), templates(4), (root)(3)
@@ -204,7 +204,7 @@ Full ledger (all repos) lives in PhenoRegistry `ledger/`; raw per-commit JSONL o
 - areas: crates(37), (root)(9), shell-plugin(2), .github(1)
 
 ## 2026-W10: 22 commits
-- areas: crates(75), benchmarks(13), shell-plugin(10), (root)(5)
+- areas: crates(76), benchmarks(13), shell-plugin(10), (root)(5)
 
 ## 2026-W11: 37 commits
 - areas: crates(119), shell-plugin(13), (root)(13), .forge(3)
@@ -213,19 +213,19 @@ Full ledger (all repos) lives in PhenoRegistry `ledger/`; raw per-commit JSONL o
 - areas: crates(106), shell-plugin(9), (root)(8), .forge(4)
 
 ## 2026-W13: 50 commits
-- areas: crates(210), .github(28), (root)(24), shell-plugin(11)
+- areas: crates(213), .github(28), (root)(24), shell-plugin(11)
 
 ## 2026-W14: 49 commits
-- areas: crates(191), (root)(25), shell-plugin(22), .forge(5)
+- areas: crates(192), (root)(25), shell-plugin(22), .forge(5)
 
 ## 2026-W15: 66 commits
-- areas: crates(258), (root)(40), shell-plugin(14), benchmarks(9)
+- areas: crates(259), (root)(40), shell-plugin(14), benchmarks(9)
 
 ## 2026-W16: 69 commits
 - areas: crates(196), (root)(38), shell-plugin(16), .github(5)
 
 ## 2026-W17: 52 commits
-- areas: crates(109), (root)(22), shell-plugin(3), .github(3)
+- areas: crates(110), (root)(22), shell-plugin(3), .github(3)
 
 ## 2026-W18: 88 commits
 - areas: crates(261), .github(86), (root)(67), docs(18)
@@ -368,6 +368,7 @@ Full ledger (all repos) lives in PhenoRegistry `ledger/`; raw per-commit JSONL o
 - merge: Merge branch 'sharecli-relay-pr-328' into main
 - merge: Merge 0e95f160669f1d3a786f6d38aaf73be14478d318 into 6db70c2b6f983982e62c7c2e943d4502775936
 
-## 2026-W43: 1 commits
-- areas: crates(26), docs(24), assets(16), .github(10)
+## 2026-W43: 3 commits
+- areas: docs(26), crates(26), assets(16), .github(10)
+- merge: Merge e5339c922c4d0808056247ce1190cf87ada08133 into 7056c93643c4ec86d8be0b6d9dc40c1a37e027
 - merge: merge(main): resolve live-control ACP branch against current main
