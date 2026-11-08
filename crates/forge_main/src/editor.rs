@@ -23,9 +23,6 @@ use crate::highlighter::ForgeHighlighter;
 use crate::model::ForgeCommandManager;
 use crate::prompt::ForgePrompt;
 
-// Default threshold for collapse (mirror `CollapseConfig::default()`).
-// const PASTE_COLLAPSE_THRESHOLD: usize = 4096;
-
 const HISTORY_CAPACITY: usize = 1024 * 1024;
 
 /// Interactive terminal editor used by the Forge prompt.
@@ -64,13 +61,6 @@ impl ForgeEditor {
             .build();
         let mut editor = Editor::<ForgeHelper, DefaultHistory>::with_config(config)
             .expect("rustyline editor should initialize for an interactive terminal");
-
-        // Best-effort enable bracketed paste mode (CSI ?2004h) on stderr. This is harmless
-        // if the terminal doesn't support it - older terminals just drop the escape.
-        if let Ok(seq) = std::str::from_utf8(b"\x1b[?2004h") {
-            let _ = std::io::Write::write_all(&mut std::io::stderr(), seq.as_bytes());
-        }
-
         editor.bind_sequence(
             KeyEvent(KeyCode::Enter, Modifiers::ALT),
             EventHandler::Simple(Cmd::Newline),
@@ -127,50 +117,12 @@ impl ForgeEditor {
 #[error("failed to read line from terminal: {0}")]
 pub struct ReadLineError(RustyReadlineError);
 
-/// Threshold (bytes) above which we collapse a paste into a placeholder.
-/// Mirrors `forge_paste::collapse::CollapseConfig::default().threshold_bytes`.
-const PASTE_COLLAPSE_THRESHOLD: usize = 4096;
-
 fn normalize_result_text(buffer: String) -> ReadResult {
-    // Strip bracketed-paste sentinels that the terminal emitted (CSI ?2004h/l).
-    let (stripped, _was_bracketed) =
-        forge_paste::shell::strip_bracketed_sentinels(buffer.as_bytes());
-    let stripped = String::from_utf8(stripped).unwrap_or_default();
-    let trimmed = stripped.trim();
+    let trimmed = buffer.trim();
     if trimmed.is_empty() {
         return ReadResult::Empty;
     }
-
-    // 1) Mentions first: rewrite @path / @dir / @sym / @agent / @git / @web to @[path] placeholders.
-    let mentions = forge_paste::mention::parse(trimmed);
-    let with_mentions = if !mentions.mentions.is_empty() {
-        let mut out = trimmed.to_string();
-        for m in &mentions.mentions {
-            // Replace the raw mention text with the @[kind:payload] placeholder form.
-            out = out.replace(&m.raw, &m.placeholder());
-        }
-        out
-    } else {
-        trimmed.to_string()
-    };
-    // 2) Classify: detect paste-like content (text vs code vs binary vs large blob).
-    let classified =
-        forge_paste::classifier::classify(with_mentions.as_bytes(), PASTE_COLLAPSE_THRESHOLD);
-    let use_collapse = matches!(
-        classified.kind,
-        forge_paste::classifier::PasteKind::LargeBlob | forge_paste::classifier::PasteKind::Code
-    ) || with_mentions.len() > PASTE_COLLAPSE_THRESHOLD;
-
-    if use_collapse {
-        let event =
-            forge_paste::paste_event::PasteEvent::new_programmatic(with_mentions.into_bytes());
-        let cfg = forge_paste::collapse::CollapseConfig::default();
-        let outcome = forge_paste::collapse::collapse_paste(&event, &cfg);
-        return ReadResult::Success(outcome.rewritten());
-    }
-
-    // 3) Fallback: legacy collapse-to-quoted-paths for any remaining bare path mentions.
-    ReadResult::Success(wrap_pasted_text(&with_mentions))
+    ReadResult::Success(wrap_pasted_text(trimmed))
 }
 
 fn render_prompt(prompt: &ForgePrompt) -> ResponsivePrompt {
@@ -323,16 +275,11 @@ mod tests {
 
     #[test]
     fn test_normalize_result_wraps_existing_pasted_path() {
-        // A real file on the current platform: unix paths like /usr/bin/env
-        // do not exist on Windows, so create a fixture file instead.
-        let dir = tempfile::tempdir().unwrap();
-        let file_path = dir.path().join("existing.txt");
-        std::fs::write(&file_path, "test").unwrap();
-        let path = file_path.to_string_lossy().into_owned();
+        let fixture = "/usr/bin/env".to_string();
 
-        let expected = ReadResult::Success(format!("@[{path}]"));
-        let actual = normalize_result_text(path);
+        let actual = normalize_result_text(fixture);
 
+        let expected = ReadResult::Success("@[/usr/bin/env]".to_string());
         assert_eq!(actual, expected);
     }
 

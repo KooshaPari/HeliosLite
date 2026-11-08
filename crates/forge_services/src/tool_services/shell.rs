@@ -107,10 +107,7 @@ mod tests {
             _working_dir: PathBuf,
             _env_vars: Option<Vec<String>>,
         ) -> anyhow::Result<std::process::ExitStatus> {
-            // Mock: raw command execution is not supported by the test double.
-            Err(anyhow::anyhow!(
-                "execute_command_raw not implemented in mock"
-            ))
+            unimplemented!()
         }
     }
 
@@ -127,8 +124,7 @@ mod tests {
         }
 
         async fn update_environment(&self, _ops: Vec<ConfigOperation>) -> anyhow::Result<()> {
-            // Test double: no environment to persist.
-            Ok(())
+            unimplemented!()
         }
 
         fn get_env_var(&self, _key: &str) -> Option<String> {
@@ -137,10 +133,6 @@ mod tests {
 
         fn get_env_vars(&self) -> std::collections::BTreeMap<String, String> {
             std::collections::BTreeMap::new()
-        }
-
-        async fn database_stats(&self) -> anyhow::Result<forge_domain::HeliosdoctorDbStats> {
-            Ok(forge_domain::HeliosdoctorDbStats::default())
         }
     }
 

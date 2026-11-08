@@ -442,8 +442,7 @@ impl AuthStrategy for GoogleAdcStrategy {
         // 1. GOOGLE_APPLICATION_CREDENTIALS env var (service account)
         // 2. gcloud ADC credentials (user credentials)
         // 3. Metadata server (GCP environment)
-        // However, we still need to collect URL params like PROJECT_ID and
-        // LOCATION
+        // However, we still need to collect URL params like PROJECT_ID and LOCATION
         Ok(AuthContextRequest::ApiKey(ApiKeyRequest {
             required_params: self.required_params.clone(),
             existing_params: None,
@@ -457,10 +456,9 @@ impl AuthStrategy for GoogleAdcStrategy {
     ) -> anyhow::Result<AuthCredential> {
         match context_response {
             AuthContextResponse::ApiKey(ctx) => {
-                // Validate that gcloud auth is properly configured before
-                // completing authentication This ensures the
-                // user has run 'gcloud auth application-default
-                // login'
+                // Validate that gcloud auth is properly configured before completing
+                // authentication This ensures the user has run 'gcloud auth
+                // application-default login'
                 use google_cloud_auth::credentials::Builder;
                 const VERTEX_AI_SCOPES: &[&str] =
                     &["https://www.googleapis.com/auth/cloud-platform"];
@@ -485,8 +483,7 @@ impl AuthStrategy for GoogleAdcStrategy {
 
                 // For Google ADC, we save a marker instead of the actual token
                 // The token will be refreshed on every use
-                // But we still need to save the url_params (PROJECT_ID,
-                // LOCATION)
+                // But we still need to save the url_params (PROJECT_ID, LOCATION)
                 Ok(AuthCredential::new_google_adc(
                     self.provider_id.clone(),
                     ApiKey::from("google_adc_marker".to_string()), /* Marker that will trigger
@@ -630,38 +627,18 @@ impl CodexDeviceStrategy {
 }
 
 /// Response from the OpenAI device auth usercode endpoint
-#[derive(serde::Deserialize)]
+#[derive(Debug, serde::Deserialize)]
 struct CodexDeviceAuthResponse {
     device_auth_id: String,
     user_code: String,
-    /// Non-secret polling interval in seconds.
     interval: String,
 }
 
-impl std::fmt::Debug for CodexDeviceAuthResponse {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("CodexDeviceAuthResponse")
-            .field("device_auth_id", &"<redacted>")
-            .field("user_code", &"<redacted>")
-            .field("interval", &self.interval)
-            .finish()
-    }
-}
-
 /// Response from the OpenAI device auth token polling endpoint
-#[derive(serde::Deserialize)]
+#[derive(Debug, serde::Deserialize)]
 struct CodexDeviceTokenResponse {
     authorization_code: String,
     code_verifier: String,
-}
-
-impl std::fmt::Debug for CodexDeviceTokenResponse {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("CodexDeviceTokenResponse")
-            .field("authorization_code", &"<redacted>")
-            .field("code_verifier", &"<redacted>")
-            .finish()
-    }
 }
 
 #[async_trait::async_trait]
@@ -729,8 +706,8 @@ impl AuthStrategy for CodexDeviceStrategy {
                     chrono::Duration::hours(1),
                 )?;
 
-                // Store account_id in url_params so it's persisted and
-                // available for chat request headers.
+                // Store account_id in url_params so it's persisted and available
+                // for chat request headers.
                 enrich_codex_oauth_credential(
                     &self.provider_id,
                     &mut credential,
@@ -771,8 +748,7 @@ async fn refresh_oauth_credential(
             )
         } else {
             // No refresh token - use the existing long-lived OAuth access token
-            // This is typical for GitHub Copilot where the OAuth token is
-            // long-lived
+            // This is typical for GitHub Copilot where the OAuth token is long-lived
             tracing::debug!("No refresh token available, using existing OAuth access token");
             (
                 tokens.access_token.to_string(),
@@ -968,16 +944,14 @@ async fn codex_poll_for_tokens(
         let status = response.status();
 
         if status.is_success() {
-            // Parse the custom response containing authorization_code +
-            // code_verifier
+            // Parse the custom response containing authorization_code + code_verifier
             let device_token: CodexDeviceTokenResponse = response.json().await.map_err(|e| {
                 AuthError::PollFailed(format!("Failed to parse device token response: {e}"))
             })?;
 
             // Exchange the authorization code for OAuth tokens via standard
-            // endpoint. Use a clean HTTP client without custom headers since
-            // the standard OAuth token endpoint rejects unknown
-            // headers.
+            // endpoint. Use a clean HTTP client without custom headers since the
+            // standard OAuth token endpoint rejects unknown headers.
             let clean_client = reqwest::Client::builder()
                 .redirect(reqwest::redirect::Policy::none())
                 .build()
@@ -1206,8 +1180,7 @@ impl StrategyFactory for ForgeAuthStrategyFactory {
                 )))
             }
             forge_domain::AuthMethod::OAuthDevice(config) => {
-                // Check if this is OAuth-with-API-Key flow (GitHub Copilot
-                // pattern)
+                // Check if this is OAuth-with-API-Key flow (GitHub Copilot pattern)
                 if config.token_refresh_url.is_some() {
                     Ok(AnyAuthStrategy::OAuthWithApiKey(
                         OAuthWithApiKeyStrategy::new(provider_id, config)?,
@@ -1512,53 +1485,5 @@ mod tests {
 
         let expected = fixture_url_params;
         assert_eq!(actual.url_params, expected);
-    }
-
-    #[test]
-    fn test_codex_device_auth_response_debug_redacts_secrets() {
-        let resp = CodexDeviceAuthResponse {
-            device_auth_id: "secret_device_auth_id_12345".to_string(),
-            user_code: "SECRET-USER-CODE".to_string(),
-            interval: "5".to_string(),
-        };
-        let debug = format!("{:?}", resp);
-        assert!(
-            !debug.contains("secret_device_auth_id_12345"),
-            "CodexDeviceAuthResponse Debug must not expose device_auth_id"
-        );
-        assert!(
-            !debug.contains("SECRET-USER-CODE"),
-            "CodexDeviceAuthResponse Debug must not expose user_code"
-        );
-        assert!(
-            debug.contains("<redacted>"),
-            "CodexDeviceAuthResponse Debug must contain <redacted>"
-        );
-        // Non-secret interval must remain visible
-        assert!(
-            debug.contains("5"),
-            "CodexDeviceAuthResponse Debug must expose interval"
-        );
-    }
-
-    #[test]
-    fn test_codex_device_token_response_debug_redacts_secrets() {
-        let resp = CodexDeviceTokenResponse {
-            authorization_code: "secret_auth_code_abcde".to_string(),
-            code_verifier: "secret_verifier_xyz789".to_string(),
-        };
-        let debug = format!("{:?}", resp);
-        assert!(
-            !debug.contains("secret_auth_code_abcde"),
-            "CodexDeviceTokenResponse Debug must not expose authorization_code"
-        );
-        assert!(
-            !debug.contains("secret_verifier_xyz789"),
-            "CodexDeviceTokenResponse Debug must not expose code_verifier"
-        );
-        assert!(
-            debug.contains("<redacted>"),
-            "CodexDeviceTokenResponse Debug must contain <redacted>"
-        );
     }
 }

@@ -77,8 +77,7 @@ impl<
             .with_context(|| format!("File already exists at {}", path.display()));
         }
 
-        // Record the file content before modification and detect its line
-        // ending style
+        // Record the file content before modification and detect its line ending style
         let (old_content, target_line_ending) = if file_exists && overwrite {
             let existing = self.infra.read_utf8(path).await?;
             let line_ending = if existing.contains("\r\n") {

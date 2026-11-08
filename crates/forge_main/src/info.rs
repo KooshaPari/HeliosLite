@@ -75,7 +75,7 @@ impl Section {
 /// # Output Format
 ///
 /// ```text
-///
+/// 
 /// CONFIGURATION
 ///   model gpt-4
 /// provider openai
@@ -346,6 +346,7 @@ impl From<&ForgeConfig> for Info {
                 )
                 .add_key_value("Pool Max Idle", http.pool_max_idle_per_host.to_string())
                 .add_key_value("Max Redirects", http.max_redirects.to_string())
+                .add_key_value("Use Hickory DNS", http.hickory.to_string())
                 .add_key_value("TLS Backend", format!("{:?}", http.tls_backend))
                 .add_key_value(
                     "Min TLS Version",
@@ -550,8 +551,8 @@ pub(crate) fn format_path_for_display(env: &Environment, path: &Path) -> String 
     {
         // Format based on OS
         return if env.os == "windows" {
-            // Use actual home path with proper quoting for Windows to work in
-            // both cmd and PowerShell
+            // Use actual home path with proper quoting for Windows to work in both cmd and
+            // PowerShell
             let home_path = home.display().to_string();
             let full_path = format!(
                 "{}{}{}",
@@ -643,7 +644,7 @@ impl From<&UserUsage> for Info {
             info = info.add_key_value(
                 "Subscription",
                 format!(
-                    "{} [Upgrade https://app.helioslite.dev/app/billing]",
+                    "{} [Upgrade https://app.forgecode.dev/app/billing]",
                     plan.r#type.to_uppercase()
                 ),
             );
@@ -713,11 +714,6 @@ impl From<&Conversation> for Info {
 
         info = info.add_key_value("ID", conversation.id.to_string());
 
-        // Subagent breadcrumb — show parent if this is a spawned session
-        if let Some(parent_id) = &conversation.parent_id {
-            info = info.add_key_value("Spawned by", format!("{} (use /parent to jump)", parent_id));
-        }
-
         if let Some(title) = &conversation.title {
             info = info.add_key_value("Title", title);
         }
@@ -770,7 +766,9 @@ mod tests {
         use fake::{Fake, Faker};
         let mut fixture: Environment = Faker.fake();
         fixture = fixture.os(os.to_string());
-        fixture.home = home.map(PathBuf::from);
+        if let Some(home_path) = home {
+            fixture = fixture.home(PathBuf::from(home_path));
+        }
         fixture
     }
 
@@ -981,10 +979,6 @@ mod tests {
             context: None,
             metrics,
             metadata: forge_domain::MetaData::new(Utc::now()),
-            cwd: None,
-            message_count: None,
-            parent_id: None,
-            source: None,
         };
 
         let actual = super::Info::from(&fixture);
@@ -1012,10 +1006,6 @@ mod tests {
             context: None,
             metrics,
             metadata: forge_domain::MetaData::new(Utc::now()),
-            cwd: None,
-            message_count: None,
-            parent_id: None,
-            source: None,
         };
 
         let actual = super::Info::from(&fixture);
@@ -1061,10 +1051,6 @@ mod tests {
             context: Some(context),
             metrics,
             metadata: forge_domain::MetaData::new(Utc::now()),
-            cwd: None,
-            message_count: None,
-            parent_id: None,
-            source: None,
         };
 
         let actual = super::Info::from(&fixture);
@@ -1099,9 +1085,8 @@ mod tests {
         let actual_str = String::from_utf8(stripped).unwrap();
 
         // Verify that keys are padded within each section
-        // In SECTION ONE, all keys should be padded to length of "Very Long
-        // Key" (13) In SECTION TWO, all keys should be padded to length
-        // of "ABC" (3)
+        // In SECTION ONE, all keys should be padded to length of "Very Long Key" (13)
+        // In SECTION TWO, all keys should be padded to length of "ABC" (3)
 
         // Check that the display contains properly formatted sections
         assert!(actual_str.contains("SECTION ONE"));
@@ -1175,8 +1160,8 @@ mod tests {
 
         let display = info.to_string();
 
-        // All keys should be lowercase - checking just the key part without
-        // exact formatting
+        // All keys should be lowercase - checking just the key part without exact
+        // formatting
         assert!(display.contains("version"));
         assert!(display.contains("working directory"));
         assert!(display.contains("mixed case key"));
@@ -1283,8 +1268,7 @@ mod tests {
         let actual = super::Info::from(&fixture);
         let expected_display = actual.to_string();
 
-        // Verify it shows "No Changes Produced" when all files have zero
-        // changes
+        // Verify it shows "No Changes Produced" when all files have zero changes
         assert!(expected_display.contains("[No Changes Produced]"));
         assert!(!expected_display.contains("file1.rs"));
         assert!(!expected_display.contains("file2.rs"));

@@ -10,7 +10,6 @@ use tokio::process::Command;
 use tokio::sync::Mutex;
 
 use crate::console::StdConsoleWriter;
-use crate::terminal_emulator::{apply_emulator_env, detect_terminal_emulator};
 
 /// Service for executing shell commands
 #[derive(Clone, Debug)]
@@ -54,24 +53,6 @@ impl ForgeCommandExecutorService {
 
         // Other common tools
         command.env("GREP_OPTIONS", "--color=always"); // GNU grep
-
-        // Windows cmd.exe stops resolving commands once PATH exceeds its
-        // ~2047-char batch limit. Pass a deduplicated, length-capped PATH so
-        // tools like `curl` still resolve even with a polluted PATH.
-        #[cfg(windows)]
-        if let Some(path) = sanitize_windows_path() {
-            command.env("PATH", path);
-        }
-
-        // Detect the terminal emulator wrapping the executor (WezTerm,
-        // iTerm2, Kitty, Windows Terminal, etc.) and stamp a marker env
-        // var onto the subprocess so downstream tooling can read our
-        // detection result without re-scanning. Detection is cheap (a
-        // hashmap lookup) but we still gate it on `trace!` so release
-        // builds don't pay for the secondary-heuristic scan in the
-        // child unless the executor is running under a debugger.
-        let (terminal_emulator, _terminal_source) = detect_terminal_emulator();
-        apply_emulator_env(&mut command, terminal_emulator);
 
         let parameter = if is_windows { "/C" } else { "-c" };
         command.arg(parameter);
@@ -144,9 +125,8 @@ impl ForgeCommandExecutorService {
             )?;
 
             // If the command's stdout did not end with a newline, the terminal
-            // cursor is left mid-line. Write a newline so that subsequent
-            // output (e.g. the LLM response) starts on a fresh
-            // line.
+            // cursor is left mid-line. Write a newline so that subsequent output
+            // (e.g. the LLM response) starts on a fresh line.
             if result.1.last() != Some(&b'\n') && !result.1.is_empty() {
                 let _ = self.output_printer.write(b"\n");
                 let _ = self.output_printer.flush();
@@ -166,59 +146,6 @@ impl ForgeCommandExecutorService {
             exit_code: status.code(),
             command,
         })
-    }
-}
-
-/// Builds a sanitized PATH for child processes on Windows.
-///
-/// cmd.exe stops resolving commands once PATH exceeds its ~2047-char batch
-/// limit, so a PATH polluted with duplicates (e.g. the user PATH mirroring the
-/// whole system PATH) silently breaks every shell command. Deduplicate the
-/// entries, always keep the critical System directories first, and cap the
-/// total length so spawned cmd.exe instances can always resolve tools.
-#[cfg(windows)]
-fn sanitize_windows_path() -> Option<String> {
-    const MAX_PATH_LEN: usize = 1900;
-
-    let system_root =
-        std::env::var_os("SystemRoot").unwrap_or_else(|| std::ffi::OsString::from("C:\\Windows"));
-    let mut seen = std::collections::HashSet::new();
-    let mut parts: Vec<String> = Vec::new();
-
-    // Always resolve these even if the caller's PATH is completely broken.
-    let critical = [
-        PathBuf::from(&system_root).join("System32"),
-        PathBuf::from(&system_root).join("System32").join("Wbem"),
-        PathBuf::from(&system_root)
-            .join("System32")
-            .join("WindowsPowerShell")
-            .join("v1.0"),
-    ];
-    for dir in critical {
-        let key = dir.to_string_lossy().to_lowercase();
-        if seen.insert(key) {
-            parts.push(dir.to_string_lossy().into_owned());
-        }
-    }
-
-    let mut total: usize = parts.iter().map(|p| p.len() + 1).sum();
-    for entry in std::env::split_paths(&std::env::var_os("PATH")?) {
-        let entry = entry.to_string_lossy();
-        let key = entry.to_lowercase();
-        if entry.is_empty() || !seen.insert(key) {
-            continue;
-        }
-        total += entry.len() + 1;
-        if total > MAX_PATH_LEN {
-            break;
-        }
-        parts.push(entry.into_owned());
-    }
-
-    if parts.is_empty() {
-        None
-    } else {
-        Some(parts.join(";"))
     }
 }
 
@@ -264,9 +191,8 @@ async fn stream<A: AsyncReadExt + Unpin, W: Write>(
     let mut output = Vec::new();
     if let Some(io) = io.as_mut() {
         let mut buff = [0; 1024];
-        // Carry incomplete trailing UTF-8 codepoint bytes across reads —
-        // Windows console stdio rejects even one byte of a split
-        // codepoint.
+        // Carry incomplete trailing UTF-8 codepoint bytes across reads — Windows
+        // console stdio rejects even one byte of a split codepoint.
         let mut pending = Vec::<u8>::new();
         loop {
             let n = io.read(&mut buff).await?;
@@ -279,8 +205,7 @@ async fn stream<A: AsyncReadExt + Unpin, W: Write>(
             let mut working = std::mem::take(&mut pending);
             working.extend_from_slice(chunk);
             pending = write_lossy_utf8(&mut writer, &working)?;
-            // note: flush is necessary else we get the cursor could not be
-            // found error.
+            // note: flush is necessary else we get the cursor could not be found error.
             writer.flush()?;
         }
         // Flush dangling bytes from a stream that ended mid-codepoint.
@@ -390,15 +315,7 @@ mod tests {
             expected.stdout = format!("'{}'", expected.stdout);
         }
 
-        // cmd.exe emits the quotes literally and terminates the line with CRLF
-        // *after* the closing quote, while the expected string keeps the
-        // newline inside the quotes; strip line endings from both sides so
-        // the comparison is line-ending agnostic.
-        let strip_newlines = |s: &str| s.replace("\r", "").replace("\n", "");
-        assert_eq!(
-            strip_newlines(actual.stdout.trim()),
-            strip_newlines(expected.stdout.trim())
-        );
+        assert_eq!(actual.stdout.trim(), expected.stdout.trim());
         assert_eq!(actual.stderr, expected.stderr);
         assert_eq!(actual.success(), expected.success());
     }
@@ -540,14 +457,8 @@ mod tests {
             expected.stdout = format!("'{}'", expected.stdout);
         }
 
-        // The output should still be captured in the CommandOutput. cmd.exe
-        // terminates the quoted output with CRLF *after* the closing quote,
-        // so strip line endings from both sides before comparing.
-        let strip_newlines = |s: &str| s.replace("\r", "").replace("\n", "");
-        assert_eq!(
-            strip_newlines(actual.stdout.trim()),
-            strip_newlines(expected.stdout.trim())
-        );
+        // The output should still be captured in the CommandOutput
+        assert_eq!(actual.stdout.trim(), expected.stdout.trim());
         assert_eq!(actual.stderr, expected.stderr);
         assert_eq!(actual.success(), expected.success());
     }

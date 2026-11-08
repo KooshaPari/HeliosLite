@@ -116,14 +116,11 @@ impl<T: HttpInfra> Google<T> {
                     struct ModelsResponse {
                         models: Vec<forge_app::dto::google::Model>,
                     }
+
                     let response: ModelsResponse = serde_json::from_str(&text)
                         .with_context(|| ctx_msg)
                         .with_context(|| "Failed to deserialize models response")?;
-                    Ok(response
-                        .models
-                        .into_iter()
-                        .map(forge_domain::Model::from)
-                        .collect())
+                    Ok(response.models.into_iter().map(Into::into).collect())
                 } else {
                     // treat non 200 response as error.
                     Err(anyhow::anyhow!(text))
@@ -134,57 +131,6 @@ impl<T: HttpInfra> Google<T> {
             forge_domain::ModelSource::Hardcoded(models) => {
                 debug!("Using hardcoded models");
                 Ok(models.clone())
-            }
-            forge_domain::ModelSource::Dynamic { url, fallback } => {
-                debug!(url = %url, "Fetching dynamic models");
-
-                let fetch_result = async {
-                    let response = self
-                        .http
-                        .http_get(url, Some(create_headers(self.get_headers())))
-                        .await
-                        .with_context(|| format_http_context(None, "GET", url))
-                        .with_context(|| "Failed to fetch models")?;
-
-                    let status = response.status();
-                    let ctx_msg = format_http_context(Some(status), "GET", url);
-                    let text = response
-                        .text()
-                        .await
-                        .with_context(|| ctx_msg.clone())
-                        .with_context(|| "Failed to decode response into text")?;
-
-                    if !status.is_success() {
-                        anyhow::bail!("{}: {}", ctx_msg, text);
-                    }
-
-                    // Google's models endpoint returns { "models": [...] }
-                    #[derive(serde::Deserialize)]
-                    struct ModelsResponse {
-                        models: Vec<forge_app::dto::google::Model>,
-                    }
-
-                    let response: ModelsResponse = serde_json::from_str(&text)
-                        .with_context(|| ctx_msg)
-                        .with_context(|| "Failed to deserialize models response")?;
-                    Ok(response
-                        .models
-                        .into_iter()
-                        .map(forge_domain::Model::from)
-                        .collect())
-                }
-                .await;
-
-                match fetch_result {
-                    Ok(live) => Ok(forge_app::domain::Model::merge_live(live, fallback.clone())),
-                    Err(error) => {
-                        tracing::warn!(
-                            error = ?error,
-                            "Dynamic model fetch failed; falling back to curated list"
-                        );
-                        Ok(fallback.clone())
-                    }
-                }
             }
         }
     }
@@ -321,19 +267,15 @@ mod tests {
 
         async fn http_post(
             &self,
-            url: &Url,
-            headers: Option<HeaderMap>,
-            body: Bytes,
+            _url: &Url,
+            _headers: Option<HeaderMap>,
+            _body: Bytes,
         ) -> anyhow::Result<reqwest::Response> {
-            let mut request = self.client.post(url.clone()).body(body);
-            if let Some(headers) = headers {
-                request = request.headers(headers);
-            }
-            Ok(request.send().await?)
+            unimplemented!()
         }
 
-        async fn http_delete(&self, url: &Url) -> anyhow::Result<reqwest::Response> {
-            Ok(self.client.delete(url.clone()).send().await?)
+        async fn http_delete(&self, _url: &Url) -> anyhow::Result<reqwest::Response> {
+            unimplemented!()
         }
 
         async fn http_eventsource(
@@ -457,11 +399,10 @@ mod tests {
             }])
             .tool_choice(ToolChoice::Call(ToolName::new("math")));
 
-        // We can't easily test Request::from(context) directly here because
-        // Request is private or we need to access it via Google::chat
-        // But we can check the serialized request if we mock the http
-        // call. However, Request is pub in dto::google::Request, so we
-        // can use it if we import it. The import
+        // We can't easily test Request::from(context) directly here because Request is
+        // private or we need to access it via Google::chat But we can check the
+        // serialized request if we mock the http call. However, Request is pub
+        // in dto::google::Request, so we can use it if we import it. The import
         // `use forge_app::dto::google::{EventData, Request};` is already there.
 
         let request = Request::from(context);

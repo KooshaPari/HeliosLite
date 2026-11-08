@@ -40,7 +40,7 @@ fn is_ignored_by_name(path: &Path) -> bool {
     let name_lower = name.to_lowercase();
 
     // Lock files: *-lock.json, *.lock, *.lockb, *.lock.json, etc.
-    name_lower.ends_with(".lock")
+    if name_lower.ends_with(".lock")
         || name_lower.ends_with(".lockb")
         || name_lower.ends_with("-lock.json")
         || name_lower.ends_with("-lock.yaml")
@@ -48,6 +48,11 @@ fn is_ignored_by_name(path: &Path) -> bool {
         || name_lower.ends_with(".lock.json")
         || name_lower.ends_with(".lockfile")
         || name == "Package.resolved"
+    {
+        return true;
+    }
+
+    false
 }
 
 /// Returns `true` if `path` is a symlink (does not follow the link).
@@ -151,21 +156,15 @@ impl<F: CommandInfra + WalkerInfra + 'static> FileDiscovery for FdDefault<F> {
 
 #[cfg(test)]
 mod tests {
-    #[cfg(unix)]
     use std::fs::{self, File};
-    #[cfg(unix)]
     use std::io::Write;
 
-    #[cfg(unix)]
     use pretty_assertions::assert_eq;
-    #[cfg(unix)]
     use tempfile::tempdir;
 
-    #[cfg(unix)]
     use super::*;
 
     #[test]
-    #[cfg(unix)]
     fn test_filter_and_resolve_excludes_symlinks() {
         let dir = tempdir().unwrap();
         let base = dir.path();
@@ -177,8 +176,7 @@ mod tests {
             .write_all(b"fn main() {}")
             .unwrap();
 
-        // Symlink pointing to the real file (also carries an allowed
-        // extension).
+        // Symlink pointing to the real file (also carries an allowed extension).
         let link_path = base.join("link.rs");
         std::os::unix::fs::symlink(&real_path, &link_path).unwrap();
 
@@ -190,7 +188,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(unix)]
     fn test_filter_and_resolve_excludes_dangling_symlinks() {
         let dir = tempdir().unwrap();
         let base = dir.path();
@@ -211,7 +208,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(unix)]
     fn test_filter_and_resolve_excludes_symlinks_to_directories() {
         let dir = tempdir().unwrap();
         let base = dir.path();

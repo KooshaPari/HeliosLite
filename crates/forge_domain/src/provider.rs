@@ -88,7 +88,6 @@ impl ProviderId {
     pub const KIMI_CODING: ProviderId = ProviderId(Cow::Borrowed("kimi_coding"));
     pub const MOONSHOT: ProviderId = ProviderId(Cow::Borrowed("moonshot"));
     pub const ALIBABA_TOKEN_PLAN: ProviderId = ProviderId(Cow::Borrowed("alibaba_token_plan"));
-    pub const OLLAMA: ProviderId = ProviderId(Cow::Borrowed("ollama"));
 
     /// Returns all built-in provider IDs
     ///
@@ -136,7 +135,6 @@ impl ProviderId {
             ProviderId::KIMI_CODING,
             ProviderId::MOONSHOT,
             ProviderId::ALIBABA_TOKEN_PLAN,
-            ProviderId::OLLAMA,
         ]
     }
 
@@ -266,28 +264,7 @@ pub enum ProviderResponse {
 pub enum ModelSource<T> {
     /// Can be a `Url` or a `Template`
     Url(T),
-    /// Models are fetched live from `url` (typically the provider's
-    /// `/v1/models` endpoint) and enriched with curated metadata from
-    /// `fallback` (matched by model id). If the fetch fails for any reason
-    /// (network, auth, schema), the curated `fallback` list is used as-is.
-    Dynamic {
-        /// Endpoint to fetch the live model list from (e.g. `/v1/models`).
-        url: T,
-        /// Curated metadata overlaid on top of the live list, and the sole
-        /// source when the live fetch fails.
-        fallback: Vec<Model>,
-    },
     Hardcoded(Vec<Model>),
-}
-
-impl<T: AsRef<str>> ModelSource<T> {
-    /// Returns the fetch URL if this source is dynamic.
-    pub fn dynamic_url(&self) -> Option<&T> {
-        match self {
-            ModelSource::Dynamic { url, .. } => Some(url),
-            _ => None,
-        }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -997,8 +974,7 @@ mod tests {
     fn test_azure_provider() {
         let fixture = azure("test_key", "my-resource", "gpt-4", "2024-02-15-preview");
 
-        // Check chat completion URL (url field now contains the chat completion
-        // URL)
+        // Check chat completion URL (url field now contains the chat completion URL)
         let actual_chat = fixture.url.clone();
         let expected_chat = Url::parse("https://my-resource.openai.azure.com/openai/deployments/gpt-4/chat/completions?api-version=2024-02-15-preview").unwrap();
         assert_eq!(actual_chat, expected_chat);

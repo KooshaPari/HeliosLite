@@ -1,12 +1,10 @@
 [package]
 name = "forge_services"
-version = "0.1.1"
+version = "0.1.0"
 edition.workspace = true
-license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-forge_semantic = { path = "../forge_semantic" }
 chrono.workspace = true
 tokio.workspace = true
 tracing.workspace = true
@@ -39,12 +37,12 @@ base64.workspace = true
 strum_macros.workspace = true
 strum.workspace = true
 bytes.workspace = true
-serde_yaml_ng.workspace = true
+serde_yml.workspace = true
 gray_matter.workspace = true
+merge.workspace = true
 strip-ansi-escapes.workspace = true
 bstr.workspace = true
 forge_app.workspace = true
-forge_guardian.workspace = true
 url.workspace = true
 forge_eventsource.workspace = true
 lazy_static = "1.5.0"
@@ -63,3 +61,5 @@ pretty_assertions.workspace = true
 tempfile.workspace = true
 fake = { version = "5.1.0", features = ["derive"] }
 forge_test_kit.workspace = true
+
+

@@ -70,8 +70,7 @@ mod tests {
     ) -> String {
         let mut messages = Vec::new();
 
-        // Add system messages to the regular messages array for Anthropic
-        // format
+        // Add system messages to the regular messages array for Anthropic format
         for c in system_messages.chars() {
             match c {
                 's' => messages.push(

@@ -364,7 +364,6 @@ pub enum Role {
     System,
     User,
     Assistant,
-    Tool,
 }
 #[derive(Clone, Debug, Serialize, Deserialize, Setters, PartialEq)]
 #[setters(into, strip_option)]
@@ -435,12 +434,11 @@ pub struct Context {
 
 impl Context {
     pub fn accumulate_usage(&self) -> Option<Usage> {
-        // Returns the usage of the **most recent** message that has usage
-        // attached. This represents the actual prompt size for the current
-        // turn. Earlier messages' usage values are cumulative historical
-        // snapshots that would otherwise inflate the displayed total when
-        // summed or even when reduced via max().
-        self.messages.iter().rev().find_map(|msg| msg.usage)
+        self.messages
+            .iter()
+            .filter_map(|msg| msg.usage.as_ref())
+            .cloned()
+            .reduce(|a, b| a.accumulate(&b))
     }
 
     pub fn system_prompt(&self) -> Option<&str> {
@@ -572,11 +570,10 @@ impl Context {
         tool_records: Vec<(ToolCallFull, ToolResult)>,
         phase: Option<MessagePhase>,
     ) -> Self {
-        // Convert flat reasoning string to reasoning_details only when no
-        // structured reasoning_details are present. When
-        // reasoning_details already exists it already contains the text
-        // (with its cryptographic signature), so adding another entry
-        // from the raw `reasoning` string would produce a duplicate
+        // Convert flat reasoning string to reasoning_details only when no structured
+        // reasoning_details are present. When reasoning_details already exists it
+        // already contains the text (with its cryptographic signature), so adding
+        // another entry from the raw `reasoning` string would produce a duplicate
         // thinking block with a null signature, which Anthropic rejects.
         let merged_reasoning_details = match (reasoning, reasoning_details) {
             (_, Some(details)) => Some(details),
@@ -648,8 +645,7 @@ impl Context {
                 return false;
             }
 
-            // When enabled parameter is defined then return it's value
-            // directly.
+            // When enabled parameter is defined then return it's value directly.
             if reasoning.enabled.is_some() {
                 return reasoning.enabled.unwrap_or_default();
             }
@@ -871,8 +867,7 @@ mod tests {
         let token_count = estimate_token_count(context.to_text().len());
 
         // Validate the token count is reasonable
-        // The exact value will depend on the implementation of
-        // estimate_token_count
+        // The exact value will depend on the implementation of estimate_token_count
         assert!(token_count > 0, "Token count should be greater than 0");
     }
 
@@ -1070,8 +1065,8 @@ mod tests {
         let fixture = Context::default().messages(vec![wrapper]);
         assert_eq!(fixture.token_count(), TokenCount::Actual(80));
 
-        // case 4: context with messages - since total_tokens are not present
-        // return estimate
+        // case 4: context with messages - since total_tokens are not present return
+        // estimate
         let fixture = Context::default()
             .add_message(ContextMessage::user("Hello", None))
             .add_message(ContextMessage::assistant("Hi there!", None, None, None))
@@ -1111,8 +1106,8 @@ mod tests {
 
         let actual = fixture.token_count();
 
-        // Expected: Should use the LAST message's usage (300), not the first
-        // (100) or second (200)
+        // Expected: Should use the LAST message's usage (300), not the first (100) or
+        // second (200)
         let expected = TokenCount::Actual(300);
 
         assert_eq!(actual, expected);
@@ -1205,9 +1200,8 @@ mod tests {
 
     #[test]
     fn test_context_is_reasoning_not_supported_when_effort_is_none() {
-        // `Effort::None` is documented as "skips the thinking step entirely"
-        // and must act as an explicit opt-out regardless of other
-        // fields.
+        // `Effort::None` is documented as "skips the thinking step entirely" and
+        // must act as an explicit opt-out regardless of other fields.
         let fixture = Context::default().reasoning(crate::ReasoningConfig {
             effort: Some(crate::Effort::None),
             ..Default::default()
@@ -1395,8 +1389,8 @@ mod tests {
                 },
             ]);
 
-        // Test total messages (6 messages: 1 system + 2 user + 2 assistant + 2
-        // tool results)
+        // Test total messages (6 messages: 1 system + 2 user + 2 assistant + 2 tool
+        // results)
         assert_eq!(fixture.total_messages(), 7);
 
         // Test user message count
@@ -1411,9 +1405,8 @@ mod tests {
 
     #[test]
     fn test_directory_listing_sorted_dirs_first() {
-        // Create entries already sorted (as they would come from attachment
-        // service) Directories first, then files, all sorted
-        // alphabetically
+        // Create entries already sorted (as they would come from attachment service)
+        // Directories first, then files, all sorted alphabetically
         let fixture_attachments = vec![Attachment {
             path: "/test/root".to_string(),
             content: AttachmentContent::DirectoryListing {
@@ -1507,10 +1500,9 @@ mod tests {
             ContextMessage::assistant("Let me help", None, None, Some(fixture_tool_calls));
         let actual = fixture.token_count_approx();
         // Content: "Let me help" = 11 chars
-        // Tool call 1: "fs_search" (9 chars) + {"query":"test"} (16 chars) = 25
-        // chars Tool call 2: "calculate" (9 chars) +
-        // {"expression":"2+2"} (20 chars) = 29 chars Total: 11 + 25 +
-        // 29 = 65 chars / 4 = 17 tokens
+        // Tool call 1: "fs_search" (9 chars) + {"query":"test"} (16 chars) = 25 chars
+        // Tool call 2: "calculate" (9 chars) + {"expression":"2+2"} (20 chars) = 29
+        // chars Total: 11 + 25 + 29 = 65 chars / 4 = 17 tokens
         let expected = 17;
         assert_eq!(actual, expected);
     }
@@ -1673,8 +1665,8 @@ mod tests {
 
     #[test]
     fn test_has_model_changed_ignores_user_messages() {
-        // User messages have model tracking too, but we should only check
-        // assistant messages
+        // User messages have model tracking too, but we should only check assistant
+        // messages
         let fixture = Context::default()
             .add_message(TextMessage::new(Role::Assistant, "Response").model(ModelId::new("gpt-4")))
             .add_message(TextMessage::new(Role::User, "Question").model(ModelId::new("claude-3")));
@@ -1688,8 +1680,8 @@ mod tests {
 
     #[test]
     fn test_has_model_changed_continuing_same_model() {
-        // Scenario: model1 -> model2 -> model2 (the second model2 should not
-        // drop reasoning)
+        // Scenario: model1 -> model2 -> model2 (the second model2 should not drop
+        // reasoning)
         let fixture = Context::default()
             .add_message(TextMessage::new(Role::Assistant, "First").model(ModelId::new("model1")))
             .add_message(TextMessage::new(Role::User, "Question"))
@@ -1714,9 +1706,8 @@ mod tests {
     /// extras.
     #[test]
     fn test_append_message_does_not_duplicate_reasoning_when_details_present() {
-        // Fixture: a structured reasoning detail with a valid signature, as
-        // would arrive after aggregating an Anthropic streaming
-        // response.
+        // Fixture: a structured reasoning detail with a valid signature, as would
+        // arrive after aggregating an Anthropic streaming response.
         let fixture_details = vec![ReasoningFull {
             text: Some("Let me think about this.".to_string()),
             signature: Some("EpwFvalidSignatureABC123".to_string()),
@@ -1726,9 +1717,8 @@ mod tests {
             ..Default::default()
         }];
 
-        // Both reasoning (raw string) and reasoning_details (structured) are
-        // provided, mirroring what orch.rs passes after collecting a
-        // streamed Anthropic response.
+        // Both reasoning (raw string) and reasoning_details (structured) are provided,
+        // mirroring what orch.rs passes after collecting a streamed Anthropic response.
         let fixture = Context::default().add_message(ContextMessage::user("Hello", None));
         let actual = fixture.append_message(
             "Answer",

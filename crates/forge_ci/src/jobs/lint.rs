@@ -5,9 +5,29 @@ fn cargo_cmd(parts: &[&str]) -> String {
     parts.join(" ")
 }
 
+/// Base parts for fmt commands
+fn fmt_base() -> Vec<&'static str> {
+    vec!["cargo", "+nightly", "fmt", "--all"]
+}
+
 /// Base parts for clippy commands (shared across all clippy invocations).
 fn clippy_base() -> Vec<&'static str> {
-    vec!["cargo", "clippy", "--all-features", "--workspace"]
+    vec![
+        "cargo",
+        "+nightly",
+        "clippy",
+        "--all-features",
+        "--workspace",
+    ]
+}
+
+/// Build a cargo fmt command
+pub fn fmt_cmd(fix: bool) -> String {
+    let mut parts = fmt_base();
+    if !fix {
+        parts.push("--check");
+    }
+    cargo_cmd(&parts)
 }
 
 /// Build a cargo clippy command that checks all targets for general warnings.

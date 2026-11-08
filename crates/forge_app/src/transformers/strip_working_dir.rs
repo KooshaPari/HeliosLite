@@ -515,9 +515,8 @@ mod tests {
 
     #[test]
     fn test_windows_case_sensitivity() {
-        // On Windows, paths are case-insensitive, but we preserve the original
-        // case when stripping. This test verifies case-sensitive
-        // matching behavior.
+        // On Windows, paths are case-insensitive, but we preserve the original case
+        // when stripping. This test verifies case-sensitive matching behavior.
         let fixture = ContextSummary::new(vec![SummaryBlock::new(
             Role::Assistant,
             vec![
@@ -527,9 +526,9 @@ mod tests {
         )]);
         let actual = StripWorkingDir::new(r"C:\Users\User\Project").transform(fixture);
 
-        // On Windows: case-insensitive matching, first path strips, second
-        // doesn't On Unix: case-sensitive matching, neither path strips
-        // (Windows paths not recognized)
+        // On Windows: case-insensitive matching, first path strips, second doesn't
+        // On Unix: case-sensitive matching, neither path strips (Windows paths not
+        // recognized)
         #[cfg(windows)]
         let expected = ContextSummary::new(vec![SummaryBlock::new(
             Role::Assistant,

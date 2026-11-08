@@ -7,6 +7,7 @@ use forge_domain::{
     AnyProvider, ApiKey, AuthCredential, AuthDetails, Error, MigrationResult, Provider,
     ProviderRepository, ProviderType, URLParam, URLParamSpec, URLParamValue,
 };
+use merge::Merge;
 use serde::Deserialize;
 
 /// Represents the source of models for a provider
@@ -15,15 +16,6 @@ use serde::Deserialize;
 enum Models {
     /// Models are fetched from a URL
     Url(String),
-    /// Models are fetched live from `url`, enriched with curated metadata
-    /// from `fallback`, falling back to `fallback` when the fetch fails
-    Dynamic {
-        /// Endpoint to fetch the live model list from (e.g. `/v1/models`).
-        url: String,
-        /// Curated metadata overlaid on the live list; sole source on fetch
-        /// failure.
-        fallback: Vec<forge_app::domain::Model>,
-    },
     /// Models are hardcoded in the configuration
     Hardcoded(Vec<forge_app::domain::Model>),
 }
@@ -80,45 +72,32 @@ impl UrlParamVarConfig {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Merge)]
 struct ProviderConfig {
+    #[merge(strategy = overwrite)]
     id: ProviderId,
     #[serde(default)]
+    #[merge(strategy = overwrite)]
     provider_type: ProviderType,
     #[serde(default)]
+    #[merge(strategy = overwrite)]
     api_key_vars: Option<String>,
     #[serde(default)]
+    #[merge(strategy = merge::vec::append)]
     url_param_vars: Vec<UrlParamVarConfig>,
     #[serde(default)]
+    #[merge(strategy = overwrite)]
     response_type: Option<ProviderResponse>,
+    #[merge(strategy = overwrite)]
     url: String,
     #[serde(default)]
+    #[merge(strategy = overwrite)]
     models: Option<Models>,
+    #[merge(strategy = merge::vec::append)]
     auth_methods: Vec<forge_domain::AuthMethod>,
     #[serde(default)]
+    #[merge(strategy = overwrite)]
     custom_headers: Option<std::collections::HashMap<String, String>>,
-}
-
-impl ProviderConfig {
-    fn merge_from(&mut self, other: Self) {
-        self.id = other.id;
-        self.provider_type = other.provider_type;
-        if other.api_key_vars.is_some() {
-            self.api_key_vars = other.api_key_vars;
-        }
-        self.url_param_vars.extend(other.url_param_vars);
-        if other.response_type.is_some() {
-            self.response_type = other.response_type;
-        }
-        self.url = other.url;
-        if other.models.is_some() {
-            self.models = other.models;
-        }
-        self.auth_methods.extend(other.auth_methods);
-        if other.custom_headers.is_some() {
-            self.custom_headers = other.custom_headers;
-        }
-    }
 }
 
 /// Maps new environment variable names to their legacy fallback names.
@@ -131,11 +110,6 @@ fn legacy_env_var_fallback(new_name: &str) -> Option<&'static str> {
         "LM_STUDIO_HOST" => Some("LM_STUDIO_URL"),
         "LLAMA_CPP_HOST" => Some("LLAMA_CPP_URL"),
         "JAN_AI_HOST" => Some("JAN_AI_URL"),
-        // HeliosLite rename (2026-07-06): FORGE_API_KEY -> HELIOSLITE_API_KEY.
-        // Users on the legacy KooshaPari/forgecode pre-rename build keep working
-        // until they rotate their env. Symmetric with the OLLAMA/VLLM/LM_STUDIO
-        // fallbacks above. Will be removed in a future major.
-        "HELIOSLITE_API_KEY" => Some("FORGE_API_KEY"),
         _ => None,
     }
 }
@@ -153,22 +127,28 @@ fn default_url_param_value(name: &str) -> Option<&'static str> {
     }
 }
 
+fn overwrite<T>(base: &mut T, other: T) {
+    *base = other;
+}
+
 /// Transparent wrapper for Vec<ProviderConfig> that implements custom merge
 /// logic
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Merge)]
 #[serde(transparent)]
-struct ProviderConfigs(Vec<ProviderConfig>);
+struct ProviderConfigs(#[merge(strategy = merge_configs)] Vec<ProviderConfig>);
 
-impl ProviderConfigs {
-    fn merge_from(&mut self, other: Self) {
-        for other_config in other.0 {
-            if let Some(base_config) = self.0.iter_mut().find(|base| base.id == other_config.id) {
-                base_config.merge_from(other_config);
-            } else {
-                self.0.push(other_config);
-            }
-        }
+fn merge_configs(base: &mut Vec<ProviderConfig>, other: Vec<ProviderConfig>) {
+    let mut map: std::collections::HashMap<_, _> =
+        base.drain(..).map(|c| (c.id.clone(), c)).collect();
+
+    for other_config in other {
+        let id = other_config.id.clone();
+        map.entry(id)
+            .and_modify(|base_config| base_config.merge(other_config.clone()))
+            .or_insert(other_config);
     }
+
+    base.extend(map.into_values());
 }
 
 impl From<forge_config::ProviderUrlParam> for UrlParamVarConfig {
@@ -222,9 +202,6 @@ impl From<forge_config::ProviderEntry> for ProviderConfig {
 
         let models = entry.models.map(|m| match m {
             forge_config::ModelListConfig::Url(url) => Models::Url(url),
-            forge_config::ModelListConfig::Dynamic { url, fallback } => {
-                Models::Dynamic { url, fallback }
-            }
             forge_config::ModelListConfig::Hardcoded(model_list) => Models::Hardcoded(model_list),
         });
 
@@ -248,10 +225,6 @@ impl From<&ProviderConfig> for forge_domain::ProviderTemplate {
             Models::Url(model_url_template) => forge_domain::ModelSource::Url(
                 forge_domain::Template::<forge_domain::URLParameters>::new(model_url_template),
             ),
-            Models::Dynamic { url, fallback } => forge_domain::ModelSource::Dynamic {
-                url: forge_domain::Template::<forge_domain::URLParameters>::new(url),
-                fallback: fallback.clone(),
-            },
             Models::Hardcoded(model_list) => {
                 forge_domain::ModelSource::Hardcoded(model_list.clone())
             }
@@ -336,8 +309,7 @@ impl<
                 continue;
             }
 
-            // Try to create configured template provider, fallback to
-            // unconfigured
+            // Try to create configured template provider, fallback to unconfigured
             let provider_entry = if let Ok(provider) = self.create_provider(&config).await {
                 Some(provider.into())
             } else if let Ok(provider) = self.create_unconfigured_provider(&config) {
@@ -377,8 +349,8 @@ impl<
         let has_anthropic_url = self.infra.get_env_var("ANTHROPIC_URL").is_some();
 
         for config in configs {
-            // Skip Forge provider and ContextEngine providers - they're not
-            // configurable via env like other providers
+            // Skip Forge provider and ContextEngine providers - they're not configurable
+            // via env like other providers
             if config.id == ProviderId::FORGE || config.provider_type == ProviderType::ContextEngine
             {
                 continue;
@@ -505,10 +477,6 @@ impl<
             Models::Url(model_url_template) => forge_domain::ModelSource::Url(
                 forge_domain::Template::<forge_domain::URLParameters>::new(model_url_template),
             ),
-            Models::Dynamic { url, fallback } => forge_domain::ModelSource::Dynamic {
-                url: forge_domain::Template::<forge_domain::URLParameters>::new(url),
-                fallback: fallback.clone(),
-            },
             Models::Hardcoded(model_list) => {
                 forge_domain::ModelSource::Hardcoded(model_list.clone())
             }
@@ -569,8 +537,7 @@ impl<
             access_token.token.chars().take(20).collect::<String>()
         );
 
-        // Create new credential with fresh token, preserving url_params and
-        // provider ID
+        // Create new credential with fresh token, preserving url_params and provider ID
         Ok(forge_domain::AuthCredential::new_api_key(
             original_credential.id.clone(),
             forge_domain::ApiKey::from(access_token.token),
@@ -584,13 +551,11 @@ impl<
     ) -> anyhow::Result<forge_domain::ProviderTemplate> {
         // Handle special cases first
         if id == ProviderId::FORGE {
-            // Forge provider isn't typically configured via env vars in the
-            // registry
+            // Forge provider isn't typically configured via env vars in the registry
             return Err(Error::provider_not_available(ProviderId::FORGE).into());
         }
 
-        // Look up provider from cached providers - return configured template
-        // providers
+        // Look up provider from cached providers - return configured template providers
         self.get_providers()
             .await
             .iter()
@@ -607,11 +572,11 @@ impl<
     async fn get_merged_configs(&self) -> Vec<ProviderConfig> {
         let mut configs = ProviderConfigs(get_provider_configs().clone());
         // Merge custom file configs into embedded configs
-        configs.merge_from(ProviderConfigs(
+        configs.merge(ProviderConfigs(
             self.get_custom_provider_configs().await.unwrap_or_default(),
         ));
         // Merge inline configs from ForgeConfig (forge.toml `providers` field)
-        configs.merge_from(ProviderConfigs(self.get_config_provider_configs()));
+        configs.merge(ProviderConfigs(self.get_config_provider_configs()));
 
         configs.0
     }
@@ -707,109 +672,6 @@ mod tests {
     use pretty_assertions::assert_eq;
 
     use super::*;
-
-    fn fixture_provider_config(id: &str, url: &str) -> ProviderConfig {
-        ProviderConfig {
-            id: ProviderId::from(id.to_string()),
-            provider_type: ProviderType::Llm,
-            api_key_vars: Some("BASE_KEY".to_string()),
-            url_param_vars: vec![UrlParamVarConfig::Plain("BASE_PARAM".to_string())],
-            response_type: Some(ProviderResponse::OpenAI),
-            url: url.to_string(),
-            models: None,
-            auth_methods: vec![AuthMethod::ApiKey],
-            custom_headers: Some(std::collections::HashMap::from([(
-                "X-Base".to_string(),
-                "base".to_string(),
-            )])),
-        }
-    }
-
-    #[test]
-    fn test_provider_config_merge_from_overwrites_scalars_and_appends_vectors() {
-        let mut fixture = fixture_provider_config("shared", "https://base.example");
-        let other = ProviderConfig {
-            id: ProviderId::from("shared".to_string()),
-            provider_type: ProviderType::ContextEngine,
-            api_key_vars: Some("OTHER_KEY".to_string()),
-            url_param_vars: vec![UrlParamVarConfig::Plain("OTHER_PARAM".to_string())],
-            response_type: Some(ProviderResponse::Anthropic),
-            url: "https://other.example".to_string(),
-            models: None,
-            auth_methods: vec![AuthMethod::GoogleAdc],
-            custom_headers: Some(std::collections::HashMap::from([(
-                "X-Other".to_string(),
-                "other".to_string(),
-            )])),
-        };
-        fixture.merge_from(other);
-        let expected = ProviderConfig {
-            id: ProviderId::from("shared".to_string()),
-            provider_type: ProviderType::ContextEngine,
-            api_key_vars: Some("OTHER_KEY".to_string()),
-            url_param_vars: vec![
-                UrlParamVarConfig::Plain("BASE_PARAM".to_string()),
-                UrlParamVarConfig::Plain("OTHER_PARAM".to_string()),
-            ],
-            response_type: Some(ProviderResponse::Anthropic),
-            url: "https://other.example".to_string(),
-            models: None,
-            auth_methods: vec![AuthMethod::ApiKey, AuthMethod::GoogleAdc],
-            custom_headers: Some(std::collections::HashMap::from([(
-                "X-Other".to_string(),
-                "other".to_string(),
-            )])),
-        };
-        assert_eq!(fixture, expected);
-    }
-
-    #[test]
-    fn test_provider_config_merge_from_preserves_absent_optional_fields() {
-        let mut fixture = fixture_provider_config("shared", "https://base.example");
-        let other = ProviderConfig {
-            models: None,
-            api_key_vars: None,
-            response_type: None,
-            custom_headers: None,
-            ..fixture_provider_config("shared", "https://other.example")
-        };
-
-        fixture.merge_from(other);
-
-        let expected = ProviderConfig {
-            url: "https://other.example".to_string(),
-            url_param_vars: vec![
-                UrlParamVarConfig::Plain("BASE_PARAM".to_string()),
-                UrlParamVarConfig::Plain("BASE_PARAM".to_string()),
-            ],
-            auth_methods: vec![AuthMethod::ApiKey, AuthMethod::ApiKey],
-            ..fixture_provider_config("shared", "https://base.example")
-        };
-        assert_eq!(fixture, expected);
-    }
-
-    #[test]
-    fn test_provider_configs_merge_from_updates_matching_id_and_preserves_base_order() {
-        let mut fixture = ProviderConfigs(vec![
-            fixture_provider_config("first", "https://base-first.example"),
-            fixture_provider_config("shared", "https://base-shared.example"),
-        ]);
-        let other = ProviderConfigs(vec![
-            ProviderConfig {
-                url: "https://other-shared.example".to_string(),
-                ..fixture_provider_config("shared", "https://unused.example")
-            },
-            fixture_provider_config("third", "https://third.example"),
-        ]);
-        fixture.merge_from(other);
-        let actual_ids = fixture
-            .0
-            .iter()
-            .map(|config| config.id.to_string())
-            .collect::<Vec<_>>();
-        assert_eq!(actual_ids, vec!["First", "Shared", "Third"]);
-        assert_eq!(fixture.0[1].url, "https://other-shared.example");
-    }
 
     #[test]
     fn test_load_provider_configs() {
@@ -915,7 +777,7 @@ mod tests {
                 assert!(model_url.contains("api-version"));
                 assert!(model_url.contains("/models"));
             }
-            _ => panic!("Expected Models::Url variant"),
+            Models::Hardcoded(_) => panic!("Expected Models::Url variant"),
         }
     }
 
@@ -964,7 +826,7 @@ mod tests {
         assert_eq!(config.url, "{{OPENAI_URL}}/responses");
         match config.models.as_ref().unwrap() {
             Models::Url(model_url) => assert_eq!(model_url, "{{OPENAI_URL}}/models"),
-            _ => panic!("Expected Models::Url variant"),
+            Models::Hardcoded(_) => panic!("Expected Models::Url variant"),
         }
     }
 
@@ -1055,30 +917,27 @@ mod tests {
             config.url.as_str(),
             "https://api.neuralwatt.com/v1/chat/completions"
         );
-        // Neuralwatt exposes a non-standard /models schema, so the curated
-        // Neuralwatt exposes a non-standard /models schema. The curated list
-        // in provider.json is the source of truth (no live fetch). The
-        // earlier Dynamic overlay was retired in #277 (P2.5) in favor
-        // of a simpler Hardcoded list here.
+        // Neuralwatt exposes a non-standard /models schema, so models are
+        // hardcoded in provider.json instead of fetched from the URL.
         match config.models.as_ref().expect("models should be present") {
             Models::Hardcoded(models) => {
                 assert!(
                     models.iter().any(|m| m.id.as_str() == "glm-5.2"),
-                    "expected glm-5.2 to be present in curated models"
+                    "expected glm-5.2 to be present in hardcoded models"
                 );
                 assert!(
                     models.iter().any(|m| m.id.as_str() == "qwen3.5-397b"),
-                    "expected qwen3.5-397b to be present in curated models"
+                    "expected qwen3.5-397b to be present in hardcoded models"
                 );
                 assert!(
                     models.iter().any(|m| m.id.as_str() == "glm-5.2-flex"),
-                    "expected glm-5.2-flex to be present in curated models"
+                    "expected glm-5.2-flex to be present in hardcoded models"
                 );
                 assert!(
                     models
                         .iter()
                         .any(|m| m.id.as_str() == "kimi-k2.7-code-flex"),
-                    "expected kimi-k2.7-code-flex to be present in curated models"
+                    "expected kimi-k2.7-code-flex to be present in hardcoded models"
                 );
             }
             other => panic!("expected hardcoded models, got {other:?}"),
@@ -1122,10 +981,39 @@ mod tests {
         assert_eq!(config.url.as_str(), "https://api.meta.ai/v1/responses");
 
         match config.models.as_ref().expect("models should be present") {
-            Models::Url(model_url) => {
-                assert_eq!(model_url, "https://api.meta.ai/v1/models");
+            Models::Hardcoded(models) => {
+                let model = models
+                    .iter()
+                    .find(|m| m.id.as_str() == "muse-spark-1.1")
+                    .expect("muse-spark-1.1 should be present in hardcoded models");
+                assert_eq!(
+                    model.context_length,
+                    Some(1048576),
+                    "muse-spark-1.1 should have 1048576 context length"
+                );
+                assert_eq!(
+                    model.tools_supported,
+                    Some(true),
+                    "muse-spark-1.1 should support tools"
+                );
+                assert_eq!(
+                    model.supports_parallel_tool_calls,
+                    Some(true),
+                    "muse-spark-1.1 should support parallel tool calls"
+                );
+                assert_eq!(
+                    model.supports_reasoning,
+                    Some(true),
+                    "muse-spark-1.1 should support reasoning"
+                );
+                assert!(
+                    model
+                        .input_modalities
+                        .contains(&forge_app::domain::InputModality::Image),
+                    "muse-spark-1.1 should support image input"
+                );
             }
-            other => panic!("expected URL-driven models, got {other:?}"),
+            other => panic!("expected hardcoded models, got {other:?}"),
         }
     }
 
@@ -1147,15 +1035,14 @@ mod tests {
             config.url.as_str(),
             "https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1/chat/completions"
         );
-        // Alibaba Token Plan exposes an OpenAI-compatible endpoint. Capability
-        // metadata is curated in provider.json (no live fetch). The
-        // Dynamic arm from earlier drafts has been replaced with the
-        // simpler Hardcoded list in #277 (P2.5).
+        // Alibaba Token Plan exposes an OpenAI-compatible endpoint but no
+        // capability metadata via /models, so models are hardcoded in
+        // provider.json.
         match config.models.as_ref().expect("models should be present") {
             Models::Hardcoded(models) => {
                 assert!(
                     models.iter().any(|m| m.id.as_str() == "qwen3.7-max"),
-                    "expected qwen3.7-max to be present in curated models"
+                    "expected qwen3.7-max to be present in hardcoded models"
                 );
             }
             other => panic!("expected hardcoded models, got {other:?}"),
@@ -1177,11 +1064,16 @@ mod tests {
             config.url.as_str(),
             "https://api.moonshot.ai/v1/chat/completions"
         );
+        // Moonshot's /models endpoint omits capability metadata (modalities,
+        // reasoning, tool support), so models are hardcoded in provider.json.
         match config.models.as_ref().expect("models should be present") {
-            Models::Url(model_url) => {
-                assert_eq!(model_url, "https://api.moonshot.ai/v1/models");
+            Models::Hardcoded(models) => {
+                assert!(
+                    models.iter().any(|m| m.id.as_str() == "kimi-k3"),
+                    "expected kimi-k3 to be present in hardcoded models"
+                );
             }
-            other => panic!("expected URL-driven models, got {other:?}"),
+            other => panic!("expected hardcoded models, got {other:?}"),
         }
     }
 
@@ -1199,15 +1091,13 @@ mod tests {
             config.url.as_str(),
             "https://api.kimi.com/coding/v1/chat/completions"
         );
-        // Kimi Code's /models endpoint omits capability metadata, so the
-        // models are curated in provider.json with platform-canonical ids
-        // (e.g. k3). Earlier drafts tried a Dynamic overlay; #277 (P2.5)
-        // settled on a plain Hardcoded list here.
+        // Kimi Code's /models endpoint omits capability metadata, so models are
+        // hardcoded using the platform's canonical model IDs (k3, etc.).
         match config.models.as_ref().expect("models should be present") {
             Models::Hardcoded(models) => {
                 assert!(
                     models.iter().any(|m| m.id.as_str() == "k3"),
-                    "expected k3 to be present in curated models"
+                    "expected k3 to be present in hardcoded models"
                 );
             }
             other => panic!("expected hardcoded models, got {other:?}"),
@@ -1276,45 +1166,6 @@ mod tests {
             response_type: None,
             url: "http://example.com/v1/chat/completions".to_string(),
             models: Some(Models::Url("http://example.com/v1/models".to_string())),
-            auth_methods: vec![forge_domain::AuthMethod::ApiKey],
-            custom_headers: None,
-        };
-
-        assert_eq!(actual, expected);
-    }
-
-    #[test]
-    fn test_provider_entry_with_dynamic_models_converts_to_dynamic() {
-        let fallback_model = forge_app::domain::Model::new("k3")
-            .name("Kimi k3".to_string())
-            .context_length(262144)
-            .tools_supported(true);
-
-        let entry = forge_config::ProviderEntry {
-            id: "kimi_coding".to_string(),
-            url: "https://api.kimi.com/coding/v1/chat/completions".to_string(),
-            response_type: Some(forge_config::ProviderResponseType::OpenAI),
-            auth_methods: vec![forge_config::ProviderAuthMethod::ApiKey],
-            models: Some(forge_config::ModelListConfig::Dynamic {
-                url: "https://api.kimi.com/coding/v1/models".to_string(),
-                fallback: vec![fallback_model.clone()],
-            }),
-            ..Default::default()
-        };
-
-        let actual = ProviderConfig::from(entry);
-
-        let expected = ProviderConfig {
-            id: ProviderId::from("kimi_coding".to_string()),
-            provider_type: forge_domain::ProviderType::Llm,
-            api_key_vars: None,
-            url_param_vars: vec![],
-            response_type: Some(forge_app::domain::ProviderResponse::OpenAI),
-            url: "https://api.kimi.com/coding/v1/chat/completions".to_string(),
-            models: Some(Models::Dynamic {
-                url: "https://api.kimi.com/coding/v1/models".to_string(),
-                fallback: vec![fallback_model],
-            }),
             auth_methods: vec![forge_domain::AuthMethod::ApiKey],
             custom_headers: None,
         };
@@ -1391,10 +1242,6 @@ mod env_tests {
                 .map(|(k, v)| (k.clone(), v.clone()))
                 .collect()
         }
-
-        async fn database_stats(&self) -> anyhow::Result<forge_domain::HeliosdoctorDbStats> {
-            Ok(forge_domain::HeliosdoctorDbStats::default())
-        }
     }
 
     #[async_trait::async_trait]
@@ -1435,8 +1282,8 @@ mod env_tests {
     #[async_trait::async_trait]
     impl FileWriterInfra for MockInfra {
         async fn write(&self, path: &std::path::Path, content: Bytes) -> anyhow::Result<()> {
-            // Capture writes to credentials file and persist to the real temp
-            // dir so that OS-level permission checks work in tests.
+            // Capture writes to credentials file and persist to the real temp dir
+            // so that OS-level permission checks work in tests.
             if path == self.get_environment().credentials_path() {
                 let content_str = String::from_utf8(content.to_vec())?;
                 let creds: Vec<AuthCredential> = serde_json::from_str(&content_str)?;
@@ -1867,7 +1714,7 @@ mod env_tests {
                     "https://{{AZURE_RESOURCE_NAME}}.openai.azure.com/openai/models?api-version={{AZURE_API_VERSION}}"
                 );
             }
-            _ => panic!("Expected ModelSource::Url variant"),
+            forge_domain::ModelSource::Hardcoded(_) => panic!("Expected ModelSource::Url variant"),
         }
     }
 
@@ -1900,8 +1747,7 @@ mod env_tests {
             })
             .unwrap();
 
-        // Regular OpenAI and Anthropic providers return template URLs (not
-        // rendered)
+        // Regular OpenAI and Anthropic providers return template URLs (not rendered)
         assert_eq!(
             openai_provider.url.template,
             "https://api.openai.com/v1/chat/completions"
@@ -2166,10 +2012,6 @@ mod env_tests {
                     .iter()
                     .map(|(k, v)| (k.clone(), v.clone()))
                     .collect()
-            }
-
-            async fn database_stats(&self) -> anyhow::Result<forge_domain::HeliosdoctorDbStats> {
-                Ok(forge_domain::HeliosdoctorDbStats::default())
             }
         }
 

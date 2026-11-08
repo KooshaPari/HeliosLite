@@ -1,30 +1,10 @@
 import * as fs from "fs";
 import * as path from "path";
-import { spawn, type ChildProcess } from "child_process";
+import { spawn } from "child_process";
 import stripAnsi from "strip-ansi";
 import type { Validation, Task } from "./model.js";
 import { runValidations, allValidationsPassed } from "./verification.js";
 import { formatTimestamp } from "./utils.js";
-
-function terminateProcessTree(child: ChildProcess, force: boolean): void {
-  const signal: NodeJS.Signals = force ? "SIGKILL" : "SIGTERM";
-  if (!child.pid) {
-    child.kill(signal);
-    return;
-  }
-  if (process.platform === "win32") {
-    const args = ["/PID", String(child.pid), "/T"];
-    if (force) args.push("/F");
-    const killer = spawn("taskkill", args, { stdio: "ignore", windowsHide: true });
-    killer.unref();
-    return;
-  }
-  try {
-    process.kill(-child.pid, signal);
-  } catch {
-    child.kill(signal);
-  }
-}
 
 export type TaskExecutionResult = {
   index: number;
@@ -71,7 +51,6 @@ export async function executeTask(
         shell: true,
         cwd: cwd,
         stdio: ["ignore", "pipe", "pipe"],
-        detached: process.platform !== "win32",
       });
 
       let stdout = "";
@@ -105,7 +84,7 @@ export async function executeTask(
                   },
                 );
               }
-              terminateProcessTree(child, false);
+              child.kill("SIGTERM");
               resolve(currentOutput);
             }
           }
@@ -122,7 +101,7 @@ export async function executeTask(
             logStream.write(`Killing process...\n`);
             logStream.end();
           }
-          terminateProcessTree(child, true);
+          child.kill("SIGKILL");
           // Resolve with captured output so far
           resolve(stdout + stderr);
         }, task.timeout * 1000);
@@ -185,9 +164,6 @@ export async function executeTask(
       command,
       duration,
       output,
-      ...(timedOut
-        ? { error: `Task timed out after ${task.timeout}s` }
-        : {}),
       isTimeout: timedOut,
       earlyExit: exitedEarly,
     };

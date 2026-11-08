@@ -18,9 +18,6 @@ pub struct McpServers {
     /// Failed MCP servers with their error messages
     #[serde(default)]
     failures: HashMap<ServerName, String>,
-    /// Per-server last-seen timestamp (epoch millis) when tools were refreshed
-    #[serde(default)]
-    last_seen: HashMap<ServerName, u64>,
 }
 
 impl McpServers {
@@ -29,13 +26,7 @@ impl McpServers {
         servers: HashMap<ServerName, Vec<ToolDefinition>>,
         failures: HashMap<ServerName, String>,
     ) -> Self {
-        Self { servers, failures, last_seen: HashMap::new() }
-    }
-
-    /// Attach per-server last-seen timestamps (epoch millis)
-    pub fn with_last_seen(mut self, last_seen: HashMap<ServerName, u64>) -> Self {
-        self.last_seen = last_seen;
-        self
+        Self { servers, failures }
     }
 
     /// Get the successful servers
@@ -46,11 +37,6 @@ impl McpServers {
     /// Get the failed servers
     pub fn get_failures(&self) -> &HashMap<ServerName, String> {
         &self.failures
-    }
-
-    /// Get the per-server last-seen timestamps (epoch millis)
-    pub fn get_last_seen(&self) -> &HashMap<ServerName, u64> {
-        &self.last_seen
     }
 }
 

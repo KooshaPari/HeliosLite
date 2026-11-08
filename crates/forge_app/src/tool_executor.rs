@@ -3,7 +3,6 @@ use std::sync::Arc;
 
 use anyhow::anyhow;
 use forge_domain::{CodebaseQueryResult, ToolCallContext, ToolCatalog, ToolOutput};
-use forge_sandbox::SandboxConfig;
 
 use crate::fmt::content::FormatContent;
 use crate::operation::{TempContentFiles, ToolOperation};
@@ -17,10 +16,6 @@ use crate::{
 
 pub struct ToolExecutor<S> {
     services: Arc<S>,
-    /// Optional OS-level sandbox policy. When `Some`, shell and fetch tool
-    /// calls are routed through `forge_sandbox::Sandbox` instead of the bare
-    /// shell. Off by default; enable via `config.sandbox`.
-    sandbox_policy: Option<SandboxConfig>,
 }
 
 impl<
@@ -45,13 +40,7 @@ impl<
 > ToolExecutor<S>
 {
     pub fn new(services: Arc<S>) -> Self {
-        Self { services, sandbox_policy: None }
-    }
-
-    /// Construct with an OS-level sandbox policy. Shell and fetch calls
-    /// route through the sandbox.
-    pub fn with_sandbox(services: Arc<S>, policy: SandboxConfig) -> Self {
-        Self { services, sandbox_policy: Some(policy) }
+        Self { services }
     }
 
     fn require_prior_read(
@@ -157,71 +146,6 @@ impl<
             )
             .await?;
         Ok(path)
-    }
-
-    /// P1.1: route a shell command through the configured OS-level sandbox.
-    /// The shell command string is parsed into program + args via a simple
-    /// shlex-style splitter, then passed to `forge_sandbox::Sandbox::run`
-    /// against the configured `SandboxConfig`. stdout/stderr/exit_code are
-    /// mapped onto `ShellOutput` so the rest of the pipeline is unaffected.
-    async fn execute_shell_sandboxed(
-        &self,
-        command: String,
-        cwd: PathBuf,
-        env_vars: std::collections::HashMap<String, String>,
-        keep_ansi: bool,
-        policy: &SandboxConfig,
-    ) -> anyhow::Result<crate::services::ShellOutput> {
-        use forge_sandbox::Sandbox;
-
-        // Parse the command string into argv. We use a minimal whitespace
-        // + quote-aware splitter rather than a shlex dep — the sandbox
-        // gets a clean argv instead of a `sh -c` blob.
-        let (program, args) = parse_shell_command(&command);
-
-        let mut cfg = policy.clone();
-        cfg.command = program;
-        cfg.args = args;
-        cfg.working_dir = cwd;
-        cfg.env = env_vars.into_iter().collect();
-
-        let sandbox = Sandbox::for_platform();
-        // The Sandbox::run is async; offload to blocking pool so callers
-        // don't need to be inside an explicit runtime.
-        let output = tokio::task::spawn_blocking(move || {
-            tokio::runtime::Handle::current().block_on(async move { sandbox.run(&cfg).await })
-        })
-        .await
-        .map_err(|e| anyhow!("sandbox task join error: {e}"))?
-        .map_err(|e| anyhow!("sandbox execution failed: {e}"))?;
-
-        // Map SandboxOutput -> ShellOutput. `keep_ansi` matches the
-        // existing shell service: whether ANSI codes are preserved.
-        let _ = keep_ansi;
-        let command_str = format!(
-            "{}{}{}",
-            output.stdout,
-            if output.stderr.is_empty() {
-                String::new()
-            } else {
-                format!("\n{}", output.stderr)
-            },
-            if output.exit_code != 0 {
-                format!("\n[exit {}]", output.exit_code)
-            } else {
-                String::new()
-            }
-        );
-        Ok(crate::services::ShellOutput {
-            output: forge_domain::CommandOutput {
-                command: command.clone(),
-                stdout: output.stdout,
-                stderr: output.stderr,
-                exit_code: Some(output.exit_code),
-            },
-            shell: command_str,
-            description: None,
-        })
     }
 
     async fn call_internal(
@@ -344,47 +268,20 @@ impl<
             ToolCatalog::Shell(input) => {
                 let cwd = input
                     .cwd
-                    .clone()
                     .map(|p| p.display().to_string())
                     .unwrap_or_else(|| self.services.get_environment().cwd.display().to_string());
                 let normalized_cwd = self.normalize_path(cwd);
-
-                // P1.1: route shell calls through forge_sandbox when configured
-                // Convert env (Option<Vec<String>>) -> HashMap for SandboxConfig
-                let env_map: std::collections::HashMap<String, String> = input
-                    .env
-                    .as_ref()
-                    .map(|pairs| {
-                        pairs
-                            .iter()
-                            .filter_map(|kv| {
-                                let (k, v) = kv.split_once('=')?;
-                                Some((k.to_string(), v.to_string()))
-                            })
-                            .collect()
-                    })
-                    .unwrap_or_default();
-                let output = if let Some(policy) = self.sandbox_policy.as_ref() {
-                    self.execute_shell_sandboxed(
+                let output = self
+                    .services
+                    .execute(
                         input.command.clone(),
                         PathBuf::from(normalized_cwd),
-                        env_map,
                         input.keep_ansi,
-                        policy,
+                        false,
+                        input.env.clone(),
+                        input.description.clone(),
                     )
-                    .await?
-                } else {
-                    self.services
-                        .execute(
-                            input.command.clone(),
-                            PathBuf::from(normalized_cwd),
-                            input.keep_ansi,
-                            false,
-                            input.env.clone(),
-                            input.description.clone(),
-                        )
-                        .await?
-                };
+                    .await?;
                 output.into()
             }
             ToolCatalog::Fetch(input) => {
@@ -442,7 +339,6 @@ impl<
         })
     }
 
-    #[tracing::instrument(skip(self, context), fields(tool = %tool_input.kind()))]
     pub async fn execute(
         &self,
         tool_input: ToolCatalog,
@@ -489,55 +385,4 @@ impl<
             operation.into_tool_output(tool_kind, truncation_path, &env, &config, metrics)
         })
     }
-}
-
-/// Minimal shlex-style command splitter for the sandbox path.
-///
-/// Splits on whitespace; supports single or double quoted segments; backslash
-/// escapes the next character. Sufficient for the vast majority of agent shell
-/// calls and avoids pulling a shlex dep. The intent is that the caller's
-/// `Shell { command, .. }` is a single program + args invocation — anything
-/// more complex (pipes, redirects, globs) keeps using the legacy bare-shell
-/// path until explicitly opted in.
-fn parse_shell_command(input: &str) -> (String, Vec<String>) {
-    let mut out: Vec<String> = Vec::new();
-    let mut cur = String::new();
-    let mut in_single = false;
-    let mut in_double = false;
-    let mut escape = false;
-    for c in input.chars() {
-        if escape {
-            cur.push(c);
-            escape = false;
-            continue;
-        }
-        match c {
-            '\\' if in_single => {
-                cur.push('\\');
-            }
-            '\\' => {
-                escape = true;
-            }
-            '\'' if !in_double => {
-                in_single = !in_single;
-            }
-            '"' if !in_single => {
-                in_double = !in_double;
-            }
-            c if (c == ' ' || c == '\t') && !in_single && !in_double => {
-                if !cur.is_empty() {
-                    out.push(std::mem::take(&mut cur));
-                }
-            }
-            _ => cur.push(c),
-        }
-    }
-    if !cur.is_empty() {
-        out.push(cur);
-    }
-    if out.is_empty() {
-        return ("".to_string(), Vec::new());
-    }
-    let program = out.remove(0);
-    (program, out)
 }

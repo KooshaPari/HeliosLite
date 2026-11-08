@@ -131,7 +131,6 @@ impl<F: HttpInfra + EnvironmentInfra<Config = forge_config::ForgeConfig> + Sync>
         if let Some(models) = provider.models() {
             match models {
                 forge_domain::ModelSource::Hardcoded(models) => Ok(models.clone()),
-                forge_domain::ModelSource::Dynamic { fallback, .. } => Ok(fallback.clone()),
                 forge_domain::ModelSource::Url(_) => {
                     // Should not happen for OpenCode Zen as we hardcode models
                     Ok(vec![])

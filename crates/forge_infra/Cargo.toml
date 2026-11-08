@@ -1,8 +1,7 @@
 [package]
 name = "forge_infra"
-version = "0.1.1"
+version = "0.1.0"
 edition.workspace = true
-license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
@@ -31,7 +30,6 @@ thiserror.workspace = true
 schemars.workspace = true
 forge_app.workspace = true
 forge_walker.workspace = true
-forge_pheno_shell.workspace = true
 
 
 forge_eventsource.workspace = true
@@ -53,9 +51,6 @@ google-cloud-auth.workspace = true
 open.workspace = true
 aws-config.workspace = true
 aws-credential-types.workspace = true
-phenotype-health.workspace = true
-phenotype-observability.workspace = true
-phenotype-telemetry.workspace = true
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt", "time", "test-util"] }

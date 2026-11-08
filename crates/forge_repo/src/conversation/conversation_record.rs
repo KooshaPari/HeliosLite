@@ -278,7 +278,6 @@ pub enum RoleRecord {
     System,
     User,
     Assistant,
-    Tool,
 }
 
 impl From<&forge_domain::Role> for RoleRecord {
@@ -287,7 +286,6 @@ impl From<&forge_domain::Role> for RoleRecord {
             forge_domain::Role::System => Self::System,
             forge_domain::Role::User => Self::User,
             forge_domain::Role::Assistant => Self::Assistant,
-            forge_domain::Role::Tool => Self::Tool,
         }
     }
 }
@@ -298,7 +296,6 @@ impl From<RoleRecord> for forge_domain::Role {
             RoleRecord::System => Self::System,
             RoleRecord::User => Self::User,
             RoleRecord::Assistant => Self::Assistant,
-            RoleRecord::Tool => Self::Tool,
         }
     }
 }
@@ -553,15 +550,7 @@ impl<'de> Deserialize<'de> for ContextMessageRecord {
             Direct(ContextMessageValueRecord),
         }
 
-        // Deserialize through `serde_json::Value` first so we can defensively
-        // drop stray variant keys that would otherwise brick the entire
-        // conversation. Past corruption has injected empty objects like
-        // `,"text":{}` alongside a real `tool` variant, which made the
-        // externally-tagged enum unable to choose a variant.
-        let value = serde_json::Value::deserialize(deserializer)?;
-        let cleaned = strip_stray_variant_keys(value);
-
-        match ContextMessageParser::deserialize(cleaned).map_err(serde::de::Error::custom)? {
+        match ContextMessageParser::deserialize(deserializer)? {
             ContextMessageParser::Wrapper { message, usage } => {
                 Ok(ContextMessageRecord { message, usage })
             }
@@ -570,89 +559,6 @@ impl<'de> Deserialize<'de> for ContextMessageRecord {
             }
         }
     }
-}
-
-/// Variant tags recognised by `ContextMessageValueRecord`. When more than one
-/// of these appears in the same object we keep the first variant that is a
-/// non-empty object and successfully deserializes, and drop the rest. This
-/// recovers from corruption that historically injected `,"text":{}` next to
-/// a real `tool` variant without allowing malformed data to displace it.
-const MESSAGE_VARIANT_KEYS: &[&str] = &["text", "tool", "image"];
-
-fn strip_stray_variant_keys(value: serde_json::Value) -> serde_json::Value {
-    match value {
-        serde_json::Value::Object(mut map) => {
-            // Wrapper format: { message: { text|tool|image: ... }, usage: ... }
-            if let Some(serde_json::Value::Object(msg)) = map.get_mut("message")
-                && drop_stray_keys_in_place(msg)
-            {
-                tracing::warn!(
-                    target: "forge_repo.conversation",
-                    "dropped stray variant key(s) from corrupted message wrapper"
-                );
-            }
-            // Direct format: root object is the variant itself.
-            if drop_stray_keys_in_place(&mut map) {
-                tracing::warn!(
-                    target: "forge_repo.conversation",
-                    "dropped stray variant key(s) from corrupted message"
-                );
-            }
-            serde_json::Value::Object(map)
-        }
-        other => other,
-    }
-}
-
-/// Returns true if any keys were removed.
-///
-/// If one of the recognised variant keys (`text` / `tool` / `image`) is present,
-/// every *other* key in the object is dropped — the variant payload is the only
-/// valid content of a `ContextMessage`. This defends against historical
-/// corruption that injected extra fields such as `"role": "system"` at the same
-/// nesting level as a real `"text"` variant; serde's externally-tagged enum
-/// rejects any sibling key and previously bricked the whole conversation.
-fn drop_stray_keys_in_place(map: &mut serde_json::Map<String, serde_json::Value>) -> bool {
-    let valid_variants: Vec<&str> = MESSAGE_VARIANT_KEYS
-        .iter()
-        .copied()
-        .filter(|k| is_valid_variant(map.get(*k), k))
-        .collect();
-    if valid_variants.is_empty() {
-        return false;
-    }
-    // Pick the first valid variant in declaration order.
-    let keep = valid_variants
-        .first()
-        .copied()
-        .expect("valid_variants is non-empty");
-
-    // When a variant key is recognised, the variant payload is the *only*
-    // valid content — strip every other sibling key (role, usage, etc.) before
-    // handing the object to the externally-tagged deserializer.
-    let original_keys: Vec<String> = map.keys().cloned().collect();
-    let mut removed = false;
-    for k in original_keys {
-        if k != keep {
-            map.remove(&k);
-            removed = true;
-        }
-    }
-    removed
-}
-
-fn is_valid_variant(value: Option<&serde_json::Value>, key: &str) -> bool {
-    let Some(serde_json::Value::Object(payload)) = value else {
-        return false;
-    };
-    if payload.is_empty() {
-        return false;
-    }
-
-    let mut candidate = serde_json::Map::new();
-    candidate.insert(key.to_owned(), serde_json::Value::Object(payload.clone()));
-    serde_json::from_value::<ContextMessageValueRecord>(serde_json::Value::Object(candidate))
-        .is_ok()
 }
 
 impl From<&forge_domain::MessageEntry> for ContextMessageRecord {
@@ -1031,247 +937,44 @@ impl From<MetricsRecord> for forge_domain::Metrics {
     }
 }
 
-/// Database model for conversations table.
-///
-/// Column set mirrors `crate::database::schema::conversations` 1:1 so that
-/// Diesel can `select(ConversationRecord::as_select())` / `as_changeset()`
-/// against the table (or the read-only `conversations_all` view) without an
-/// explicit column list. Fields added after P2.5 (`context_zstd`,
-/// `is_compressed`, `cwd`, `parent_id`, `source`, `message_count`,
-/// `intent_state`, `extracted_at`, `memory_id`, `intent_hash`) are
-/// `Option<...>` so legacy rows written by older migrations deserialize
-/// cleanly.
-#[derive(
-    Debug,
-    Clone,
-    diesel::Queryable,
-    diesel::Selectable,
-    diesel::Insertable,
-    diesel::AsChangeset,
-    diesel::QueryableByName,
-)]
+/// Database model for conversations table
+#[derive(Debug, diesel::Queryable, diesel::Selectable, diesel::Insertable, diesel::AsChangeset)]
 #[diesel(table_name = crate::database::schema::conversations)]
 #[diesel(check_for_backend(diesel::sqlite::Sqlite))]
 pub(super) struct ConversationRecord {
     pub conversation_id: String,
     pub title: Option<String>,
-    /// Nullable so legacy rows from older `conversations` tables (which
-    /// pre-date the `workspace_id` column) deserialize cleanly through the
-    /// `conversations_all` VIEW. Local writes always populate this column.
-    pub workspace_id: Option<i64>,
+    pub workspace_id: i64,
     pub context: Option<String>,
     pub created_at: chrono::NaiveDateTime,
     pub updated_at: Option<chrono::NaiveDateTime>,
     pub metrics: Option<String>,
-    pub parent_id: Option<String>,
-    pub source: Option<String>,
-    #[diesel(column_name = cwd)]
-    pub cwd: Option<String>,
-    #[diesel(column_name = message_count)]
-    pub message_count: Option<i32>,
-    pub intent_state: String,
-    pub extracted_at: Option<chrono::NaiveDateTime>,
-    pub memory_id: Option<String>,
-    pub intent_hash: Option<String>,
-    pub context_zstd: Option<Vec<u8>>,
-    pub is_compressed: i32,
 }
 
 impl ConversationRecord {
-    /// Creates a new ConversationRecord from a Conversation domain object.
-    ///
-    /// The context is **compressed** via `crate::codec::compress` and stored
-    /// in `context_zstd` with `is_compressed = 1`; the plain-text `context`
-    /// column is left NULL. This matches the on-disk format expected by
-    /// the search / picker paths, which decompress on demand. Callers that
-    /// want a plain-text row (e.g. snapshot export) can overwrite the fields
-    /// after construction.
-    ///
-    /// Fields the domain `Conversation` does not carry (`parent_id`, `source`,
-    /// `cwd`, `intent_state`, etc.) default to safe on-disk values: NULL /
-    /// empty / "pending". Callers that need to persist richer state can
-    /// populate them directly on the returned struct.
+    /// Creates a new ConversationRecord from a Conversation domain object
     pub fn new(
         conversation: forge_domain::Conversation,
         workspace_id: forge_domain::WorkspaceHash,
     ) -> Self {
-        let created_at = conversation.metadata.created_at.naive_utc();
-        let message_count = conversation
+        let context = conversation
             .context
             .as_ref()
-            .map(|ctx| ctx.messages.len() as i32);
-
-        let (context, context_zstd, is_compressed, updated_at) =
-            Self::encode_context(conversation.context.as_ref());
+            .filter(|ctx| !ctx.messages.is_empty() || ctx.initiator.is_some())
+            .map(ContextRecord::from)
+            .and_then(|ctx_record| serde_json::to_string(&ctx_record).ok());
+        let updated_at = context.as_ref().map(|_| chrono::Utc::now().naive_utc());
         let metrics_record = MetricsRecord::from(&conversation.metrics);
         let metrics = serde_json::to_string(&metrics_record).ok();
 
         Self {
             conversation_id: conversation.id.into_string(),
             title: conversation.title.clone(),
-            context,
-            created_at,
-            updated_at,
-            workspace_id: Some(workspace_id.id() as i64),
-            metrics,
-            parent_id: None,
-            source: None,
-            cwd: None,
-            message_count,
-            intent_state: "pending".to_string(),
-            extracted_at: None,
-            memory_id: None,
-            intent_hash: None,
-            context_zstd,
-            is_compressed,
-        }
-    }
-
-    /// Compress the conversation context to the on-disk wire format.
-    ///
-    /// Returns `(plaintext_column, zstd_blob, is_compressed_flag, updated_at)`.
-    /// Empty contexts (no messages, no initiator) compress to `(None, None, 0,
-    /// None)` so existing rows stay NULL. Non-empty contexts are serialized
-    /// to the record DTO and stored **only** in `context_zstd` with
-    /// `is_compressed = 1`. The plain `context` column stays NULL so search /
-    /// picker paths can rely on the compressed-or-empty signal without
-    /// cross-checking two columns.
-    fn encode_context(
-        context: Option<&forge_domain::Context>,
-    ) -> (
-        Option<String>,
-        Option<Vec<u8>>,
-        i32,
-        Option<chrono::NaiveDateTime>,
-    ) {
-        let Some(ctx) = context else {
-            return (None, None, 0, None);
-        };
-        if ctx.messages.is_empty() && ctx.initiator.is_none() {
-            return (None, None, 0, None);
-        }
-        let record = ContextRecord::from(ctx);
-        let Ok(json) = serde_json::to_string(&record) else {
-            return (None, None, 0, None);
-        };
-        match crate::codec::compress(&json) {
-            Ok(zstd_bytes) => (
-                None,
-                Some(zstd_bytes),
-                1,
-                Some(chrono::Utc::now().naive_utc()),
-            ),
-            Err(_) => (Some(json), None, 0, Some(chrono::Utc::now().naive_utc())),
-        }
-    }
-
-    /// Creates a "ref" record used by `upsert_conversation_ref`.
-    ///
-    /// Unlike `ConversationRecord::new`, the ref path **does** propagate the
-    /// incoming conversation's context payload (compressed via the same
-    /// `encode_context` helper). The "ref" name is historical — it stems from
-    /// a pre-P2.5 era when this method only carried the conversation id /
-    /// title for shell-style reference rows. After P2.5 the path is used as
-    /// the "incoming context wins over existing row" upsert: callers
-    /// expecting plain-text semantics pass an empty `Context`; callers
-    /// expecting compressed semantics let `encode_context` do the work.
-    ///
-    /// Tests like `ref_upsert_replaces_existing_plain_context_with_incoming_compressed_context`
-    /// assert this contract — the ref upsert **replaces** any existing
-    /// context with the incoming payload (compressed or empty).
-    pub fn new_ref(
-        conversation: &forge_domain::Conversation,
-        workspace_id: forge_domain::WorkspaceHash,
-    ) -> Self {
-        let (context, context_zstd, is_compressed, updated_at) =
-            Self::encode_context(conversation.context.as_ref());
-        let metrics_record = MetricsRecord::from(&conversation.metrics);
-        let metrics = serde_json::to_string(&metrics_record).ok();
-        let message_count = conversation
-            .context
-            .as_ref()
-            .map(|ctx| ctx.messages.len() as i32);
-
-        Self {
-            conversation_id: conversation.id.into_string(),
-            title: conversation.title.clone(),
-            workspace_id: Some(workspace_id.id() as i64),
             context,
             created_at: conversation.metadata.created_at.naive_utc(),
             updated_at,
+            workspace_id: workspace_id.id() as i64,
             metrics,
-            parent_id: None,
-            source: None,
-            cwd: None,
-            message_count,
-            intent_state: "pending".to_string(),
-            extracted_at: None,
-            memory_id: None,
-            intent_hash: None,
-            context_zstd,
-            is_compressed,
-        }
-    }
-}
-
-/// Slim projection of `ConversationRecord` for the picker / recent-list path.
-///
-/// `get_parent_conversations_lite` only needs columns that summarise a
-/// conversation for display: id, title, workspace, updated_at, plus the
-/// compressed-context hints that the search code reuses for LIKE fallback.
-/// Defining a dedicated Diesel-deserializable struct keeps the picker query
-/// free of unused columns (context JSON can be megabytes per row) without
-/// forcing the full `ConversationRecord` to be loaded.
-///
-/// `table_name` points at the read-only `conversations_all` view (not the
-/// local `conversations` table) because the picker query reads through
-/// `conversations_all::table` — the VIEW that UNIONs the local table with
-/// the legacy DB ATTACH. Diesel ties `Selectable` impls to a single table,
-/// so the picker query reads via `ConversationRecordLite::as_select()`
-/// against `conversations_all::table`.
-#[derive(Debug, diesel::Queryable, diesel::Selectable, Clone)]
-#[diesel(table_name = crate::database::schema::conversations_all)]
-#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
-pub(super) struct ConversationRecordLite {
-    pub conversation_id: String,
-    pub title: Option<String>,
-    /// Nullable on disk; the picker filters rows via SQL `WHERE workspace_id
-    /// = ?` rather than reading this column into Rust.
-    #[allow(dead_code)]
-    pub workspace_id: Option<i64>,
-    pub updated_at: Option<chrono::NaiveDateTime>,
-    #[diesel(column_name = cwd)]
-    pub cwd: Option<String>,
-    #[diesel(column_name = message_count)]
-    pub message_count: Option<i32>,
-    pub parent_id: Option<String>,
-    /// Read from the DB; consumed by SQL `WHERE` filters but not by the
-    /// picker projection itself.
-    #[allow(dead_code)]
-    pub source: Option<String>,
-    /// Read from the DB; consumed by SQL `WHERE` filters but not by the
-    /// picker projection itself.
-    #[allow(dead_code)]
-    pub intent_state: String,
-    pub created_at: chrono::NaiveDateTime,
-}
-
-impl From<ConversationRecordLite> for forge_domain::ConversationSummary {
-    fn from(record: ConversationRecordLite) -> Self {
-        let id = forge_domain::ConversationId::parse(record.conversation_id)
-            .unwrap_or_else(|_| forge_domain::ConversationId::generate());
-        let parent_id = record
-            .parent_id
-            .as_deref()
-            .and_then(|raw| forge_domain::ConversationId::parse(raw).ok());
-        Self {
-            id,
-            title: record.title,
-            parent_id,
-            created_at: record.created_at.and_utc(),
-            updated_at: record.updated_at.map(|updated_at| updated_at.and_utc()),
-            message_count: record.message_count,
-            cwd: record.cwd,
         }
     }
 }
@@ -1284,34 +987,7 @@ impl TryFrom<ConversationRecord> for forge_domain::Conversation {
         let id = ConversationId::parse(conversation_id.clone())
             .with_context(|| format!("Failed to parse conversation ID: {}", conversation_id))?;
 
-        let context = if record.is_compressed == 1 {
-            // Compressed on-disk format: context lives in `context_zstd`.
-            let Some(bytes) = record.context_zstd.as_ref() else {
-                anyhow::bail!(
-                    "Conversation {} marked compressed but has no context_zstd blob",
-                    conversation_id
-                );
-            };
-            let json = crate::codec::decompress(bytes).with_context(|| {
-                format!(
-                    "Failed to decompress context for conversation {}",
-                    conversation_id
-                )
-            })?;
-            let record = serde_json::from_str::<ContextRecord>(&json).with_context(|| {
-                format!(
-                    "Failed to deserialize decompressed context for conversation {}",
-                    conversation_id
-                )
-            })?;
-            Some(record.try_into().with_context(|| {
-                format!(
-                    "Failed to convert context record to domain type for conversation {}",
-                    conversation_id
-                )
-            })?)
-        } else if let Some(context_str) = record.context {
-            // Legacy plain-text format (rows written before P2.5).
+        let context = if let Some(context_str) = record.context {
             Some(
                 serde_json::from_str::<ContextRecord>(&context_str)
                     .with_context(|| {
@@ -1341,331 +1017,13 @@ impl TryFrom<ConversationRecord> for forge_domain::Conversation {
                 forge_domain::Metrics::default().started_at(record.created_at.and_utc())
             });
 
-        let parent_id = record
-            .parent_id
-            .as_deref()
-            .and_then(|raw| forge_domain::ConversationId::parse(raw).ok());
-
         Ok(forge_domain::Conversation::new(id)
             .context(context)
             .title(record.title)
             .metrics(metrics)
-            .parent_id(parent_id)
             .metadata(
                 forge_domain::MetaData::new(record.created_at.and_utc())
                     .updated_at(record.updated_at.map(|updated_at| updated_at.and_utc())),
             ))
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use pretty_assertions::assert_eq;
-
-    use super::*;
-
-    #[test]
-    fn deserialize_drops_stray_empty_text_alongside_tool() {
-        // Reproduces the corruption that caused
-        // `data did not match any variant of untagged enum ContextMessageParser`:
-        // a real tool message wrapper with an injected `,"text":{}` field.
-        let corrupted = r#"{
-            "message": {
-                "tool": {
-                    "name": "shell",
-                    "call_id": "call_abc",
-                    "output": { "is_error": false, "values": [{"text": "ok"}] }
-                },
-                "text": {}
-            }
-        }"#;
-        let record: ContextMessageRecord = serde_json::from_str(corrupted)
-            .expect("deserializer should drop stray text key and recover");
-        match record.message {
-            ContextMessageValueRecord::Tool(_) => {}
-            other => panic!("expected Tool variant, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn deserialize_drops_stray_empty_tool_alongside_text() {
-        // Mirror of the above: real text variant with stray empty tool key.
-        let corrupted = r#"{
-            "message": {
-                "text": { "role": "Assistant", "content": "hi" },
-                "tool": {}
-            }
-        }"#;
-        let record: ContextMessageRecord = serde_json::from_str(corrupted)
-            .expect("deserializer should drop stray tool key and recover");
-        match record.message {
-            ContextMessageValueRecord::Text(_) => {}
-            other => panic!("expected Text variant, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn deserialize_keeps_non_empty_variant() {
-        // When both variant objects are non-empty, prefer the first one
-        // declared in `MESSAGE_VARIANT_KEYS`.
-        let corrupted = r#"{
-            "message": {
-                "text": { "role": "Assistant", "content": "real" },
-                "tool": {
-                    "name": "shell",
-                    "call_id": "call_abc",
-                    "output": { "is_error": false, "values": [{"text": "should-be-dropped"}] }
-                }
-            }
-        }"#;
-        let record: ContextMessageRecord =
-            serde_json::from_str(corrupted).expect("deserializer should keep text variant");
-        match record.message {
-            ContextMessageValueRecord::Text(_) => {}
-            other => panic!("expected Text variant, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn deserialize_clean_message_still_works() {
-        let clean = r#"{
-            "message": {
-                "tool": {
-                    "name": "shell",
-                    "call_id": "call_abc",
-                    "output": { "is_error": false, "values": [{"text": "ok"}] }
-                }
-            }
-        }"#;
-        let record: ContextMessageRecord =
-            serde_json::from_str(clean).expect("clean message must still deserialize");
-        match record.message {
-            ContextMessageValueRecord::Tool(_) => {}
-            other => panic!("expected Tool variant, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn deserialize_ignores_null_variant_when_tool_is_valid() {
-        let corrupted = r#"{
-            "message": {
-                "text": null,
-                "tool": {
-                    "name": "shell",
-                    "call_id": "call_abc",
-                    "output": { "is_error": false, "values": [{"text": "ok"}] }
-                }
-            }
-        }"#;
-        let actual: ContextMessageRecord = serde_json::from_str(corrupted).unwrap();
-        assert!(matches!(actual.message, ContextMessageValueRecord::Tool(_)));
-    }
-
-    #[test]
-    fn deserialize_ignores_scalar_variant_when_tool_is_valid() {
-        let corrupted = r#"{
-            "message": {
-                "text": "invalid",
-                "tool": {
-                    "name": "shell",
-                    "call_id": "call_abc",
-                    "output": { "is_error": false, "values": [{"text": "ok"}] }
-                }
-            }
-        }"#;
-        let actual: ContextMessageRecord = serde_json::from_str(corrupted).unwrap();
-        assert!(matches!(actual.message, ContextMessageValueRecord::Tool(_)));
-    }
-
-    #[test]
-    fn deserialize_ignores_malformed_non_empty_variant_when_tool_is_valid() {
-        let corrupted = r#"{
-            "message": {
-                "text": { "role": "not-a-role", "content": 42 },
-                "tool": {
-                    "name": "shell",
-                    "call_id": "call_abc",
-                    "output": { "is_error": false, "values": [{"text": "ok"}] }
-                }
-            }
-        }"#;
-        let actual: ContextMessageRecord = serde_json::from_str(corrupted).unwrap();
-        assert!(matches!(actual.message, ContextMessageValueRecord::Tool(_)));
-    }
-
-    #[test]
-    fn deserialize_drops_stray_role_alongside_text() {
-        // Reproduces the corruption seen on 48 system messages where the
-        // outer `message` wrapper contains both `"role": "system"` and a real
-        // `"text"` variant. Serde's externally-tagged enum rejects any sibling
-        // key inside the variant payload, so without recovery the entire
-        // conversation fails to deserialize.
-        let corrupted = r#"{
-            "message": {
-                "role": "system",
-                "text": {
-                    "role": "System",
-                    "content": "you are a helpful assistant"
-                }
-            }
-        }"#;
-        let record: ContextMessageRecord = serde_json::from_str(corrupted)
-            .expect("deserializer should drop stray role key and recover text message");
-        match record.message {
-            ContextMessageValueRecord::Text(msg) => {
-                assert_eq!(msg.role, RoleRecord::System);
-                assert!(msg.content.contains("helpful"));
-            }
-            other => panic!("expected Text variant, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn deserialize_drops_stray_role_alongside_tool() {
-        // Same class of corruption but on a tool message wrapper.
-        let corrupted = r#"{
-            "message": {
-                "role": "system",
-                "tool": {
-                    "name": "shell",
-                    "call_id": "call_abc",
-                    "output": { "is_error": false, "values": [{"text": "ok"}] }
-                }
-            }
-        }"#;
-        let record: ContextMessageRecord = serde_json::from_str(corrupted)
-            .expect("deserializer should drop stray role key on tool messages");
-        match record.message {
-            ContextMessageValueRecord::Tool(_) => {}
-            other => panic!("expected Tool variant, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn deserialize_drops_multiple_stray_keys_alongside_variant() {
-        // Real corruption had several extra fields next to the variant;
-        // ensure the hardener drops them all and keeps only the variant.
-        let corrupted = r#"{
-            "message": {
-                "role": "system",
-                "model": "openrouter/free",
-                "text": {
-                    "role": "System",
-                    "content": "summary",
-                    "model": "openrouter/free"
-                }
-            }
-        }"#;
-        let record: ContextMessageRecord = serde_json::from_str(corrupted)
-            .expect("deserializer should drop role+model siblings of the text variant");
-        match record.message {
-            ContextMessageValueRecord::Text(msg) => {
-                assert_eq!(msg.role, RoleRecord::System);
-            }
-            other => panic!("expected Text variant, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn deserialize_full_corrupted_context_recovers() {
-        // Verifies the deserializer recovers the original on-disk corruption
-        // that produced
-        //     `data did not match any variant of untagged enum
-        //      ContextMessageParser at line 1 column 30753`
-        // for conversation 2edac8f2-359e-4157-946c-df4c98bbe534. The fixture
-        // is a snippet with multiple tool messages each carrying an injected
-        // `,"text":{}` field.
-        let fixture = r#"{
-            "messages": [
-                {"message": {"text": {"role": "User", "content": "hi"}}},
-                {"message": {"tool": {
-                    "name": "shell",
-                    "call_id": "call_1",
-                    "output": {"is_error": false, "values": [{"text": "first"}]}
-                }, "text": {}}},
-                {"message": {"tool": {
-                    "name": "shell",
-                    "call_id": "call_2",
-                    "output": {"is_error": false, "values": [{"text": "second"}]}
-                }, "text": {}}},
-                {"message": {"text": {"role": "Assistant", "content": "done"}}}
-            ],
-            "tools": []
-        }"#;
-        let record: ContextRecord = serde_json::from_str(fixture)
-            .expect("full context with multiple stray text keys must recover");
-        assert_eq!(record.messages.len(), 4);
-        // Spot-check: tool messages round-tripped as Tool variants, not Text.
-        assert!(matches!(
-            record.messages[1].message,
-            ContextMessageValueRecord::Tool(_)
-        ));
-        assert!(matches!(
-            record.messages[2].message,
-            ContextMessageValueRecord::Tool(_)
-        ));
-    }
-
-    #[test]
-    fn deserialize_real_on_disk_corruption_recovers() {
-        // End-to-end check against the actual corrupted conversation snapshot
-        // salvaged from `~/.forge/.forge.db.bak-pre-ctxparserfix-20260903-180015`.
-        // The fixture path is configurable via the `FORGE_CORRUPTION_FIXTURE`
-        // env var; the test is skipped when the file isn't present so CI
-        // environments without the artifact don't fail.
-        let path = std::env::var("FORGE_CORRUPTION_FIXTURE")
-            .unwrap_or_else(|_| "/tmp/orig_corrupted_ctx.txt".to_string());
-        if !std::path::Path::new(&path).exists() {
-            eprintln!("skipping: fixture not found at {path}");
-            return;
-        }
-
-        let raw =
-            std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("failed to read {path}: {e}"));
-
-        // Sanity: the on-disk corruption is still present.
-        let compact = raw.split_whitespace().collect::<String>();
-        assert!(
-            compact.contains("\"tool\":{"),
-            "fixture should contain tool messages"
-        );
-        let stray = compact.matches("\"text\":{}").count();
-        assert!(
-            stray >= 1,
-            "fixture should still contain at least one stray `\"text\": {{}}` \
-             (got {stray}); re-create it from the .bak-pre-ctxparserfix-* DB"
-        );
-
-        // This is the call that used to fail with
-        //   `data did not match any variant of untagged enum ContextMessageParser
-        //    at line 1 column 30753`.
-        let record: ContextRecord = serde_json::from_str(&raw).unwrap_or_else(|e| {
-            panic!("hardened deserializer must recover real on-disk corruption, got: {e}");
-        });
-
-        // Conversation 2edac8f2-... had 20 messages: 11 text + 9 tool.
-        assert_eq!(
-            record.messages.len(),
-            20,
-            "expected 20 messages after recovery, got {}",
-            record.messages.len()
-        );
-
-        let mut n_text = 0usize;
-        let mut n_tool = 0usize;
-        for m in &record.messages {
-            match m.message {
-                ContextMessageValueRecord::Text(_) => n_text += 1,
-                ContextMessageValueRecord::Tool(_) => n_tool += 1,
-                ContextMessageValueRecord::Image(_) => {}
-            }
-        }
-        assert_eq!(n_text + n_tool, 20);
-        assert!(n_tool >= 1, "at least one tool message must round-trip");
-
-        eprintln!(
-            "recovered {n_text} text + {n_tool} tool messages from {path} ({} bytes)",
-            raw.len()
-        );
     }
 }

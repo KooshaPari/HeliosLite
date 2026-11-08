@@ -269,8 +269,7 @@ impl<S: Services + EnvironmentInfra<Config = forge_config::ForgeConfig>> GitApp<
         let staged_diff = staged_diff.context("Failed to get staged changes")?;
         let unstaged_diff = unstaged_diff.context("Failed to get unstaged changes")?;
 
-        // Use staged changes if available, otherwise fall back to unstaged
-        // changes
+        // Use staged changes if available, otherwise fall back to unstaged changes
         let has_staged_files = !staged_diff.output.stdout.trim().is_empty();
         let diff_output = if has_staged_files {
             staged_diff
@@ -309,10 +308,9 @@ impl<S: Services + EnvironmentInfra<Config = forge_config::ForgeConfig>> GitApp<
         )?;
         let agent_provider_resolver = AgentProviderResolver::new(self.services.clone());
 
-        // Resolve provider and model: commit config takes priority over agent
-        // defaults. If the configured provider is unavailable (e.g.
-        // logged out), fall back to the agent's provider/model with a
-        // warning.
+        // Resolve provider and model: commit config takes priority over agent defaults.
+        // If the configured provider is unavailable (e.g. logged out), fall back to the
+        // agent's provider/model with a warning.
         let (provider, model) = match commit_config {
             Some(mc) => match self.services.get_provider(mc.provider).await {
                 Ok(provider) => match self.services.refresh_provider_credential(provider).await {
@@ -369,13 +367,12 @@ impl<S: Services + EnvironmentInfra<Config = forge_config::ForgeConfig>> GitApp<
         let stream = self.services.chat(&model, context, provider).await?;
         let message = stream.into_full(false).await?;
 
-        // Parse the response - try JSON first (structured output), fallback to
-        // plain text
+        // Parse the response - try JSON first (structured output), fallback to plain
+        // text
         let commit_message = match serde_json::from_str::<CommitMessageResponse>(&message.content) {
             Ok(response) => response.commit_message,
             Err(_) => {
-                // Fallback: Some providers don't support structured output,
-                // treat as plain text
+                // Fallback: Some providers don't support structured output, treat as plain text
                 message.content.trim().to_string()
             }
         };
@@ -401,7 +398,7 @@ fn build_commit_command(message: &str, flags: &str, use_forge_committer: bool) -
     let escaped_message = message.replace('\'', r"'\''");
     if use_forge_committer {
         format!(
-            "GIT_COMMITTER_NAME='HeliosLite' GIT_COMMITTER_EMAIL='noreply@helioslite.dev' git commit {flags} -m '{escaped_message}'"
+            "GIT_COMMITTER_NAME='ForgeCode' GIT_COMMITTER_EMAIL='noreply@forgecode.dev' git commit {flags} -m '{escaped_message}'"
         )
     } else {
         format!("git commit {flags} -m '{escaped_message}'")
@@ -417,14 +414,14 @@ mod tests {
     #[test]
     fn test_build_commit_command_with_forge_committer_staged() {
         let actual = build_commit_command("feat: add feature", "", true);
-        let expected = "GIT_COMMITTER_NAME='HeliosLite' GIT_COMMITTER_EMAIL='noreply@helioslite.dev' git commit  -m 'feat: add feature'";
+        let expected = "GIT_COMMITTER_NAME='ForgeCode' GIT_COMMITTER_EMAIL='noreply@forgecode.dev' git commit  -m 'feat: add feature'";
         assert_eq!(actual, expected);
     }
 
     #[test]
     fn test_build_commit_command_with_forge_committer_unstaged() {
         let actual = build_commit_command("fix: bug", " -a", true);
-        let expected = "GIT_COMMITTER_NAME='HeliosLite' GIT_COMMITTER_EMAIL='noreply@helioslite.dev' git commit  -a -m 'fix: bug'";
+        let expected = "GIT_COMMITTER_NAME='ForgeCode' GIT_COMMITTER_EMAIL='noreply@forgecode.dev' git commit  -a -m 'fix: bug'";
         assert_eq!(actual, expected);
     }
 
@@ -445,7 +442,7 @@ mod tests {
     #[test]
     fn test_build_commit_command_escapes_single_quotes() {
         let actual = build_commit_command("feat: it's done", "", true);
-        let expected = "GIT_COMMITTER_NAME='HeliosLite' GIT_COMMITTER_EMAIL='noreply@helioslite.dev' git commit  -m 'feat: it'\\''s done'";
+        let expected = "GIT_COMMITTER_NAME='ForgeCode' GIT_COMMITTER_EMAIL='noreply@forgecode.dev' git commit  -m 'feat: it'\\''s done'";
         assert_eq!(actual, expected);
     }
 }

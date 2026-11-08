@@ -1154,8 +1154,7 @@ impl TryFrom<ToolCallFull> for ToolCatalog {
 
     fn try_from(value: ToolCallFull) -> Result<Self, Self::Error> {
         // Normalize the tool name: trim whitespace and perform case-insensitive
-        // catalog match so the serde deserialization receives the canonical
-        // name.
+        // catalog match so the serde deserialization receives the canonical name.
         let normalized_name = normalize_tool_name(&value.name);
 
         let mut map = Map::new();
@@ -1224,28 +1223,10 @@ mod tests {
     use std::path::PathBuf;
 
     use pretty_assertions::assert_eq;
-    use serde_json::{Map, Value};
     use strum::IntoEnumIterator;
 
     use super::Shell;
     use crate::{ToolCatalog, ToolKind, ToolName};
-
-    fn canonical_json(value: Value) -> Value {
-        match value {
-            Value::Array(values) => Value::Array(values.into_iter().map(canonical_json).collect()),
-            Value::Object(object) => {
-                let mut entries = object.into_iter().collect::<Vec<_>>();
-                entries.sort_by(|(left, _), (right, _)| left.cmp(right));
-
-                let mut sorted = Map::new();
-                for (key, value) in entries {
-                    sorted.insert(key, canonical_json(value));
-                }
-                Value::Object(sorted)
-            }
-            value => value,
-        }
-    }
 
     #[test]
     fn test_tool_definition() {
@@ -1270,7 +1251,7 @@ mod tests {
     fn test_tool_definition_json() {
         let tools = ToolCatalog::iter()
             .map(|tool| {
-                let definition = canonical_json(tool.definition().input_schema.into());
+                let definition = tool.definition().input_schema;
                 serde_json::to_string_pretty(&definition)
                     .expect("Failed to serialize tool definition to JSON")
             })
@@ -1284,8 +1265,7 @@ mod tests {
     fn test_coerce_string_integers_to_i32() {
         use crate::{ToolCallArguments, ToolCallFull};
 
-        // Simulate the exact error case: read tool with string integers instead
-        // of i32
+        // Simulate the exact error case: read tool with string integers instead of i32
         let tool_call = ToolCallFull {
             name: ToolName::new("read"),
             call_id: None,

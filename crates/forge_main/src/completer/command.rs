@@ -28,12 +28,10 @@ impl CommandCompleter {
 
 impl CommandCompleter {
     pub fn complete(&mut self, line: &str, _: usize) -> Vec<InputSuggestion> {
-        // Determine which sentinel the user typed (`:` or `/`), defaulting to
-        // `/`.
+        // Determine which sentinel the user typed (`:` or `/`), defaulting to `/`.
         let sentinel = if line.starts_with(':') { ':' } else { '/' };
 
-        // Build the list of display names using the same sentinel the user
-        // typed.
+        // Build the list of display names using the same sentinel the user typed.
         let commands: Vec<CommandRow> = self
             .0
             .list()
@@ -45,8 +43,7 @@ impl CommandCompleter {
                     format!("{}{}", sentinel, cmd.name)
                 };
 
-                // Only include commands that match what the user has typed so
-                // far.
+                // Only include commands that match what the user has typed so far.
                 if display_name.starts_with(line) {
                     Some(CommandRow(ForgeCommand {
                         name: display_name,
@@ -63,8 +60,8 @@ impl CommandCompleter {
             return vec![];
         }
 
-        // Extract the initial query text (everything after the leading sentinel
-        // or `!`).
+        // Extract the initial query text (everything after the leading sentinel or
+        // `!`).
         let initial_query = line
             .strip_prefix('/')
             .or_else(|| line.strip_prefix(':'))
