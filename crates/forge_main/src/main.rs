@@ -2,30 +2,12 @@ use std::io::{IsTerminal, Read};
 use std::panic;
 use std::path::PathBuf;
 
-// Allocator selection per OS:
-//   Linux  — jemalloc (lower fragmentation, higher throughput for long-running
-// streaming).   macOS  — mimalloc (comparable fragmentation wins; jemalloc bug
-// #2532 causes 20x             cold-init regression on ARM64: HPA probes every
-// 4KB page → 14s vs 25ms).   Other  — system allocator (no special handling
-// needed).
-#[cfg(target_os = "linux")]
-#[global_allocator]
-static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
-
-#[cfg(target_os = "macos")]
-#[global_allocator]
-static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
-
 use anyhow::{Context, Result};
-use clap::{CommandFactory, FromArgMatches};
+use clap::Parser;
 use forge_api::ForgeAPI;
 use forge_config::ForgeConfig;
 use forge_domain::TitleFormat;
-use forge_main::{
-    Cli, Sandbox, TitleDisplayExt, TopLevelCommand, UI, render_static_zsh_rprompt,
-    telemetry::TraceraTelem, tracker,
-};
-use tracing::debug;
+use forge_main::{Cli, Sandbox, TitleDisplayExt, TopLevelCommand, UI, tracker};
 
 /// Enables ENABLE_VIRTUAL_TERMINAL_PROCESSING on the stdout console handle.
 ///
@@ -53,10 +35,6 @@ fn enable_stdout_vt_processing() {
         ENABLE_VIRTUAL_TERMINAL_PROCESSING, GetConsoleMode, GetStdHandle, STD_OUTPUT_HANDLE,
         SetConsoleMode,
     };
-    // SAFETY: Windows console API — GetStdHandle/GetConsoleMode/SetConsoleMode
-    // are always safe to call with STD_OUTPUT_HANDLE.  This runs once at
-    // program startup before the async runtime spawns worker threads, so no
-    // concurrent console-handle mutation is possible.
     unsafe {
         let handle = GetStdHandle(STD_OUTPUT_HANDLE);
         let mut mode = 0;
@@ -66,90 +44,9 @@ fn enable_stdout_vt_processing() {
     }
 }
 
-fn main() {
-    if let Err(err) = maybe_render_fast_zsh_rprompt() {
-        eprintln!("{}", TitleFormat::error(format!("{err}")).display());
-        std::process::exit(1);
-    }
-
-    let runtime = match tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .build()
-    {
-        Ok(runtime) => runtime,
-        Err(err) => {
-            eprintln!(
-                "{}",
-                TitleFormat::error(format!("failed to start async runtime: {err}")).display()
-            );
-            std::process::exit(1);
-        }
-    };
-
-    runtime.block_on(async_main());
-}
-
-fn maybe_render_fast_zsh_rprompt() -> Result<()> {
-    let args: Vec<_> = std::env::args().skip(1).collect();
-    if args.as_slice() != ["zsh", "rprompt"] {
-        return Ok(());
-    }
-
-    let config =
-        ForgeConfig::read().context("Failed to read Forge configuration from .forge.toml")?;
-    println!("{}", render_static_zsh_rprompt(&config));
-    std::process::exit(0);
-}
-
-async fn async_main() {
-    // Initialize outbound Tracera telemetry. This is a no-op unless
-    // `TRACERA_ENDPOINT` is set, so it never adds latency or side effects to
-    // normal sessions.
-    let telem = TraceraTelem::from_env();
-    telem
-        .session(
-            "start",
-            serde_json::json!({ "binary": std::env::args().next().unwrap_or_default() }),
-        )
-        .await;
-
-    // Wrap run() in a ctrl_c handler for graceful shutdown.
-    let app_future = run();
-    tokio::pin!(app_future);
-
-    let result = tokio::select! {
-        res = &mut app_future => res,
-        _ = tokio::signal::ctrl_c() => {
-            debug!("received SIGINT, initiating graceful shutdown");
-            // The app value will be dropped when this block exits,
-            // triggering any Drop implementations (e.g., WalCheckpointer).
-            Ok(())
-        }
-    };
-
-    // Emit lifecycle/error telemetry then drain the sink before exiting.
-    match &result {
-        Ok(()) => {
-            telem
-                .session("end", serde_json::json!({ "status": "ok" }))
-                .await
-        }
-        Err(err) => {
-            let msg = format!("{err}");
-            telem.error(&msg).await;
-            telem
-                .session(
-                    "end",
-                    serde_json::json!({ "status": "error", "error": msg }),
-                )
-                .await;
-        }
-    }
-
-    // Best-effort final drain; a failed flush must never fail the CLI.
-    telem.shutdown().await;
-
-    if let Err(err) = result {
+#[tokio::main]
+async fn main() {
+    if let Err(err) = run().await {
         eprintln!("{}", TitleFormat::error(format!("{err}")).display());
         if let Some(cause) = err.chain().nth(1) {
             eprintln!("{cause}");
@@ -191,7 +88,7 @@ async fn run() -> Result<()> {
     }));
 
     // Initialize and run the UI
-    let mut cli = parse_cli();
+    let mut cli = Cli::parse();
 
     // Check if there's piped input, but skip for `forge select` since that
     // command uses stdin for its item list.
@@ -209,71 +106,6 @@ async fn run() -> Result<()> {
     // immediately rather than silently falling back to defaults at runtime.
     let config =
         ForgeConfig::read().context("Failed to read Forge configuration from .forge.toml")?;
-
-    if cli.check_a11y {
-        eprintln!("Running accessibility audit...");
-        // A11yAudit checks WCAG 2.1 AA compliance of CLI output
-        let mut audit_results = std::collections::HashMap::new();
-        audit_results.insert("structural_issues", Vec::<String>::new());
-        audit_results.insert("contrast_issues", Vec::<String>::new());
-        eprintln!("A11y audit complete: all checks passed.");
-        return Ok(());
-    }
-
-    // Handle AgilePlus subcommands before the full UI startup. The
-    // engine is synchronous and exits cleanly with stdout/stderr
-    // results, matching the pattern used by other inspector commands
-    // (e.g. heliosdoctor).
-    if let Some(TopLevelCommand::Agileplus(cmd)) = &cli.subcommands {
-        match forge_agileplus::commands::Cli::run_command(cmd) {
-            Ok(output) => {
-                print!("{output}");
-                return Ok(());
-            }
-            Err(err) => {
-                eprintln!(
-                    "{}",
-                    TitleFormat::error(format!("agileplus: {err}")).display()
-                );
-                std::process::exit(1);
-            }
-        }
-    }
-
-    // Handle LSP capability subcommands before the full UI startup. The
-    // facade is synchronous and constructs the language-server subprocesses
-    // on demand, matching the pattern used by the agileplus engine above.
-    if let Some(TopLevelCommand::Lsp(cmd)) = &cli.subcommands {
-        match forge_lsp::commands::run_command(cmd) {
-            Ok(Some(output)) => {
-                print!("{output}");
-                return Ok(());
-            }
-            Ok(None) => return Ok(()),
-            Err(err) => {
-                eprintln!("{}", TitleFormat::error(format!("lsp: {err}")).display());
-                std::process::exit(1);
-            }
-        }
-    }
-
-    // Handle ShareCLI realtime subcommands before the full UI startup.
-    // Mirrors the LSP dispatch pattern; the share facade constructs its own
-    // hub per invocation and exits on its own (Publish / Topics), or blocks
-    // serving (Serve) until SIGINT.
-    if let Some(TopLevelCommand::Share(cmd)) = &cli.subcommands {
-        match forge_sharecli::commands::run_command(cmd) {
-            Ok(Some(output)) => {
-                print!("{output}");
-                return Ok(());
-            }
-            Ok(None) => return Ok(()),
-            Err(err) => {
-                eprintln!("{}", TitleFormat::error(format!("share: {err}")).display());
-                std::process::exit(1);
-            }
-        }
-    }
 
     // Handle worktree creation if specified
     let cwd: PathBuf = match (&cli.sandbox, &cli.directory) {
@@ -298,23 +130,8 @@ async fn run() -> Result<()> {
     Ok(())
 }
 
-fn parse_cli() -> Cli {
-    let bin_name = std::env::args_os()
-        .next()
-        .and_then(|arg| {
-            std::path::PathBuf::from(arg)
-                .file_stem()
-                .map(|stem| stem.to_string_lossy().into_owned())
-        })
-        .unwrap_or_else(|| "helioslite".to_string());
-    let bin_name: &'static str = Box::leak(bin_name.into_boxed_str());
-    let matches = Cli::command().name(bin_name).get_matches();
-    Cli::from_arg_matches(&matches).unwrap_or_else(|err| err.exit())
-}
-
 #[cfg(test)]
 mod tests {
-    use clap::Parser;
     use forge_main::TopLevelCommand;
     use pretty_assertions::assert_eq;
 
@@ -326,8 +143,7 @@ mod tests {
         // We can't easily test the actual stdin reading in a unit test,
         // but we can verify the logic flow
 
-        // Test that when prompt is provided, it remains independent of piped
-        // input
+        // Test that when prompt is provided, it remains independent of piped input
         let cli_with_prompt = Cli::parse_from(["forge", "--prompt", "existing prompt"]);
         let original_prompt = cli_with_prompt.prompt.clone();
 

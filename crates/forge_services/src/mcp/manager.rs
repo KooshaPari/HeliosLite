@@ -1,4 +1,3 @@
-use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -9,16 +8,10 @@ use forge_app::{
     EnvironmentInfra, FileInfoInfra, FileReaderInfra, FileWriterInfra, KVStore, McpConfigManager,
     McpServerInfra, UserInfra,
 };
+use merge::Merge;
 
 pub struct ForgeMcpManager<I> {
     infra: Arc<I>,
-}
-
-fn retain_trusted_servers(
-    raw: &mut BTreeMap<forge_app::domain::ServerName, forge_app::domain::McpServerConfig>,
-    trusted: &BTreeMap<forge_app::domain::ServerName, forge_app::domain::McpServerConfig>,
-) {
-    raw.retain(|name, server| trusted.get(name) == Some(server));
 }
 
 impl<I> ForgeMcpManager<I>
@@ -164,7 +157,7 @@ where
                             "An error occurred while reading config at: {}",
                             path.display()
                         ))?;
-                        config.merge_from(new_config);
+                        config.merge(new_config);
                     }
                 }
                 Ok(config)
@@ -182,8 +175,7 @@ where
             .await?;
 
         // Clear the unified cache to force refresh on next use
-        // Since we now use a merged hash, clearing any scope invalidates the
-        // cache
+        // Since we now use a merged hash, clearing any scope invalidates the cache
         self.infra.cache_clear().await?;
 
         Ok(())
@@ -209,50 +201,15 @@ where
             McpConfig::default()
         };
 
-        // Merge: user first, then local (local takes precedence as in
-        // read_mcp_config).
+        // Merge: user first, then local (local takes precedence as in read_mcp_config).
         let mut merged = user_config;
-        merged.merge_from(local_config);
+        merged.merge(local_config);
 
         // Retain only servers that exist in the merged trusted set.
-        let trusted_servers = merged.mcp_servers;
+        let trusted_keys: std::collections::BTreeSet<_> =
+            merged.mcp_servers.keys().cloned().collect();
         let mut result = raw;
-        retain_trusted_servers(&mut result.mcp_servers, &trusted_servers);
+        result.mcp_servers.retain(|k, _| trusted_keys.contains(k));
         Ok(result)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use std::collections::BTreeMap;
-
-    use forge_app::domain::{McpConfig, McpServerConfig, ServerName};
-
-    use super::retain_trusted_servers;
-
-    #[test]
-    fn rejected_local_definition_cannot_override_trusted_user_definition() {
-        let name = ServerName::from("shared".to_string());
-        let trusted_server = McpServerConfig::new_stdio("trusted", Vec::new(), None);
-        let rejected_server = McpServerConfig::new_stdio("untrusted", Vec::new(), None);
-        let trusted = McpConfig::from(BTreeMap::from([(name.clone(), trusted_server)]));
-        let mut raw = McpConfig::from(BTreeMap::from([(name, rejected_server)]));
-
-        retain_trusted_servers(&mut raw.mcp_servers, &trusted.mcp_servers);
-
-        let expected = McpConfig::default();
-        assert_eq!(raw, expected);
-    }
-
-    #[test]
-    fn accepted_definition_is_retained_when_it_matches_trusted_value() {
-        let name = ServerName::from("accepted".to_string());
-        let server = McpServerConfig::new_http("https://example.test");
-        let trusted = McpConfig::from(BTreeMap::from([(name.clone(), server.clone())]));
-        let mut raw = McpConfig::from(BTreeMap::from([(name, server)]));
-
-        retain_trusted_servers(&mut raw.mcp_servers, &trusted.mcp_servers);
-
-        assert_eq!(raw, trusted);
     }
 }

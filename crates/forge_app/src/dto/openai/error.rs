@@ -7,7 +7,7 @@ use thiserror::Error;
 #[derive(Debug, derive_more::From, Error)]
 pub enum Error {
     #[error("{0}")]
-    Response(Box<ErrorResponse>),
+    Response(ErrorResponse),
 
     #[error("Invalid Status Code: {0}")]
     InvalidStatusCode(u16),
@@ -136,8 +136,7 @@ mod tests {
 
     #[test]
     fn test_get_code_deep_nested() {
-        // Test with an error that has no direct code but has an inner error
-        // with a code
+        // Test with an error that has no direct code but has an inner error with a code
         let error_code = ErrorCode::String("ERR_STREAM_PREMATURE_CLOSE".to_string());
 
         // Use derived setters for cleaner initialization

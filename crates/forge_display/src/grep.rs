@@ -141,8 +141,7 @@ impl GrepFormat {
             .iter()
             .any(|line| ParsedLine::parse(line).is_some());
 
-        // If no valid grep format entries found, treat all lines as raw file
-        // paths
+        // If no valid grep format entries found, treat all lines as raw file paths
         if !has_valid_entries {
             return self.format_raw_paths();
         }

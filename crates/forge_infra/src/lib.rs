@@ -16,17 +16,7 @@ mod inquire;
 mod kv_storage;
 mod mcp_client;
 mod mcp_server;
-pub mod resilience;
-pub mod terminal_emulator;
 mod walker;
-
-// L133: forgecode utility cross-pollination from substrate gateway —
-// backoff (Fixed/Linear/Exponential retry schedule), cyclic_check
-// (CRC-8/16/32 family), glob_pattern (ASCII glob matcher with * ? [abc]
-// [!abc]).
-pub mod backoff;
-pub mod cyclic_check;
-pub mod glob_pattern;
 
 pub use console::StdConsoleWriter;
 pub use env::ForgeEnvironmentInfra;

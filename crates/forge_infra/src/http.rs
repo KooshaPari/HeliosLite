@@ -43,6 +43,7 @@ impl<F: forge_app::FileWriterInfra + 'static> ForgeHttpInfra<F> {
             pool_idle_timeout_secs: 90,
             pool_max_idle_per_host: 5,
             max_redirects: 10,
+            hickory: false,
             tls_backend: TlsBackend::Default,
             min_tls_version: None,
             max_tls_version: None,
@@ -60,6 +61,7 @@ impl<F: forge_app::FileWriterInfra + 'static> ForgeHttpInfra<F> {
             .pool_idle_timeout(Duration::from_secs(http.pool_idle_timeout_secs))
             .pool_max_idle_per_host(http.pool_max_idle_per_host)
             .redirect(Policy::limited(http.max_redirects))
+            .hickory_dns(http.hickory)
             // HTTP/2 configuration from config
             .http2_adaptive_window(http.adaptive_window)
             .http2_keep_alive_interval(http.keep_alive_interval_secs.map(Duration::from_secs))
@@ -198,7 +200,7 @@ impl<F: forge_app::FileWriterInfra + 'static> ForgeHttpInfra<F> {
         );
         headers.insert(
             "HTTP-Referer",
-            HeaderValue::from_static("https://helioslite.dev"),
+            HeaderValue::from_static("https://forgecode.dev"),
         );
         headers.insert(
             reqwest::header::CONNECTION,

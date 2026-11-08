@@ -142,9 +142,8 @@ impl FromDomain<ReasoningConfig> for oai::Reasoning {
             builder.summary(oai::ReasoningSummary::Auto);
         }
 
-        // Note: max_tokens is not supported in the OpenAI Responses API's
-        // ReasoningArgs It's controlled at the request level via
-        // max_output_tokens
+        // Note: max_tokens is not supported in the OpenAI Responses API's ReasoningArgs
+        // It's controlled at the request level via max_output_tokens
 
         builder.build().map_err(anyhow::Error::from)
     }
@@ -269,9 +268,6 @@ impl FromDomain<ChatContext> for oai::CreateResponse {
                             }
                         }
                     }
-                    Role::Tool => {
-                        anyhow::bail!("Tool text messages should use a tool result item")
-                    }
                 },
                 ContextMessage::Tool(result) => {
                     let call_id = result
@@ -297,9 +293,8 @@ impl FromDomain<ChatContext> for oai::CreateResponse {
                     )));
                 }
                 ContextMessage::Image(img) => {
-                    // Mirror the Chat Completions request path: represent image
-                    // input as a user message with
-                    // structured content.
+                    // Mirror the Chat Completions request path: represent image input
+                    // as a user message with structured content.
                     items.push(oai::InputItem::EasyMessage(oai::EasyInputMessage {
                         r#type: oai::MessageType::Message,
                         role: oai::Role::User,
@@ -361,9 +356,9 @@ impl FromDomain<ChatContext> for oai::CreateResponse {
             builder.temperature(temperature.value());
         }
 
-        // Some OpenAI Codex/"reasoning" models reject `top_p` entirely (even
-        // when set to defaults). To avoid hard failures, we currently
-        // omit it for the Responses API path.
+        // Some OpenAI Codex/"reasoning" models reject `top_p` entirely (even when set
+        // to defaults). To avoid hard failures, we currently omit it for the
+        // Responses API path.
 
         if let Some(tools) = tools {
             builder.tools(tools);
@@ -408,29 +403,12 @@ mod tests {
     };
     use forge_app::utils::enforce_strict_schema;
     use pretty_assertions::assert_eq;
-    use serde_json::{Map, Value, json};
+    use serde_json::json;
 
     use crate::provider::FromDomain;
     use crate::provider::openai_responses::request::{
         codex_tool_parameters, has_open_additional_properties,
     };
-
-    fn canonical_json(value: Value) -> Value {
-        match value {
-            Value::Array(values) => Value::Array(values.into_iter().map(canonical_json).collect()),
-            Value::Object(object) => {
-                let mut entries = object.into_iter().collect::<Vec<_>>();
-                entries.sort_by(|(left, _), (right, _)| left.cmp(right));
-
-                let mut sorted = Map::new();
-                for (key, value) in entries {
-                    sorted.insert(key, canonical_json(value));
-                }
-                Value::Object(sorted)
-            }
-            value => value,
-        }
-    }
 
     #[test]
     fn test_reasoning_config_conversion_with_effort() -> anyhow::Result<()> {
@@ -972,8 +950,7 @@ mod tests {
 
         let actual = oai::CreateResponse::from_domain(context)?;
 
-        let tools = canonical_json(serde_json::to_value(actual.tools)?);
-        insta::assert_json_snapshot!("openai_responses_tools", tools);
+        insta::assert_json_snapshot!("openai_responses_tools", actual.tools);
 
         Ok(())
     }
@@ -996,8 +973,7 @@ mod tests {
 
         let actual = oai::CreateResponse::from_domain(context)?;
 
-        let tools = canonical_json(serde_json::to_value(actual.tools)?);
-        insta::assert_json_snapshot!("openai_responses_all_catalog_tools", tools);
+        insta::assert_json_snapshot!("openai_responses_all_catalog_tools", actual.tools);
 
         Ok(())
     }
@@ -1437,8 +1413,8 @@ mod tests {
             anyhow::bail!("Expected items input");
         };
 
-        // Should only have user message, function call, and function call
-        // output Empty assistant message should be skipped
+        // Should only have user message, function call, and function call output
+        // Empty assistant message should be skipped
         assert_eq!(items.len(), 3);
 
         Ok(())

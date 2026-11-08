@@ -215,10 +215,9 @@ impl IntoDomain for oai::Response {
                         }
                     }
 
-                    // Process reasoning summary - include the reasoning id so
-                    // that summary parts can be grouped
-                    // with their encrypted counterpart when
-                    // replayed back to the API.
+                    // Process reasoning summary - include the reasoning id so that
+                    // summary parts can be grouped with their encrypted counterpart
+                    // when replayed back to the API.
                     if !reasoning.summary.is_empty() {
                         let mut summary_texts = Vec::new();
                         for summary_part in &reasoning.summary {
@@ -349,22 +348,7 @@ fn into_response_failed_error(failed: oai::ResponseFailedEvent) -> anyhow::Error
         response_error = response_error.message(error.message);
     }
 
-    anyhow::Error::from(OpenAIError::Response(Box::new(response_error)))
-        .context("Upstream response failed")
-}
-
-fn into_response_error_error(error: oai::ResponseErrorEvent) -> anyhow::Error {
-    let mut response_error = OpenAIErrorResponse::default();
-    if let Some(code) = error.code {
-        response_error = response_error.code(OpenAIErrorCode::String(code));
-    }
-
-    if !error.message.is_empty() {
-        response_error = response_error.message(error.message);
-    }
-
-    anyhow::Error::from(OpenAIError::Response(Box::new(response_error)))
-        .context("Upstream response error")
+    anyhow::Error::from(OpenAIError::Response(response_error)).context("Upstream response failed")
 }
 
 impl IntoDomain for BoxStream<StreamItem, anyhow::Error> {
@@ -415,10 +399,8 @@ impl IntoDomain for BoxStream<StreamItem, anyhow::Error> {
                                             (tool_call_id.clone(), tool_name.clone()),
                                         );
 
-                                        // Only emit if we have non-empty
-                                        // initial arguments.
-                                        // Otherwise, wait for deltas or done
-                                        // event.
+                                        // Only emit if we have non-empty initial arguments.
+                                        // Otherwise, wait for deltas or done event.
                                         if !call.arguments.is_empty() {
                                             Some(Ok(ChatCompletionMessage::default()
                                                 .add_tool_call(ToolCall::Part(ToolCallPart {
@@ -432,8 +414,7 @@ impl IntoDomain for BoxStream<StreamItem, anyhow::Error> {
                                         }
                                     }
                                     oai::OutputItem::Reasoning(_reasoning) => {
-                                        // Reasoning items don't emit content in
-                                        // real-time, only at
+                                        // Reasoning items don't emit content in real-time, only at
                                         // completion
                                         None
                                     }
@@ -470,20 +451,16 @@ impl IntoDomain for BoxStream<StreamItem, anyhow::Error> {
                                 )))
                             }
                             oai::ResponseStreamEvent::ResponseFunctionCallArgumentsDone(done) => {
-                                // If deltas were already streamed for this
-                                // output index,
-                                // the arguments have already been emitted
-                                // incrementally.
+                                // If deltas were already streamed for this output index,
+                                // the arguments have already been emitted incrementally.
                                 if state
                                     .received_toolcall_deltas
                                     .contains(&(done.output_index.into()))
                                 {
                                     None
                                 } else {
-                                    // No deltas were received (e.g. the Spark
-                                    // model sends
-                                    // the complete arguments only in the `done`
-                                    // event).
+                                    // No deltas were received (e.g. the Spark model sends
+                                    // the complete arguments only in the `done` event).
                                     // Emit the full tool call now.
                                     let (call_id, name) = state
                                         .output_index_to_tool_call
@@ -514,19 +491,16 @@ impl IntoDomain for BoxStream<StreamItem, anyhow::Error> {
                                 }
                             }
                             oai::ResponseStreamEvent::ResponseCompleted(done) => {
-                                // Text content, reasoning, and tool calls were
-                                // already streamed via
+                                // Text content, reasoning, and tool calls were already streamed via
                                 // delta events Only emit metadata
                                 // (usage, finish_reason)
                                 let mut message: ChatCompletionMessage =
                                     done.response.into_domain();
                                 message.content = None; // Clear content to avoid duplication
                                 message.reasoning = None; // Clear reasoning to avoid duplication
-                                // Keep only encrypted-content reasoning details
-                                // — text and
+                                // Keep only encrypted-content reasoning details — text and
                                 // summary were already streamed via deltas but
-                                // encrypted_content is never streamed and must
-                                // be preserved
+                                // encrypted_content is never streamed and must be preserved
                                 // for multi-turn reasoning replay.
                                 message.reasoning_details =
                                     retain_encrypted_reasoning_details(message.reasoning_details);
@@ -534,15 +508,13 @@ impl IntoDomain for BoxStream<StreamItem, anyhow::Error> {
                                 Some(Ok(message))
                             }
                             oai::ResponseStreamEvent::ResponseIncomplete(done) => {
-                                // Text content, reasoning, and tool calls were
-                                // already streamed via
+                                // Text content, reasoning, and tool calls were already streamed via
                                 // delta events
                                 let mut message: ChatCompletionMessage =
                                     done.response.into_domain();
                                 message.content = None; // Clear content to avoid duplication
                                 message.reasoning = None; // Clear reasoning to avoid duplication
-                                // Keep only encrypted-content reasoning details
-                                // (see above).
+                                // Keep only encrypted-content reasoning details (see above).
                                 message.reasoning_details =
                                     retain_encrypted_reasoning_details(message.reasoning_details);
                                 message.tool_calls.clear(); // Clear tool calls to avoid duplication
@@ -553,7 +525,7 @@ impl IntoDomain for BoxStream<StreamItem, anyhow::Error> {
                                 Some(Err(into_response_failed_error(failed)))
                             }
                             oai::ResponseStreamEvent::ResponseError(err) => {
-                                Some(Err(into_response_error_error(err)))
+                                Some(Err(anyhow::anyhow!("Upstream error: {}", err.message)))
                             }
                             _ => None,
                         },
@@ -916,10 +888,10 @@ mod tests {
         }
     }
 
-    fn fixture_response_error_event(code: &str) -> oai::ResponseErrorEvent {
+    fn fixture_response_error_event() -> oai::ResponseErrorEvent {
         oai::ResponseErrorEvent {
             sequence_number: 1,
-            code: Some(code.to_string()),
+            code: Some("connection_error".to_string()),
             message: "Connection error".to_string(),
             param: None,
         }
@@ -1327,8 +1299,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_stream_with_function_call_arguments_done_no_deltas() -> anyhow::Result<()> {
-        // When no deltas were received, the done event should emit the tool
-        // call
+        // When no deltas were received, the done event should emit the tool call
         let done = oai::ResponseFunctionCallArgumentsDoneEvent {
             sequence_number: 1,
             output_index: 0,
@@ -1490,7 +1461,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_stream_with_response_error() -> anyhow::Result<()> {
-        let error = fixture_response_error_event("server_error");
+        let error = fixture_response_error_event();
 
         let stream: ResponseStream = Box::pin(tokio_stream::iter([event(
             oai::ResponseStreamEvent::ResponseError(error),
@@ -1499,18 +1470,8 @@ mod tests {
         let mut stream_domain = stream.into_domain()?;
         let actual = stream_domain.next().await.unwrap();
 
-        let actual = actual.unwrap_err();
-        assert!(actual.to_string().contains("Upstream response error"));
-        let code = actual
-            .downcast_ref::<OpenAIError>()
-            .and_then(|error| match error {
-                OpenAIError::Response(error) => {
-                    error.get_code_deep().and_then(|code| code.as_str())
-                }
-                OpenAIError::InvalidStatusCode(_) => None,
-            });
-
-        assert_eq!(code, Some("server_error"));
+        assert!(actual.is_err());
+        assert!(actual.unwrap_err().to_string().contains("Upstream error"));
 
         Ok(())
     }
@@ -1635,8 +1596,7 @@ mod tests {
         let delta3_msg = messages[2].as_ref().unwrap();
         assert_eq!(delta3_msg.content, Some(Content::part("</commit_message>")));
 
-        // Completion event should have NO content (cleared to avoid
-        // duplication)
+        // Completion event should have NO content (cleared to avoid duplication)
         let completion_msg = messages[3].as_ref().unwrap();
         assert_eq!(completion_msg.content, None);
         assert_eq!(completion_msg.finish_reason, Some(FinishReason::Stop));
@@ -1646,14 +1606,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_stream_avoids_duplicate_reasoning_in_completion() -> anyhow::Result<()> {
-        // Simulate realistic streaming: reasoning deltas followed by completion
-        // event
+        // Simulate realistic streaming: reasoning deltas followed by completion event
         let reasoning_delta1 = fixture_delta_reasoning_text("Analyzing the request...");
         let reasoning_delta2 = fixture_delta_reasoning_text(" and formulating response.");
         let summary_delta = fixture_delta_reasoning_summary("Summary of analysis");
 
-        // Completion event contains the full reasoning that was already
-        // streamed
+        // Completion event contains the full reasoning that was already streamed
         let response = fixture_response_with_reasoning_both(
             "Analyzing the request... and formulating response.",
             "Summary of analysis",
@@ -1705,8 +1663,8 @@ mod tests {
         );
         assert!(summary_msg.reasoning_details.is_some());
 
-        // Completion event should have NO reasoning or reasoning_details
-        // (cleared to avoid duplication)
+        // Completion event should have NO reasoning or reasoning_details (cleared to
+        // avoid duplication)
         let completion_msg = messages[3].as_ref().unwrap();
         assert_eq!(completion_msg.reasoning, None);
         assert_eq!(completion_msg.reasoning_details, None);
@@ -1717,14 +1675,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_stream_avoids_duplicate_tool_calls_in_completion() -> anyhow::Result<()> {
-        // Simulate realistic streaming: tool call deltas followed by completion
-        // event
+        // Simulate realistic streaming: tool call deltas followed by completion event
         let added = fixture_function_call_added("call_123", "shell", "");
         let delta1 = fixture_function_call_arguments_delta(0, r#"{"cmd":"echo"#);
         let delta2 = fixture_function_call_arguments_delta(0, r#" hello"}"#);
 
-        // Completion event contains the full tool call that was already
-        // streamed
+        // Completion event contains the full tool call that was already streamed
         let response =
             fixture_response_with_function_call("call_123", "shell", r#"{"cmd":"echo hello"}"#);
         let completed = oai::ResponseCompletedEvent { sequence_number: 4, response };
@@ -1753,8 +1709,7 @@ mod tests {
         let delta2_msg = messages[1].as_ref().unwrap();
         assert_eq!(delta2_msg.tool_calls.len(), 1);
 
-        // Completion event should have NO tool calls (cleared to avoid
-        // duplication)
+        // Completion event should have NO tool calls (cleared to avoid duplication)
         let completion_msg = messages[2].as_ref().unwrap();
         assert_eq!(completion_msg.tool_calls.len(), 0);
         assert_eq!(completion_msg.finish_reason, Some(FinishReason::ToolCalls));
@@ -1869,8 +1824,7 @@ mod tests {
     /// 3. response.completed
     #[tokio::test]
     async fn test_spark_style_stream_function_call_no_deltas() -> anyhow::Result<()> {
-        // Step 1: output_item.added with empty arguments (Spark sends ""
-        // initially)
+        // Step 1: output_item.added with empty arguments (Spark sends "" initially)
         let added = fixture_function_call_added("call_shkZ0WZ4bgS2HdaAF0YOcB06", "shell", "");
 
         // Step 2: function_call_arguments.done with full arguments (no deltas)

@@ -34,7 +34,7 @@ pub struct ForgePolicyService<I> {
 /// Default policies loaded once at startup from the embedded YAML file
 static DEFAULT_POLICIES: LazyLock<PolicyConfig> = LazyLock::new(|| {
     let yaml_content = include_str!("./permissions.default.yaml");
-    serde_yaml_ng::from_str(yaml_content).expect(
+    serde_yml::from_str(yaml_content).expect(
         "Failed to parse default policies YAML. This should never happen as the YAML is embedded.",
     )
 });
@@ -82,7 +82,7 @@ where
         }
 
         let content = self.infra.read_utf8(&policies_path).await?;
-        let policies = serde_yaml_ng::from_str(&content)
+        let policies = serde_yml::from_str(&content)
             .with_context(|| format!("Failed to parse policy {}", policies_path.display()))?;
 
         Ok(Some(policies))
@@ -97,7 +97,7 @@ where
         policies = policies.add_policy(policy);
 
         // Serialize the updated policies to YAML
-        let new_content = serde_yaml_ng::to_string(&policies)
+        let new_content = serde_yml::to_string(&policies)
             .with_context(|| "Failed to serialize policies to YAML")?;
 
         // Write the updated content
@@ -119,7 +119,7 @@ where
 
         // Get the default policies content
         let default_policies = Self::load_default_policies();
-        let content = serde_yaml_ng::to_string(&default_policies)
+        let content = serde_yml::to_string(&default_policies)
             .with_context(|| "Failed to serialize default policies to YAML")?;
 
         // Write the default policies to the file
@@ -131,9 +131,6 @@ where
     }
 
     /// Get or create policies, prompting user if needed
-    // `async_recursion` injects `#[must_use]` on the generated wrapper, whose
-    // return type is already `#[must_use]`; the clippy lint is a false positive.
-    #[allow(clippy::double_must_use)]
     #[async_recursion::async_recursion]
     async fn get_or_create_policies(&self) -> anyhow::Result<(PolicyConfig, Option<PathBuf>)>
     where
@@ -155,7 +152,7 @@ where
     I: FileReaderInfra
         + FileWriterInfra
         + FileInfoInfra
-        + EnvironmentInfra<Config = forge_config::ForgeConfig>
+        + EnvironmentInfra
         + DirectoryReaderInfra
         + UserInfra,
 {
@@ -168,22 +165,7 @@ where
         let (policies, path) = self.get_or_create_policies().await?;
 
         let engine = PolicyEngine::new(&policies);
-
-        // When the guardian is enabled (opt-in), pass the rule-engine decision
-        // through the risk adjudicator. In the neutral Build mode the rules
-        // still decide (allow/deny stay absolute); the guardian attaches a
-        // risk snapshot + rationale and may conservatively escalate Confirm
-        // for side-effecting ops.
-        let permission = if self.infra.get_config().map(|c| c.guardian).unwrap_or(false) {
-            let engine_decision = engine.can_perform(operation);
-            let adjudicator: forge_guardian::GuardianAdjudicator =
-                forge_guardian::GuardianAdjudicator::new(forge_guardian::SessionMode::Build);
-            adjudicator
-                .adjudicate(operation, |_| engine_decision)
-                .verdict
-        } else {
-            engine.can_perform(operation)
-        };
+        let permission = engine.can_perform(operation);
 
         match permission {
             Permission::Deny => Ok(PolicyDecision { allowed: false, path }),

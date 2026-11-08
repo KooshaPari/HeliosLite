@@ -9,8 +9,7 @@ use serde::{Deserialize, Serialize};
 use crate::reader::ConfigReader;
 use crate::writer::ConfigWriter;
 use crate::{
-    AutoDumpFormat, Compact, Decimal, HttpConfig, ModelConfig, OutputSettings, ReasoningConfig,
-    RetryConfig, Update,
+    AutoDumpFormat, Compact, Decimal, HttpConfig, ModelConfig, ReasoningConfig, RetryConfig, Update,
 };
 
 /// Wire protocol a provider uses for chat completions.
@@ -64,23 +63,13 @@ pub struct ProviderUrlParam {
     pub optional: bool,
 }
 
-/// Source of models for a provider: a URL to fetch them from, a live fetch
-/// with a curated fallback, or a static list defined inline.
+/// Source of models for a provider: either a URL to fetch them from or a
+/// static list defined inline.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, Dummy)]
 #[serde(untagged)]
 pub enum ModelListConfig {
     /// URL template used to fetch the model list dynamically.
     Url(String),
-    /// Fetch the live model list from `url` (e.g. `/v1/models`), enrich it
-    /// with curated metadata from `fallback` (matched by model id), and fall
-    /// back to `fallback` as-is when the fetch fails.
-    Dynamic {
-        /// Endpoint to fetch the live model list from (e.g. `/v1/models`).
-        url: String,
-        /// Curated metadata overlaid on the live list; the sole source when
-        /// the live fetch fails.
-        fallback: Vec<forge_domain::Model>,
-    },
     /// A static list of models defined directly in the configuration.
     Hardcoded(Vec<forge_domain::Model>),
 }
@@ -199,7 +188,7 @@ pub struct ForgeConfig {
     /// Base URL of the Forge services API used for semantic search and
     /// indexing.
     #[serde(default)]
-    #[dummy(expr = "\"https://api.helioslite.dev/api\".to_string()")]
+    #[dummy(expr = "\"https://api.forgecode.dev/api\".to_string()")]
     pub services_url: String,
     /// Maximum number of file extensions included in the agent system prompt.
     #[serde(default)]
@@ -269,42 +258,15 @@ pub struct ForgeConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_requests_per_turn: Option<usize>,
 
-    /// Whether to automatically continue after a per-turn limit interruption.
-    #[serde(default)]
-    pub auto_continue_on_interrupt: bool,
-
     /// Context compaction settings applied to all agents; falls back to each
     /// agent's individual setting when absent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub compact: Option<Compact>,
 
-    /// User-facing output rendering settings (verbose/concise/compact modes).
-    /// When absent the renderer falls back to `OutputSettings::default()`
-    /// (concise mode, trailing newline enabled).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub output: Option<OutputSettings>,
-
     /// Whether restricted mode is active; when enabled, tool execution requires
     /// explicit permission grants.
     #[serde(default)]
     pub restricted: bool,
-
-    /// Whether the LLM guardian / risk-adjudication layer is active. When
-    /// enabled, a `GuardianAdjudicator` runs before the rule engine makes its
-    /// allow/deny/confirm decision, scoring risk and applying session-mode
-    /// gates (Plan/Build/AcceptEdits/Yolo). Defaults to off (backwards
-    /// compatible — current behavior unchanged when absent).
-    #[serde(default)]
-    pub guardian: bool,
-
-    /// Whether the OS-level sandbox should be applied to risky tool calls
-    /// (currently `Shell` and `Fetch`). When enabled, those tool calls are
-    /// routed through `forge_sandbox::Sandbox` instead of the bare shell —
-    /// providing Landlock/Seatbelt/Job Object containment per `SandboxPolicy`.
-    /// Defaults to off (backwards compatible — current behavior unchanged
-    /// when absent).
-    #[serde(default)]
-    pub sandbox: bool,
 
     /// Whether tool use is supported in the current environment; when false,
     /// all tool calls are disabled.
@@ -393,19 +355,13 @@ impl ForgeConfig {
 
     /// Writes the configuration to the user config file.
     ///
-    /// When `path` is `None`, the default config path (`~/.forge/.forge.toml`)
-    /// is used. When `Some(path)`, the configuration is written to that path
-    /// instead.
-    ///
     /// # Errors
     ///
     /// Returns an error if the configuration cannot be serialized or written to
     /// disk.
-    pub fn write(&self, path: Option<&std::path::Path>) -> crate::Result<()> {
-        let target = path
-            .map(std::path::Path::to_path_buf)
-            .unwrap_or_else(ConfigReader::config_path);
-        ConfigWriter::new(self.clone()).write(&target)
+    pub fn write(&self) -> crate::Result<()> {
+        let path = ConfigReader::config_path();
+        ConfigWriter::new(self.clone()).write(&path)
     }
 }
 
@@ -532,43 +488,6 @@ models = "http://example.com/v1/models"
             models: Some(ModelListConfig::Url(
                 "http://example.com/v1/models".to_string(),
             )),
-            ..Default::default()
-        }];
-
-        assert_eq!(actual.providers, expected);
-    }
-
-    #[test]
-    fn test_provider_dynamic_model_list_with_inline_fallback_deserialization() {
-        let fixture = r#"
-[[providers]]
-id = "kimi_coding"
-url = "https://api.kimi.com/coding/v1/chat/completions"
-
-[providers.models]
-url = "https://api.kimi.com/coding/v1/models"
-
-[[providers.models.fallback]]
-id = "k3"
-name = "Kimi k3"
-context_length = 262144
-tools_supported = true
-"#;
-
-        let actual = ConfigReader::default().read_toml(fixture).build().unwrap();
-
-        let expected = vec![ProviderEntry {
-            id: "kimi_coding".to_string(),
-            url: "https://api.kimi.com/coding/v1/chat/completions".to_string(),
-            models: Some(ModelListConfig::Dynamic {
-                url: "https://api.kimi.com/coding/v1/models".to_string(),
-                fallback: vec![
-                    forge_domain::Model::new("k3")
-                        .name("Kimi k3".to_string())
-                        .context_length(262144)
-                        .tools_supported(true),
-                ],
-            }),
             ..Default::default()
         }];
 

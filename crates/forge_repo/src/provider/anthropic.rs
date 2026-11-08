@@ -40,8 +40,8 @@ impl<H: HttpInfra> Anthropic<H> {
             self.anthropic_version.clone(),
         )];
 
-        // Extract API key/token from provider credentials (handles Google ADC,
-        // OAuth, and API key)
+        // Extract API key/token from provider credentials (handles Google ADC, OAuth,
+        // and API key)
         let api_key = self
             .provider
             .credential
@@ -92,15 +92,14 @@ impl<H: HttpInfra> Anthropic<H> {
 }
 
 /// Returns false when the model auto-enables interleaved thinking through
-/// adaptive thinking (Opus 5.5, Sonnet 5.5, Opus 5, Opus 4.8, Opus 4.7,
-/// Opus 4.6, Sonnet 4.6). When
+/// adaptive thinking (Opus 5, Opus 4.8, Opus 4.7, Opus 4.6, Sonnet 5, Sonnet
+/// 4.6). When
 /// the model is unknown (e.g., listing endpoints), the flag is included because
 /// it is harmless on non-chat endpoints and necessary on older chat models.
 fn interleaved_thinking_required(model: Option<&ModelId>) -> bool {
     let Some(model) = model else { return true };
     let id = model.as_str().to_lowercase();
     !(id.contains("opus-5")
-        || id.contains("sonnet-5-5")
         || id.contains("opus-4-8")
         || id.contains("opus-4-7")
         || id.contains("opus-4-6")
@@ -127,8 +126,7 @@ impl<T: HttpInfra> Anthropic<T> {
 
         let mut request = Request::try_from(context)?.max_tokens(max_tokens as u64);
 
-        // For Vertex AI Anthropic, model is in the URL path, not the request
-        // body
+        // For Vertex AI Anthropic, model is in the URL path, not the request body
         if self.provider.id == ProviderId::VERTEX_AI_ANTHROPIC {
             request = request.anthropic_version(self.anthropic_version.clone());
         } else {
@@ -142,8 +140,8 @@ impl<T: HttpInfra> Anthropic<T> {
             .pipe(DropInvalidToolUse)
             .pipe(SanitizeToolIds);
 
-        // Vertex AI does not support output_format, so we skip schema
-        // enforcement and remove any output_format field
+        // Vertex AI does not support output_format, so we skip schema enforcement
+        // and remove any output_format field
         let request = if self.provider.id == ProviderId::VERTEX_AI_ANTHROPIC {
             pipeline
                 .pipe(RemoveOutputFormat)
@@ -157,9 +155,8 @@ impl<T: HttpInfra> Anthropic<T> {
         };
 
         let url = if self.provider.id == ProviderId::VERTEX_AI_ANTHROPIC {
-            // For Vertex AI, we need to append the model ID and
-            // streamRawPredict to the URL The chat_url from
-            // provider.json ends with .../models
+            // For Vertex AI, we need to append the model ID and streamRawPredict to the URL
+            // The chat_url from provider.json ends with .../models
             let base = self.provider.url.as_str().trim_end_matches('/');
             format!("{}/{}:streamRawPredict", base, model.as_str())
         } else {
@@ -291,58 +288,6 @@ impl<T: HttpInfra> Anthropic<T> {
             forge_domain::ModelSource::Hardcoded(models) => {
                 debug!("Using hardcoded models");
                 Ok(models.clone())
-            }
-            forge_domain::ModelSource::Dynamic { url, fallback } => {
-                debug!(url = %url, "Fetching dynamic models");
-
-                let fetch_result = async {
-                    let response = self
-                        .http
-                        .http_get(url, Some(create_headers(self.get_headers(None))))
-                        .await
-                        .with_context(|| format_http_context(None, "GET", url))
-                        .with_context(|| "Failed to fetch models")?;
-
-                    let status = response.status();
-                    let ctx_msg = format_http_context(Some(status), "GET", url);
-                    let text = response
-                        .text()
-                        .await
-                        .with_context(|| ctx_msg.clone())
-                        .with_context(|| "Failed to decode response into text")?;
-
-                    if !status.is_success() {
-                        anyhow::bail!("{}: {}", ctx_msg, text);
-                    }
-
-                    let response: ListModelResponse = serde_json::from_str(&text)
-                        .with_context(|| ctx_msg)
-                        .with_context(|| "Failed to deserialize models response")?;
-                    // Preserve the full server-side Model DTOs so the
-                    // curated overlay can fill None gaps instead of
-                    // overriding server values. Anthropic's /v1/models
-                    // response carries per-model metadata (display_name,
-                    // created_at) that we want to surface when the
-                    // server provided it.
-                    Ok(response
-                        .data
-                        .into_iter()
-                        .map(forge_domain::Model::from)
-                        .collect())
-                }
-                .await;
-
-                match fetch_result {
-                    Ok(live) => Ok(forge_app::domain::Model::merge_live(live, fallback.clone())),
-                    Err(error) => {
-                        tracing::warn!(
-                            error = ?error,
-                            provider = %self.provider.id,
-                            "Dynamic model fetch failed; falling back to curated list"
-                        );
-                        Ok(fallback.clone())
-                    }
-                }
             }
         }
     }
@@ -503,8 +448,7 @@ mod tests {
             _headers: Option<HeaderMap>,
             _body: Bytes,
         ) -> anyhow::Result<EventSource> {
-            // For now, return an error since eventsource is not used in the
-            // failing tests
+            // For now, return an error since eventsource is not used in the failing tests
             Err(anyhow::anyhow!("EventSource not implemented in mock"))
         }
     }
@@ -865,8 +809,7 @@ mod tests {
     #[test]
     fn test_get_headers_drops_interleaved_thinking_for_4_6_plus_models() {
         // Adaptive thinking auto-enables interleaved thinking on Opus 4.8,
-        // Opus 4.7, Opus 4.6, and Sonnet 4.6; the beta header is redundant
-        // there.
+        // Opus 4.7, Opus 4.6, and Sonnet 4.6; the beta header is redundant there.
         let chat_url = Url::parse("https://api.anthropic.com/v1/messages").unwrap();
         let model_url = Url::parse("https://api.anthropic.com/v1/models").unwrap();
 
@@ -896,8 +839,6 @@ mod tests {
         );
 
         for model_id in [
-            "claude-opus-5-5",
-            "claude-sonnet-5-5",
             "claude-opus-5",
             "claude-opus-4-8",
             "claude-opus-4-7",

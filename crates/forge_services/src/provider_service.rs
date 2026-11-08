@@ -86,19 +86,6 @@ impl<R> ForgeProviderService<R> {
                     .ok();
                 model_url.map(ModelSource::Url)
             }
-            ModelSource::Dynamic { url, fallback } => {
-                let model_url = self
-                    .render_url_template(
-                        &url.template,
-                        &credential.url_params,
-                        &template_provider.url_params,
-                    )
-                    .ok();
-                model_url.map(|rendered| ModelSource::Dynamic {
-                    url: rendered,
-                    fallback: fallback.clone(),
-                })
-            }
             ModelSource::Hardcoded(list) => Some(ModelSource::Hardcoded(list.clone())),
         });
 
@@ -124,8 +111,7 @@ impl<R: ChatRepository + ProviderRepository> ProviderService for ForgeProviderSe
         context: Context,
         provider: Provider<Url>,
     ) -> ResultStream<ChatCompletionMessage, anyhow::Error> {
-        // Repository builds client on each call (no caching at repository
-        // level)
+        // Repository builds client on each call (no caching at repository level)
         self.repository.chat(model_id, context, provider).await
     }
 

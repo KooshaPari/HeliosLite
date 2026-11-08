@@ -26,11 +26,6 @@ pub struct Orchestrator<S> {
     error_tracker: ToolErrorTracker,
     hook: Arc<Hook>,
     config: forge_config::ForgeConfig,
-    dirty: bool,
-    /// Pluggable telemetry sink — no-op by default, zero overhead unless
-    /// replaced with a real implementation via `.metrics_sink(sink)`.
-    #[setters(skip)]
-    metrics_sink: Arc<dyn MetricsSink>,
 }
 
 impl<S: AgentService + EnvironmentInfra<Config = forge_config::ForgeConfig>> Orchestrator<S> {
@@ -50,22 +45,7 @@ impl<S: AgentService + EnvironmentInfra<Config = forge_config::ForgeConfig>> Orc
             models: Default::default(),
             error_tracker: Default::default(),
             hook: Arc::new(Hook::default()),
-            dirty: false,
-            metrics_sink: Arc::new(NoopMetricsSink),
         }
-    }
-
-    /// Replace the no-op telemetry sink with a real implementation.
-    ///
-    /// Call this once during setup; the orchestrator keeps an `Arc` so the sink
-    /// can be shared cheaply across clones.
-    // Public injection point for a real metrics sink, supplied by embedders; no
-    // internal caller yet. Justified suppression: it is the only wiring for P2
-    // observability and removing it would drop that capability.
-    #[allow(dead_code)]
-    pub fn with_metrics_sink(mut self, sink: Arc<dyn MetricsSink>) -> Self {
-        self.metrics_sink = sink;
-        self
     }
 
     /// Get a reference to the internal conversation
@@ -74,13 +54,6 @@ impl<S: AgentService + EnvironmentInfra<Config = forge_config::ForgeConfig>> Orc
     }
 
     // Helper function to get all tool results from a vector of tool calls
-    //
-    // `async_recursion` injects `#[must_use]` onto the non-async wrapper it
-    // generates, but that wrapper returns a boxed `Future`, which the compiler
-    // already treats as `#[must_use]`. The resulting `clippy::double_must_use`
-    // is a false positive against the macro-generated attribute.
-    #[allow(clippy::double_must_use)]
-    #[tracing::instrument(skip(self, tool_calls, tool_context), fields(tool_count = tool_calls.len()))]
     #[async_recursion]
     async fn execute_tool_calls(
         &mut self,
@@ -89,8 +62,7 @@ impl<S: AgentService + EnvironmentInfra<Config = forge_config::ForgeConfig>> Orc
     ) -> anyhow::Result<Vec<(ToolCallFull, ToolResult)>> {
         let task_tool_name = ToolKind::Task.name();
 
-        // Use a case-insensitive comparison since the model may send "Task" or
-        // "task".
+        // Use a case-insensitive comparison since the model may send "Task" or "task".
         let is_task = |tc: &ToolCallFull| {
             tc.name
                 .as_str()
@@ -104,8 +76,8 @@ impl<S: AgentService + EnvironmentInfra<Config = forge_config::ForgeConfig>> Orc
             |tc: &&ToolCallFull| tc.name.as_str().to_lowercase() == task_tool_name.as_str();
         let (task_calls, other_calls): (Vec<_>, Vec<_>) = tool_calls.iter().partition(is_task_call);
 
-        // Execute task tool calls in parallel — mirrors how direct
-        // agent-as-tool calls work.
+        // Execute task tool calls in parallel — mirrors how direct agent-as-tool calls
+        // work.
         let task_results: Vec<(ToolCallFull, ToolResult)> = join_all(
             task_calls
                 .iter()
@@ -123,13 +95,12 @@ impl<S: AgentService + EnvironmentInfra<Config = forge_config::ForgeConfig>> Orc
             .map(|tool| &tool.name)
             .collect::<HashSet<_>>();
 
-        // Process non-task tool calls sequentially (preserving UI notifier
-        // handshake and hooks).
+        // Process non-task tool calls sequentially (preserving UI notifier handshake
+        // and hooks).
         let mut other_results: Vec<(ToolCallFull, ToolResult)> =
             Vec::with_capacity(other_calls.len());
         for tool_call in &other_calls {
-            // Send the start notification for system tools and not agent as a
-            // tool
+            // Send the start notification for system tools and not agent as a tool
             let is_system_tool = system_tools.contains(&tool_call.name);
             if is_system_tool {
                 let notifier = Arc::new(Notify::new());
@@ -138,10 +109,9 @@ impl<S: AgentService + EnvironmentInfra<Config = forge_config::ForgeConfig>> Orc
                     notifier: notifier.clone(),
                 })
                 .await?;
-                // Wait for the UI to acknowledge it has rendered the tool
-                // header before we execute the tool. This
-                // prevents tool stdout from appearing before
-                // the tool name is printed.
+                // Wait for the UI to acknowledge it has rendered the tool header
+                // before we execute the tool. This prevents tool stdout from
+                // appearing before the tool name is printed.
                 notifier.notified().await;
             }
 
@@ -161,8 +131,7 @@ impl<S: AgentService + EnvironmentInfra<Config = forge_config::ForgeConfig>> Orc
                 .call(&self.agent, tool_context, (*tool_call).clone())
                 .await;
 
-            // Fire the ToolcallEnd lifecycle event (fires on both success and
-            // failure)
+            // Fire the ToolcallEnd lifecycle event (fires on both success and failure)
             let toolcall_end_event = LifecycleEvent::ToolcallEnd(EventData::new(
                 self.agent.clone(),
                 self.agent.model.clone(),
@@ -172,8 +141,7 @@ impl<S: AgentService + EnvironmentInfra<Config = forge_config::ForgeConfig>> Orc
                 .handle(&toolcall_end_event, &mut self.conversation)
                 .await?;
 
-            // Send the end notification for system tools and not agent as a
-            // tool
+            // Send the end notification for system tools and not agent as a tool
             if is_system_tool {
                 self.send(ChatResponse::ToolCallEnd(tool_result.clone()))
                     .await?;
@@ -225,7 +193,6 @@ impl<S: AgentService + EnvironmentInfra<Config = forge_config::ForgeConfig>> Orc
         Ok(tool_supported)
     }
 
-    #[tracing::instrument(skip(self, context), fields(model = %model_id, reasoning = reasoning_supported))]
     async fn execute_chat_turn(
         &self,
         model_id: &ModelId,
@@ -270,7 +237,6 @@ impl<S: AgentService + EnvironmentInfra<Config = forge_config::ForgeConfig>> Orc
     }
 
     // Create a helper method with the core functionality
-    #[tracing::instrument(skip(self), fields(agent = %self.agent.id, conversation = %self.conversation.id))]
     pub async fn run(&mut self) -> anyhow::Result<()> {
         let model_id = self.get_model();
 
@@ -286,42 +252,23 @@ impl<S: AgentService + EnvironmentInfra<Config = forge_config::ForgeConfig>> Orc
             .handle(&start_event, &mut self.conversation)
             .await?;
 
-        // Signals that the loop should suspend (task may or may not be
-        // completed)
+        // Signals that the loop should suspend (task may or may not be completed)
         let mut should_yield = false;
 
         // Signals that the task is completed
         let mut is_complete = false;
 
-        // Install crash-safety guard: if `run` exits via panic or cancellation,
-        // the guard's `Drop` performs a best-effort final persist via
-        // `services.update`. Held for the entire body of `run`. The guard owns
-        // a snapshot of the data it needs (instead of borrowing `self`) so the
-        // rest of `run` can keep using `self.foo()` without conflicts.
-        let mut _drop_guard = OrchestratorDropGuard {
-            dirty: self.dirty,
-            conversation: Some(self.conversation.clone()),
-            services: self.services.clone(),
-        };
-
         let mut request_count = 0;
 
         // Retrieve the number of requests allowed per tick.
         let max_requests_per_turn = self.agent.max_requests_per_turn;
-        let tool_context = {
-            let mut ctx =
-                ToolCallContext::new(self.conversation.metrics.clone()).sender(self.sender.clone());
-            ctx.set_conversation_id(Some(self.conversation.id));
-            ctx.set_parent_id(self.conversation.parent_id);
-            ctx.set_source(self.conversation.source.clone());
-            ctx
-        };
+        let tool_context =
+            ToolCallContext::new(self.conversation.metrics.clone()).sender(self.sender.clone());
 
         while !should_yield {
             // Set context for the current loop iteration
             self.conversation.context = Some(context.clone());
-            self.mark_dirty();
-            self.flush_if_dirty().await?;
+            self.services.update(self.conversation.clone()).await?;
 
             let request_event = LifecycleEvent::Request(EventData::new(
                 self.agent.clone(),
@@ -331,9 +278,6 @@ impl<S: AgentService + EnvironmentInfra<Config = forge_config::ForgeConfig>> Orc
             self.hook
                 .handle(&request_event, &mut self.conversation)
                 .await?;
-
-            // Telemetry: count each outgoing request
-            self.metrics_sink.increment(metric_names::REQUEST, 1);
 
             let message = crate::retry::retry_with_config(
                 &self.config.clone().retry.unwrap_or_default(),
@@ -348,18 +292,15 @@ impl<S: AgentService + EnvironmentInfra<Config = forge_config::ForgeConfig>> Orc
                     let sender = sender.clone();
                     let agent_id = self.agent.id.clone();
                     let model_id = model_id.clone();
-                    let metrics_sink = self.metrics_sink.clone();
                     move |error: &anyhow::Error, duration: Duration| {
                         let root_cause = error.root_cause();
-                        // Log retry attempts - critical for debugging API
-                        // failures
+                        // Log retry attempts - critical for debugging API failures
                         tracing::error!(
                             agent_id = %agent_id,
                             error = ?root_cause,
                             model = %model_id,
                             "Retry attempt due to error"
                         );
-                        metrics_sink.increment(metric_names::RETRY, 1);
                         let retry_event =
                             ChatResponse::RetryAttempt { cause: error.into(), duration };
                         let _ = sender.try_send(Ok(retry_event));
@@ -367,9 +308,6 @@ impl<S: AgentService + EnvironmentInfra<Config = forge_config::ForgeConfig>> Orc
                 }),
             )
             .await?;
-
-            // Telemetry: model execution completed
-            self.metrics_sink.increment(metric_names::MODEL_EXEC, 1);
 
             // Fire the Response lifecycle event
             let response_event = LifecycleEvent::Response(EventData::new(
@@ -381,8 +319,8 @@ impl<S: AgentService + EnvironmentInfra<Config = forge_config::ForgeConfig>> Orc
                 .handle(&response_event, &mut self.conversation)
                 .await?;
 
-            // Turn is completed, if finish_reason is 'stop'. Gemini models
-            // return stop as finish reason with tool calls.
+            // Turn is completed, if finish_reason is 'stop'. Gemini models return stop as
+            // finish reason with tool calls.
             is_complete =
                 message.finish_reason == Some(FinishReason::Stop) && message.tool_calls.is_empty();
 
@@ -398,8 +336,7 @@ impl<S: AgentService + EnvironmentInfra<Config = forge_config::ForgeConfig>> Orc
                 .execute_tool_calls(&message.tool_calls, &tool_context)
                 .await?;
 
-            // Update context from conversation after response / tool-call hooks
-            // run
+            // Update context from conversation after response / tool-call hooks run
             if let Some(updated_context) = &self.conversation.context {
                 context = updated_context.clone();
             }
@@ -409,8 +346,7 @@ impl<S: AgentService + EnvironmentInfra<Config = forge_config::ForgeConfig>> Orc
             for (_, result) in tool_call_records.iter_mut() {
                 if result.is_error() {
                     let attempts_left = self.error_tracker.remaining_attempts(&result.name);
-                    // Add attempt information to the error message so the agent
-                    // can reflect on it.
+                    // Add attempt information to the error message so the agent can reflect on it.
                     let context = serde_json::json!({
                         "attempts_left": attempts_left,
                         "allowed_max_attempts": allowed_max_attempts,
@@ -448,15 +384,13 @@ impl<S: AgentService + EnvironmentInfra<Config = forge_config::ForgeConfig>> Orc
             // Update context in the conversation
             context = SetModel::new(model_id.clone()).transform(context);
             self.conversation.context = Some(context.clone());
-            self.mark_dirty();
-            self.flush_if_dirty().await?;
+            self.services.update(self.conversation.clone()).await?;
             request_count += 1;
 
             if !should_yield && let Some(max_request_allowed) = max_requests_per_turn {
                 // Check if agent has reached the maximum request per turn limit
                 if request_count >= max_request_allowed {
-                    // Log warning - important for understanding conversation
-                    // interruptions
+                    // Log warning - important for understanding conversation interruptions
                     warn!(
                         agent_id = %self.agent.id,
                         model_id = %model_id,
@@ -495,8 +429,7 @@ impl<S: AgentService + EnvironmentInfra<Config = forge_config::ForgeConfig>> Orc
                         &mut self.conversation,
                     )
                     .await?;
-                self.mark_dirty();
-                self.flush_if_dirty().await?;
+                self.services.update(self.conversation.clone()).await?;
                 // Check if End hook added messages - if so, continue the loop
                 if self.conversation.len() > end_count_before {
                     // End hook added messages, sync context and continue
@@ -508,8 +441,7 @@ impl<S: AgentService + EnvironmentInfra<Config = forge_config::ForgeConfig>> Orc
             }
         }
 
-        self.mark_dirty();
-        self.flush_if_dirty().await?;
+        self.services.update(self.conversation.clone()).await?;
 
         // Signal Task Completion
         if is_complete {
@@ -521,58 +453,5 @@ impl<S: AgentService + EnvironmentInfra<Config = forge_config::ForgeConfig>> Orc
 
     fn get_model(&self) -> ModelId {
         self.agent.model.clone()
-    }
-
-    /// Mark the conversation as dirty so the next `flush_if_dirty` will
-    /// persist. Cheap (no I/O) — call whenever the conversation changes.
-    fn mark_dirty(&mut self) {
-        self.dirty = true;
-    }
-
-    /// Persist the conversation if `dirty` is set, then clear the flag. This is
-    /// the single chokepoint where `services.update` is called from `run`,
-    /// paired with `OrchestratorDropGuard` for crash-safety on
-    /// panic/cancellation.
-    async fn flush_if_dirty(&mut self) -> anyhow::Result<()> {
-        if self.dirty {
-            self.services.update(self.conversation.clone()).await?;
-            self.dirty = false;
-        }
-        Ok(())
-    }
-}
-
-/// Crash-safety guard for `Orchestrator::run`. If `run` exits via panic or
-/// cancellation before `flush_if_dirty` clears the dirty flag, the `Drop` impl
-/// performs a best-effort final `services.update`. Stores only the data needed
-/// for the final persist so it does not borrow the orchestrator and conflict
-/// with the rest of `run`'s `self.foo()` calls.
-struct OrchestratorDropGuard<S>
-where
-    S: AgentService + EnvironmentInfra<Config = forge_config::ForgeConfig>,
-{
-    dirty: bool,
-    conversation: Option<crate::domain::Conversation>,
-    services: Arc<S>,
-}
-
-impl<S> Drop for OrchestratorDropGuard<S>
-where
-    S: AgentService + EnvironmentInfra<Config = forge_config::ForgeConfig>,
-{
-    fn drop(&mut self) {
-        // Best-effort final persist on panic/cancellation. Uses block_in_place
-        // because Drop cannot be async; the underlying SQLite write is fast
-        // (a single statement), so this is acceptable.
-        if self.dirty
-            && let Some(conversation) = self.conversation.take()
-        {
-            let services = self.services.clone();
-            tokio::task::block_in_place(|| {
-                tokio::runtime::Handle::current().block_on(async {
-                    let _ = services.update(conversation).await;
-                })
-            });
-        }
     }
 }

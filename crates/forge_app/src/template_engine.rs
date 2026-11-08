@@ -88,8 +88,7 @@ fn create_handlebar() -> Handlebars<'static> {
                     false
                 };
 
-                // Write "true" or empty string for handlebars to interpret as
-                // boolean
+                // Write "true" or empty string for handlebars to interpret as boolean
                 if contains {
                     out.write("true")?;
                 }

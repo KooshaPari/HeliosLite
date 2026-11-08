@@ -43,8 +43,8 @@ impl<
 
         // Check if path is a directory (exists but is not a file)
         if self.infra.exists(&path).await? && !self.infra.is_file(&path).await? {
-            // List all entries (files and directories) efficiently without
-            // reading file contents
+            // List all entries (files and directories) efficiently without reading file
+            // contents
             let dir_entries = self.infra.list_directory_entries(&path).await?;
 
             // Create DirectoryEntry for each entry
@@ -173,12 +173,7 @@ pub mod tests {
         }
 
         async fn update_environment(&self, _ops: Vec<ConfigOperation>) -> anyhow::Result<()> {
-            // Test double: no environment to persist.
-            Ok(())
-        }
-
-        async fn database_stats(&self) -> anyhow::Result<forge_domain::HeliosdoctorDbStats> {
-            Ok(forge_domain::HeliosdoctorDbStats::default())
+            unimplemented!()
         }
     }
 
@@ -295,8 +290,7 @@ pub mod tests {
                 start_idx as u64 + filtered_lines.len() as u64
             };
 
-            // Compute hash from the full file content to match production
-            // behaviour
+            // Compute hash from the full file content to match production behaviour
             let content_hash = compute_hash(&full_content);
 
             Ok((
@@ -533,14 +527,6 @@ pub mod tests {
         fn get_env_vars(&self) -> BTreeMap<String, String> {
             self.env_service.get_env_vars()
         }
-
-        fn database_stats(
-            &self,
-        ) -> impl std::future::Future<Output = anyhow::Result<forge_domain::HeliosdoctorDbStats>> + Send
-        {
-            let env_service = self.env_service.clone();
-            async move { env_service.database_stats().await }
-        }
     }
 
     #[async_trait::async_trait]
@@ -600,8 +586,7 @@ pub mod tests {
         let attachment = attachments.first().unwrap();
         assert_eq!(attachment.path, "/test/file1.txt");
 
-        // Check that the content contains our original text and has range
-        // information
+        // Check that the content contains our original text and has range information
         assert!(attachment.content.contains("This is a text file content"));
     }
 
@@ -622,8 +607,8 @@ pub mod tests {
         let attachment = attachments.first().unwrap();
         assert_eq!(attachment.path, "/test/image.png");
 
-        // Base64 content should be the encoded mock binary content with proper
-        // data URI format
+        // Base64 content should be the encoded mock binary content with proper data URI
+        // format
         let expected_base64 =
             base64::engine::general_purpose::STANDARD.encode("mock-binary-content");
         assert_eq!(
@@ -649,8 +634,8 @@ pub mod tests {
         let attachment = attachments.first().unwrap();
         assert_eq!(attachment.path, "/test/image with spaces.jpg");
 
-        // Base64 content should be the encoded mock jpeg content with proper
-        // data URI format
+        // Base64 content should be the encoded mock jpeg content with proper data URI
+        // format
         let expected_base64 = base64::engine::general_purpose::STANDARD.encode("mock-jpeg-content");
         assert_eq!(
             attachment.content.as_image().unwrap().url().as_str(),
@@ -756,8 +741,7 @@ pub mod tests {
         let attachment = attachments.first().unwrap();
         assert_eq!(attachment.path, "/test/unknown.xyz");
 
-        // Check that the content contains our original text and has range
-        // information
+        // Check that the content contains our original text and has range information
         assert!(attachment.content.contains("Some content"));
     }
 
@@ -1117,8 +1101,7 @@ pub mod tests {
         let url = "@[/test/emptydir]";
         let attachments = chat_request.attachments(url).await.unwrap();
 
-        // Should return a single DirectoryListing attachment with empty files
-        // list
+        // Should return a single DirectoryListing attachment with empty files list
         assert_eq!(attachments.len(), 1);
         let attachment = attachments.first().unwrap();
 

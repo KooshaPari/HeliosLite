@@ -41,8 +41,7 @@ impl<F: FsReadService> FileChangeDetector<F> {
     ///   if unreadable)
     pub async fn detect(&self, metrics: &Metrics, parallel_file_reads: usize) -> Vec<FileChange> {
         let fs = self.fs_read_service.clone();
-        // Collect into owned data upfront so the stream futures are
-        // 'static-safe
+        // Collect into owned data upfront so the stream futures are 'static-safe
         let entries: Vec<(std::path::PathBuf, Option<String>)> = metrics
             .file_operations
             .iter()
@@ -332,8 +331,7 @@ mod tests {
         );
 
         // Even though displayed content differs from raw, the hash comparison
-        // uses the raw-based content_hash from ReadOutput, so no false
-        // positive.
+        // uses the raw-based content_hash from ReadOutput, so no false positive.
         let actual = detector.detect(&metrics, 64).await;
         let expected = vec![];
 

@@ -7,7 +7,6 @@ use forge_app::domain::{
 };
 use forge_app::{EnvironmentInfra, HttpInfra};
 use forge_domain::{BoxStream, ChatRepository, Provider};
-use forge_eventsource::is_sse_terminal;
 use forge_eventsource_stream::Eventsource;
 use forge_infra::sanitize_headers;
 use futures::StreamExt;
@@ -165,8 +164,7 @@ impl<T: HttpInfra> OpenAIResponsesProvider<T> {
         let mut request = oai::CreateResponse::from_domain(context)?;
         request.model = Some(model.as_str().to_string());
 
-        // Apply Codex-specific request adjustments via the transformer
-        // pipeline.
+        // Apply Codex-specific request adjustments via the transformer pipeline.
         if self.provider.id == forge_domain::ProviderId::CODEX {
             use forge_domain::Transformer;
             request = super::codex_transformer::CodexTransformer.transform(request);
@@ -220,7 +218,9 @@ impl<T: HttpInfra> OpenAIResponsesProvider<T> {
                 async move {
                     match event_result {
                         Ok(Event::Open) => None,
-                        Ok(Event::Message(msg)) if is_sse_terminal(&msg.data) => None,
+                        Ok(Event::Message(msg)) if ["[DONE]", ""].contains(&msg.data.as_str()) => {
+                            None
+                        }
                         Ok(Event::Message(msg)) => {
                             let result = serde_json::from_str::<
                                 super::response::ResponsesStreamEvent,
@@ -323,7 +323,7 @@ impl<T: HttpInfra> OpenAIResponsesProvider<T> {
             .eventsource()
             .filter_map(|event_result| async move {
                 match event_result {
-                    Ok(event) if is_sse_terminal(&event.data) => None,
+                    Ok(event) if ["[DONE]", ""].contains(&event.data.as_str()) => None,
                     Ok(event) => {
                         let result = serde_json::from_str::<super::response::ResponsesStreamEvent>(
                             &event.data,
@@ -700,57 +700,6 @@ impl<F: HttpInfra + EnvironmentInfra<Config = forge_config::ForgeConfig> + 'stat
     async fn models(&self, provider: Provider<Url>) -> anyhow::Result<Vec<Model>> {
         match provider.models().cloned() {
             Some(forge_domain::ModelSource::Hardcoded(models)) => Ok(models),
-            Some(forge_domain::ModelSource::Dynamic { url, fallback }) => {
-                let fetch_result = async {
-                    let provider_client =
-                        OpenAIResponsesProvider::new(provider.clone(), self.infra.clone());
-                    let headers = create_headers(provider_client.get_headers());
-                    let response = self
-                        .infra
-                        .http_get(&url, Some(headers))
-                        .await
-                        .with_context(|| format_http_context(None, "GET", &url))
-                        .with_context(|| "Failed to fetch models")?;
-
-                    let status = response.status();
-                    let ctx_message = format_http_context(Some(status), "GET", &url);
-                    let response_text = response
-                        .text()
-                        .await
-                        .with_context(|| ctx_message.clone())
-                        .with_context(|| "Failed to decode response into text")?;
-
-                    if !status.is_success() {
-                        anyhow::bail!("{}: {}", ctx_message, response_text);
-                    }
-
-                    let data: forge_app::dto::openai::ListModelResponse =
-                        serde_json::from_str(&response_text)
-                            .with_context(|| format_http_context(None, "GET", &url))
-                            .with_context(|| "Failed to deserialize models response")?;
-                    // Preserve server-side Model DTOs so the merge can
-                    // fill None gaps with curated metadata instead of
-                    // overriding the server values.
-                    Ok(data
-                        .data
-                        .into_iter()
-                        .map(forge_domain::Model::from)
-                        .collect())
-                }
-                .await;
-
-                match fetch_result {
-                    Ok(live) => Ok(Model::merge_live(live, fallback)),
-                    Err(error) => {
-                        tracing::warn!(
-                            error = ?error,
-                            provider = %provider.id,
-                            "Dynamic model fetch failed; falling back to curated list"
-                        );
-                        Ok(fallback)
-                    }
-                }
-            }
             Some(forge_domain::ModelSource::Url(url)) => {
                 let provider_client = OpenAIResponsesProvider::new(provider, self.infra.clone());
                 let headers = create_headers(provider_client.get_headers());
@@ -865,8 +814,8 @@ mod tests {
             Ok(request.send().await?)
         }
 
-        async fn http_delete(&self, url: &reqwest::Url) -> anyhow::Result<reqwest::Response> {
-            Ok(self.client.delete(url.clone()).send().await?)
+        async fn http_delete(&self, _url: &reqwest::Url) -> anyhow::Result<reqwest::Response> {
+            unimplemented!()
         }
 
         async fn http_eventsource(
@@ -908,10 +857,6 @@ mod tests {
             _ops: Vec<forge_domain::ConfigOperation>,
         ) -> anyhow::Result<()> {
             Ok(())
-        }
-
-        async fn database_stats(&self) -> anyhow::Result<forge_domain::HeliosdoctorDbStats> {
-            Ok(forge_domain::HeliosdoctorDbStats::default())
         }
     }
 

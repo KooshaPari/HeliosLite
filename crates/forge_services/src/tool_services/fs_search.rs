@@ -102,8 +102,8 @@ impl<W: WalkerInfra + FileReaderInfra + FileInfoInfra> ForgeFsSearch<W> {
         params: &FSSearch,
     ) -> anyhow::Result<Vec<PathBuf>> {
         // Build type matcher once if file_type is specified (for efficiency)
-        // Filter out empty strings that may arrive from LLM tool calls with
-        // nullable parameters
+        // Filter out empty strings that may arrive from LLM tool calls with nullable
+        // parameters
         let types_matcher =
             if let Some(file_type) = params.file_type.as_deref().filter(|s| !s.is_empty()) {
                 use ignore::types::TypesBuilder;
@@ -362,8 +362,8 @@ impl Sink for ContextSink {
     type Error = std::io::Error;
 
     fn matched(&mut self, _searcher: &Searcher, mat: &SinkMatch<'_>) -> Result<bool, Self::Error> {
-        // If we have a pending match, save it first (it's now complete with all
-        // after context)
+        // If we have a pending match, save it first (it's now complete with all after
+        // context)
         if let Some((line_num, line)) = self.current_match.take() {
             self.matches.push(Match {
                 path: self.path.clone(),
@@ -384,8 +384,8 @@ impl Sink for ContextSink {
             self.current_after_context.clear();
         }
 
-        // Store the current match (before_context is already accumulated,
-        // after_context will be added via context() calls)
+        // Store the current match (before_context is already accumulated, after_context
+        // will be added via context() calls)
         let line_num = mat.line_number().unwrap_or(0) as usize;
         let line = mat.bytes().to_str_lossy().trim_end().to_string();
         self.current_match = Some((line_num, line));
@@ -524,8 +524,8 @@ mod test {
 
     #[async_trait::async_trait]
     impl FileReaderInfra for MockInfra {
-        async fn read_utf8(&self, path: &Path) -> anyhow::Result<String> {
-            Ok(self.read(path).await?.to_str_lossy().to_string())
+        async fn read_utf8(&self, _path: &Path) -> anyhow::Result<String> {
+            unimplemented!()
         }
 
         fn read_batch_utf8(
@@ -544,49 +544,11 @@ mod test {
 
         async fn range_read_utf8(
             &self,
-            path: &Path,
-            start_line: u64,
-            end_line: u64,
+            _path: &Path,
+            _start_line: u64,
+            _end_line: u64,
         ) -> anyhow::Result<(String, forge_domain::FileInfo)> {
-            // Read the full content first, then apply line-range filtering.
-            let full_content = self.read_utf8(path).await?;
-            let all_lines: Vec<&str> = full_content.lines().collect();
-
-            let start_idx = start_line.saturating_sub(1) as usize;
-            let end_idx = if end_line > 0 {
-                std::cmp::min(end_line as usize, all_lines.len())
-            } else {
-                all_lines.len()
-            };
-
-            let filtered_lines = if start_idx < all_lines.len() {
-                &all_lines[start_idx..end_idx]
-            } else {
-                &[]
-            };
-
-            let filtered_content = filtered_lines.join("\n");
-            let actual_start = if filtered_lines.is_empty() {
-                0
-            } else {
-                start_line
-            };
-            let actual_end = if filtered_lines.is_empty() {
-                0
-            } else {
-                start_idx as u64 + filtered_lines.len() as u64
-            };
-
-            let content_hash = forge_app::utils::compute_hash(&full_content);
-            Ok((
-                filtered_content,
-                forge_domain::FileInfo::new(
-                    actual_start,
-                    actual_end,
-                    all_lines.len() as u64,
-                    content_hash,
-                ),
-            ))
+            unimplemented!()
         }
     }
 
@@ -609,8 +571,8 @@ mod test {
             Ok(tokio::fs::metadata(path).await.is_ok())
         }
 
-        async fn file_size(&self, path: &Path) -> anyhow::Result<u64> {
-            Ok(tokio::fs::metadata(path).await?.len())
+        async fn file_size(&self, _path: &Path) -> anyhow::Result<u64> {
+            unreachable!()
         }
     }
 

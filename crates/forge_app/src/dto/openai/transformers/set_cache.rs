@@ -24,8 +24,7 @@ impl Transformer for SetCache {
                 return request;
             }
 
-            // Remove cache control from second-to-last message (when there are
-            // 3+ messages)
+            // Remove cache control from second-to-last message (when there are 3+ messages)
             if len >= 3
                 && let Some(message) = messages.get_mut(len - 2)
                 && let Some(ref content) = message.content

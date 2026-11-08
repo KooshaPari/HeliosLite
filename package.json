@@ -1,7 +1,7 @@
 {
   "name": "forge-code-evals",
   "private": true,
-  "version": "2.13.21",
+  "version": "1.0.0",
   "description": "",
   "license": "ISC",
   "author": "Tushar Mathur <tusharmath@gmail.com>",
@@ -11,11 +11,11 @@
     "test:bounty": "tsx --test .github/scripts/bounty/tests/*.test.ts",
     "bounty:sync-issue": "tsx .github/scripts/bounty/src/sync-issue.ts",
     "bounty:sync-pr": "tsx .github/scripts/bounty/src/sync-pr.ts",
-    "bounty:sync-all-issues": "tsx .github/scripts/bounty/src/sync-all-issues.ts",
-    "test:eval-oracle": "tsx --test benchmarks/oracle-policy.test.ts"
+    "bounty:sync-all-issues": "tsx .github/scripts/bounty/src/sync-all-issues.ts"
   },
   "dependencies": {
     "@ai-sdk/google-vertex": "^5.0.0",
+    "@types/handlebars": "^4.0.40",
     "@types/node": "^24.10.1",
     "@types/tmp": "^0.2.6",
     "@types/yargs": "^17.0.35",
@@ -33,6 +33,5 @@
     "yaml": "^2.8.3",
     "yargs": "^18.0.0",
     "zod": "^4.0.0"
-  },
-  "packageManager": "npm@10"
+  }
 }
