@@ -6982,32 +6982,35 @@ dependencies = [
 [[package]]
 name = "phenotype-health"
 version = "0.2.0"
+source = "git+https://github.com/KooshaPari/PhenoShared.git?rev=68beca26#68beca269720d582a408dc5bbb62982fe86964af"
 dependencies = [
  "chrono",
  "serde",
- "thiserror 2.0.19",
+ "thiserror 2.0.20",
  "tokio",
 ]
 
 [[package]]
 name = "phenotype-observability"
 version = "0.3.10"
+source = "git+https://github.com/KooshaPari/PhenoShared.git?rev=68beca26#68beca269720d582a408dc5bbb62982fe86964af"
 dependencies = [
  "chrono",
  "serde",
  "serde_json",
- "thiserror 2.0.19",
+ "thiserror 2.0.20",
  "uuid",
 ]
 
 [[package]]
 name = "phenotype-telemetry"
 version = "0.3.10"
+source = "git+https://github.com/KooshaPari/PhenoShared.git?rev=68beca26#68beca269720d582a408dc5bbb62982fe86964af"
 dependencies = [
  "chrono",
  "serde",
  "serde_json",
- "thiserror 2.0.19",
+ "thiserror 2.0.20",
  "tracing",
  "tracing-subscriber",
 ]
