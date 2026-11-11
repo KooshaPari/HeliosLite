@@ -366,6 +366,102 @@ fn collect_like_source(
 }
 
 impl ConversationRepositoryImpl {
+    pub(crate) async fn import_forge_db_inner(
+        &self,
+        source: PathBuf,
+        options: &forge_domain::ForgeImportOptions,
+        require_valid_context: bool,
+    ) -> anyhow::Result<ForgeImportReport> {
+        let options = options.clone();
+        self.run_with_connection(move |connection, wid| {
+            use diesel::Connection;
+            use diesel::sql_types::Text;
+
+            if !source.is_file() {
+                anyhow::bail!("source database not found: {}", source.display());
+            }
+
+            // Open the source database read-only and enable query_only as a
+            // second guard. SQLite may still use WAL coordination sidecars.
+            let source_url = source_readonly_uri(&source)?;
+            let mut src = diesel::sqlite::SqliteConnection::establish(&source_url)?;
+            diesel::sql_query("PRAGMA query_only = ON;").execute(&mut src)?;
+            diesel::sql_query("PRAGMA busy_timeout = 5000;").execute(&mut src)?;
+
+            // Detect the source schema before reading anything.
+            #[derive(diesel::QueryableByName)]
+            struct ColumnName {
+                #[diesel(sql_type = Text)]
+                name: String,
+            }
+            let columns: Vec<ColumnName> =
+                diesel::sql_query("PRAGMA table_info(conversations)").load(&mut src)?;
+            let column_names: Vec<&str> =
+                columns.iter().map(|column| column.name.as_str()).collect();
+
+            if column_names
+                .iter()
+                .any(|name| *name == "is_compressed" || *name == "context_zstd")
+            {
+                anyhow::bail!(
+                    "source database {} is already a heliosLite/fork-schema database; \
+                     there is nothing to import",
+                    source.display()
+                );
+            }
+            for required in ["conversation_id", "context", "created_at"] {
+                if !column_names.contains(&required) {
+                    anyhow::bail!(
+                        "source database {} is not an official forge conversations \
+                         database (missing column `{required}`)",
+                        source.display()
+                    );
+                }
+            }
+
+            let rows: Vec<DecodedSourceRow> = diesel::sql_query(
+                "SELECT conversation_id, title, context, created_at, updated_at, metrics \
+                 FROM conversations",
+            )
+            .load(&mut src)?;
+
+            let mut report = ForgeImportReport {
+                source_total: rows.len(),
+                dry_run: options.dry_run,
+                ..Default::default()
+            };
+
+            // Wrap the inserts in a single transaction so a partial import
+            // cannot leave the destination DB in an inconsistent state.
+            // dry_run skips BEGIN entirely (nothing is written).
+            if !options.dry_run {
+                connection.transaction::<_, anyhow::Error, _>(|conn| {
+                    import_rows(
+                        conn,
+                        wid,
+                        &rows,
+                        &options,
+                        require_valid_context,
+                        &mut report,
+                    );
+                    Ok(())
+                })?;
+            } else {
+                import_rows(
+                    connection,
+                    wid,
+                    &rows,
+                    &options,
+                    require_valid_context,
+                    &mut report,
+                );
+            }
+
+            Ok(report)
+        })
+        .await
+    }
+
     pub fn new(pool: Arc<DatabasePool>, workspace_id: WorkspaceHash) -> Self {
         Self { pool, wid: workspace_id }
     }
@@ -1507,82 +1603,7 @@ impl ConversationRepository for ConversationRepositoryImpl {
         source: PathBuf,
         options: &forge_domain::ForgeImportOptions,
     ) -> anyhow::Result<ForgeImportReport> {
-        let options = options.clone();
-        self.run_with_connection(move |connection, wid| {
-            use diesel::Connection;
-            use diesel::sql_types::Text;
-
-            if !source.is_file() {
-                anyhow::bail!("source database not found: {}", source.display());
-            }
-
-            // Open the source database and immediately enable SQLite's
-            // `query_only` mode on this connection. No write can succeed
-            // after this point, which guarantees the source is never
-            // modified (a "never writes back" invariant).
-            let source_url = source.to_string_lossy().to_string();
-            let mut src = diesel::sqlite::SqliteConnection::establish(&source_url)?;
-            diesel::sql_query("PRAGMA query_only = ON;").execute(&mut src)?;
-            diesel::sql_query("PRAGMA busy_timeout = 5000;").execute(&mut src)?;
-
-            // Detect the source schema before reading anything.
-            #[derive(diesel::QueryableByName)]
-            struct ColumnName {
-                #[diesel(sql_type = Text)]
-                name: String,
-            }
-            let columns: Vec<ColumnName> =
-                diesel::sql_query("PRAGMA table_info(conversations)").load(&mut src)?;
-            let column_names: Vec<&str> =
-                columns.iter().map(|column| column.name.as_str()).collect();
-
-            if column_names
-                .iter()
-                .any(|name| *name == "is_compressed" || *name == "context_zstd")
-            {
-                anyhow::bail!(
-                    "source database {} is already a heliosLite/fork-schema database; \
-                     there is nothing to import",
-                    source.display()
-                );
-            }
-            for required in ["conversation_id", "context", "created_at"] {
-                if !column_names.contains(&required) {
-                    anyhow::bail!(
-                        "source database {} is not an official forge conversations \
-                         database (missing column `{required}`)",
-                        source.display()
-                    );
-                }
-            }
-
-            let rows: Vec<DecodedSourceRow> = diesel::sql_query(
-                "SELECT conversation_id, title, context, created_at, updated_at, metrics \
-                 FROM conversations",
-            )
-            .load(&mut src)?;
-
-            let mut report = ForgeImportReport {
-                source_total: rows.len(),
-                dry_run: options.dry_run,
-                ..Default::default()
-            };
-
-            // Wrap the inserts in a single transaction so a partial import
-            // cannot leave the destination DB in an inconsistent state.
-            // dry_run skips BEGIN entirely (nothing is written).
-            if !options.dry_run {
-                connection.transaction::<_, anyhow::Error, _>(|conn| {
-                    import_rows(conn, wid, &rows, &options, &mut report);
-                    Ok(())
-                })?;
-            } else {
-                import_rows(connection, wid, &rows, &options, &mut report);
-            }
-
-            Ok(report)
-        })
-        .await
+        self.import_forge_db_inner(source, options, false).await
     }
 
     async fn export_forge_db(
@@ -2065,6 +2086,20 @@ impl ConversationRepository for ConversationRepositoryImpl {
     }
 }
 
+fn source_readonly_uri(path: &std::path::Path) -> anyhow::Result<String> {
+    let absolute = std::path::absolute(path)?;
+    let mut uri = url::Url::from_file_path(&absolute)
+        .map_err(|_| anyhow::anyhow!("invalid source database path: {}", path.display()))?;
+    uri.query_pairs_mut().append_pair("mode", "ro");
+    if uri.host_str().is_some() {
+        // SQLite accepts UNC paths in the path component without requiring
+        // the optional SQLITE_ALLOW_URI_AUTHORITY build flag.
+        Ok(uri.as_str().replacen("file://", "file:////", 1))
+    } else {
+        Ok(uri.into())
+    }
+}
+
 /// Shared row loop used by both the transactional and dry-run import paths.
 /// Performs per-row decoding (idempotency lookup, context parsing) and either
 /// inserts the row (transactional path) or just counts the outcome (dry-run).
@@ -2073,6 +2108,7 @@ fn import_rows(
     wid: WorkspaceHash,
     rows: &[DecodedSourceRow],
     options: &forge_domain::ForgeImportOptions,
+    require_valid_context: bool,
     report: &mut ForgeImportReport,
 ) {
     for row in rows {
@@ -2087,11 +2123,21 @@ fn import_rows(
         // Idempotency: skip conversations that already exist in either the
         // write DB or the legacy DB (via `conversations_all`) instead of
         // overwriting them.
-        let existing: i64 = conversations_all::table
+        let existing: i64 = match conversations_all::table
             .filter(conversations_all::conversation_id.eq(&row.conversation_id))
             .count()
             .get_result(connection)
-            .unwrap_or(0);
+        {
+            Ok(count) => count,
+            Err(error) => {
+                eprintln!(
+                    "Failed to check conversation {}: {}",
+                    row.conversation_id, error
+                );
+                report.errors += 1;
+                continue;
+            }
+        };
         if existing > 0 {
             report.skipped_existing += 1;
             if options.verbose {
@@ -2101,23 +2147,34 @@ fn import_rows(
         }
 
         // Parse the plain-text context with the heliosLite record type.
-        // Rows that fail to parse are still imported (title + timestamps)
-        // so the session remains visible; the failure is reported.
+        // By default, parse failures remain visible as title-only rows.
+        // Strict callers can leave them unmodified for a later retry.
         let mut context_parse_failed = false;
         let context = match row.context.as_deref() {
             Some(json) if !json.trim().is_empty() => {
                 let parsed = serde_json::from_str::<ContextRecord>(json)
                     .ok()
                     .and_then(|record| Context::try_from(record).ok());
-                if parsed.is_none() {
+                if parsed.is_none()
+                    || (require_valid_context
+                        && parsed
+                            .as_ref()
+                            .is_some_and(|ctx| ctx.messages.is_empty() && ctx.initiator.is_none()))
+                {
                     context_parse_failed = true;
                 }
                 parsed
             }
-            _ => None,
+            _ => {
+                context_parse_failed = require_valid_context;
+                None
+            }
         };
         if context_parse_failed {
             report.context_parse_failed += 1;
+            if require_valid_context {
+                continue;
+            }
         }
 
         let created_at =
@@ -2150,6 +2207,10 @@ fn import_rows(
         }
 
         let record = ConversationRecord::new(conversation, wid);
+        if require_valid_context && record.context.is_none() && record.context_zstd.is_none() {
+            report.errors += 1;
+            continue;
+        }
         match diesel::insert_into(conversations::table)
             .values(&record)
             .execute(connection)
@@ -4027,7 +4088,9 @@ mod tests {
 
         // A well-formed plain-text context serialized through the record type
         // exactly as the importer expects to read it back.
-        let well_formed = ContextRecord::from(&forge_domain::Context::default());
+        let fixture_context = forge_domain::Context::default()
+            .messages(vec![ContextMessage::user("source message", None).into()]);
+        let well_formed = ContextRecord::from(&fixture_context);
         insert(
             "11111111-1111-1111-1111-111111111111",
             "imported fully",
@@ -4075,6 +4138,170 @@ mod tests {
         assert!(fetched.is_some(), "imported row should be readable");
         assert_eq!(fetched.unwrap().title.as_deref(), Some("imported fully"));
 
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_readonly_import_observes_live_wal() -> anyhow::Result<()> {
+        use diesel::Connection;
+
+        let temp = tempfile::tempdir()?;
+        let source = temp.path().join("with spaces #wal.db");
+        seed_official_source_db(&source);
+        let mut writer = diesel::sqlite::SqliteConnection::establish(&source.to_string_lossy())?;
+        diesel::sql_query("PRAGMA journal_mode=WAL").execute(&mut writer)?;
+        let fixture_context = forge_domain::Context::default()
+            .messages(vec![ContextMessage::user("wal message", None).into()]);
+        let context = serde_json::to_string(&ContextRecord::from(&fixture_context))?;
+        diesel::sql_query("INSERT INTO conversations (conversation_id, title, context, created_at) VALUES (?, ?, ?, ?)")
+            .bind::<diesel::sql_types::Text, _>("44444444-4444-4444-4444-444444444444")
+            .bind::<diesel::sql_types::Text, _>("wal row")
+            .bind::<diesel::sql_types::Text, _>(context)
+            .bind::<diesel::sql_types::Text, _>("2026-08-05 10:00:00")
+            .execute(&mut writer)?;
+        let repo = repository()?;
+        let report = repo
+            .import_forge_db_inner(source, &Default::default(), true)
+            .await?;
+        assert_eq!(report.imported, 2);
+        let id = ConversationId::parse("44444444-4444-4444-4444-444444444444")?;
+        assert_eq!(
+            repo.get_conversation(&id).await?.unwrap().title.as_deref(),
+            Some("wal row")
+        );
+        drop(writer);
+        Ok(())
+    }
+
+    #[test]
+    fn test_import_readonly_source_open_does_not_create_missing_database() -> anyhow::Result<()> {
+        use diesel::Connection;
+
+        let temp = tempfile::tempdir()?;
+        let missing = temp.path().join("missing #source.db");
+        let uri = source_readonly_uri(&missing)?;
+        assert!(diesel::sqlite::SqliteConnection::establish(&uri).is_err());
+        assert!(!missing.exists());
+        Ok(())
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn test_import_unc_uri_uses_path_not_authority() -> anyhow::Result<()> {
+        let uri = source_readonly_uri(std::path::Path::new(r"\\server\share\a #b.db"))?;
+        assert_eq!(uri, "file:////server/share/a%20%23b.db?mode=ro");
+        Ok(())
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn test_import_from_opt_in_unc_share() -> anyhow::Result<()> {
+        let Some(share) = std::env::var_os("FORGE_TEST_UNC_C_DRIVE") else {
+            return Ok(());
+        };
+        let temp = tempfile::tempdir()?;
+        let source = temp.path().join("unc #source.db");
+        seed_official_source_db(&source);
+        let relative = source.strip_prefix("C:/")?;
+        let unc = std::path::PathBuf::from(share).join(relative);
+        let repo = repository()?;
+        let report = repo
+            .import_forge_db_inner(unc, &Default::default(), true)
+            .await?;
+        assert_eq!(report.imported, 1);
+        let id = ConversationId::parse("11111111-1111-1111-1111-111111111111")?;
+        assert_eq!(
+            repo.get_conversation(&id)
+                .await?
+                .unwrap()
+                .context
+                .unwrap()
+                .messages
+                .len(),
+            1
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_strict_import_defers_empty_context() -> anyhow::Result<()> {
+        use diesel::Connection;
+
+        let temp = tempfile::tempdir()?;
+        let source = temp.path().join("official.db");
+        seed_official_source_db(&source);
+        let mut writer = diesel::sqlite::SqliteConnection::establish(&source.to_string_lossy())?;
+        let empty = serde_json::to_string(&ContextRecord::from(&forge_domain::Context::default()))?;
+        diesel::sql_query("UPDATE conversations SET context = ? WHERE conversation_id = ?")
+            .bind::<diesel::sql_types::Text, _>(empty)
+            .bind::<diesel::sql_types::Text, _>("11111111-1111-1111-1111-111111111111")
+            .execute(&mut writer)?;
+        drop(writer);
+        let repo = repository()?;
+        let report = repo
+            .import_forge_db_inner(source, &Default::default(), true)
+            .await?;
+        assert_eq!((report.imported, report.context_parse_failed), (0, 3));
+        let id = ConversationId::parse("11111111-1111-1111-1111-111111111111")?;
+        assert!(repo.get_conversation(&id).await?.is_none());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_strict_import_retries_corrected_context() -> anyhow::Result<()> {
+        use diesel::Connection;
+
+        let temp = tempfile::tempdir()?;
+        let source = temp.path().join("official.db");
+        seed_official_source_db(&source);
+        let before = std::fs::read(&source)?;
+        let repo = repository()?;
+        let options = forge_domain::ForgeImportOptions::default();
+        let first = repo
+            .import_forge_db_inner(source.clone(), &options, true)
+            .await?;
+        assert_eq!(
+            (first.imported, first.context_parse_failed, first.invalid_id),
+            (1, 2, 1)
+        );
+        assert_eq!(std::fs::read(&source)?, before);
+        let id = ConversationId::parse("33333333-3333-3333-3333-333333333333")?;
+        assert!(repo.get_conversation(&id).await?.is_none());
+
+        let mut connection =
+            diesel::sqlite::SqliteConnection::establish(&source.to_string_lossy())?;
+        let fixture_context = forge_domain::Context::default()
+            .messages(vec![ContextMessage::user("recovered message", None).into()]);
+        let context = serde_json::to_string(&ContextRecord::from(&fixture_context))?;
+        diesel::sql_query("UPDATE conversations SET context = ? WHERE conversation_id = ?")
+            .bind::<diesel::sql_types::Text, _>(context)
+            .bind::<diesel::sql_types::Text, _>("33333333-3333-3333-3333-333333333333")
+            .execute(&mut connection)?;
+        diesel::sql_query("UPDATE conversations SET title = 'updated upstream' WHERE conversation_id = '11111111-1111-1111-1111-111111111111'")
+            .execute(&mut connection)?;
+        drop(connection);
+
+        let second = repo.import_forge_db_inner(source, &options, true).await?;
+        assert_eq!(
+            (
+                second.imported,
+                second.skipped_existing,
+                second.context_parse_failed
+            ),
+            (1, 1, 1)
+        );
+        let recovered = repo.get_conversation(&id).await?.unwrap();
+        assert!(recovered.context.is_some());
+        assert_eq!(recovered.context.unwrap().messages.len(), 1);
+        let existing_id = ConversationId::parse("11111111-1111-1111-1111-111111111111")?;
+        assert_eq!(
+            repo.get_conversation(&existing_id)
+                .await?
+                .unwrap()
+                .title
+                .as_deref(),
+            Some("imported fully")
+        );
         Ok(())
     }
 
