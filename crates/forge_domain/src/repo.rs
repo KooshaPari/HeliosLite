@@ -43,8 +43,8 @@ pub struct ForgeImportReport {
     pub skipped_existing: usize,
     /// Rows skipped because `conversation_id` was not parseable.
     pub invalid_id: usize,
-    /// Conversations imported without a context blob because the source
-    /// context could not be parsed into the heliosLite schema.
+    /// Rows with unparseable context, or missing/empty context in background
+    /// discovery. Default imports retain unparseable contexts as title-only rows.
     pub context_parse_failed: usize,
     /// Rows skipped due to insert or read errors.
     pub errors: usize,

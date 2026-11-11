@@ -205,7 +205,7 @@ impl ForgeAPI<ForgeServices<ForgeRepo<ForgeInfra>>, ForgeRepo<ForgeInfra>> {
     /// Polls the forge DB every `UPSTREAM_SYNC_DEFAULT_SECS` (override via
     /// `FORGE_SYNC_INTERVAL_SECS`, disable via `FORGE_SYNC_DISABLED=1` or
     /// `FORGE_SYNC_INTERVAL_SECS=0`) and imports new conversations
-    /// idempotently.
+    /// idempotently. Existing IDs are never refreshed or overwritten.
     fn spawn_upstream_sync_task(
         repo: Arc<ForgeRepo<ForgeInfra>>,
         infra: &ForgeInfra,
@@ -262,45 +262,36 @@ impl ForgeAPI<ForgeServices<ForgeRepo<ForgeInfra>>, ForgeRepo<ForgeInfra>> {
             }
 
             let interval = Duration::from_secs(sync_secs);
-            let mut last_mtime: Option<std::time::SystemTime> = None;
-
+            // A SQLite WAL can change without changing the main database mtime.
+            // Scan every interval; the importer skips IDs already present.
             loop {
-                // Cheap mtime check to avoid opening the DB when unchanged.
-                let current_mtime = std::fs::metadata(&source_db)
-                    .and_then(|m| m.modified())
-                    .ok();
-
-                let should_sync = match (current_mtime, &last_mtime) {
-                    (Some(cur), Some(last)) => cur != *last,
-                    (Some(_), None) => true,
-                    (None, _) => false, // source doesn't exist yet
-                };
-
-                if should_sync {
-                    if current_mtime.is_some() {
-                        last_mtime = current_mtime;
-                    }
-                    match repo.import_forge_db(source_db.clone()).await {
+                if source_db.is_file() {
+                    match repo.import_forge_db_for_background(source_db.clone()).await {
+                        Ok(report)
+                            if report.errors > 0
+                                || report.invalid_id > 0
+                                || report.context_parse_failed > 0 =>
+                        {
+                            warn!(
+                                errors = report.errors,
+                                invalid_id = report.invalid_id,
+                                context_parse_failed = report.context_parse_failed,
+                                imported = report.imported,
+                                skipped = report.skipped_existing,
+                                "Upstream import incomplete; remaining rows will be retried"
+                            );
+                        }
                         Ok(report) => {
                             if report.imported > 0 {
                                 debug!(
                                     imported = report.imported,
                                     skipped = report.skipped_existing,
                                     source_total = report.source_total,
-                                    "Upstream sync imported new conversations"
+                                    "Upstream import scan completed"
                                 );
                             }
                         }
-                        Err(error) => {
-                            // Expected when source is missing or is already a
-                            // fork-schema DB (e.g. no upstream forge installed).
-                            let msg = error.to_string();
-                            if !msg.contains("source database not found")
-                                && !msg.contains("already a heliosLite/fork-schema")
-                            {
-                                warn!(%error, "Upstream sync failed");
-                            }
-                        }
+                        Err(error) => warn!(%error, "Upstream import failed; will retry"),
                     }
                 }
 
