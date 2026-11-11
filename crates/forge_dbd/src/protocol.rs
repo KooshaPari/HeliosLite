@@ -19,6 +19,9 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 /// workspace processes.
 pub const MUTATION_PROTOCOL_VERSION: u16 = 2;
 
+/// Version three binds a mutation to a logical destination database token.
+pub const BOUND_MUTATION_PROTOCOL_VERSION: u16 = 3;
+
 /// The version implicitly reported by a Health response that predates the
 /// explicit `protocol_version` field.
 pub const LEGACY_PROTOCOL_VERSION: u16 = 1;
@@ -75,6 +78,12 @@ pub enum Request {
     /// health negotiation before it sends this variant.
     MutationV2 {
         workspace_id: i64,
+        mutation: ConversationMutation,
+    },
+    /// A mutation scoped to a persisted logical database binding.
+    MutationV3 {
+        workspace_id: i64,
+        database_token: String,
         mutation: ConversationMutation,
     },
     /// Deletion with ledger safeguards. Older daemons reject this unknown variant.

@@ -58,7 +58,7 @@ mod integration_tests {
     }
 
     #[test]
-    fn test_import_ledger_migration_rollback_preserves_tombstone() -> Result<()> {
+    fn test_latest_migration_rollback_preserves_tombstone() -> Result<()> {
         use diesel_migrations::MigrationHarness;
         let pool = DatabasePool::in_memory()?;
         let mut conn = pool.get_connection()?;
@@ -67,6 +67,28 @@ mod integration_tests {
             .execute(&mut *conn)?;
         let error = conn.revert_last_migration(crate::database::MIGRATIONS);
         assert!(error.is_err());
+        let row = diesel::sql_query(
+            "SELECT state AS name FROM forge_import_ledger WHERE conversation_id = 'deleted-id'",
+        )
+        .get_result::<StringResult>(&mut *conn)?;
+        assert_eq!(row.name, "deleted");
+        Ok(())
+    }
+
+    #[test]
+    fn test_import_ledger_down_sql_preserves_tombstone() -> Result<()> {
+        use diesel::connection::SimpleConnection;
+        let pool = DatabasePool::in_memory()?;
+        let mut conn = pool.get_connection()?;
+        diesel::sql_query("INSERT INTO conversations (conversation_id, workspace_id, created_at) VALUES ('deleted-id', 0, CURRENT_TIMESTAMP)").execute(&mut *conn)?;
+        diesel::sql_query("DELETE FROM conversations WHERE conversation_id = 'deleted-id'")
+            .execute(&mut *conn)?;
+        let result = conn.transaction::<_, diesel::result::Error, _>(|c| {
+            c.batch_execute(include_str!(
+                "migrations/2026-11-11-120000_forge_import_ledger/down.sql"
+            ))
+        });
+        assert!(result.is_err());
         let row = diesel::sql_query(
             "SELECT state AS name FROM forge_import_ledger WHERE conversation_id = 'deleted-id'",
         )
@@ -104,6 +126,47 @@ mod integration_tests {
         );
         let owner = diesel::sql_query("SELECT CAST(workspace_id AS TEXT) AS name FROM forge_import_ledger WHERE conversation_id = 'conflict-id'").get_result::<StringResult>(&mut *conn)?;
         assert_eq!(owner.name, "7");
+        Ok(())
+    }
+
+    #[test]
+    fn test_daemon_binding_is_unique_immutable_and_preserved_on_rollback() -> Result<()> {
+        use diesel_migrations::MigrationHarness;
+        let first = DatabasePool::in_memory()?;
+        let second = DatabasePool::in_memory()?;
+        let mut a = first.get_connection()?;
+        let mut b = second.get_connection()?;
+        let query = "SELECT token AS name FROM forge_daemon_binding WHERE singleton = 1";
+        let token_a = diesel::sql_query(query)
+            .get_result::<StringResult>(&mut *a)?
+            .name;
+        let token_b = diesel::sql_query(query)
+            .get_result::<StringResult>(&mut *b)?
+            .name;
+        assert_eq!(token_a.len(), 64);
+        assert_ne!(token_a, token_b);
+        assert!(
+            diesel::sql_query(
+                "UPDATE forge_daemon_binding SET token = 'replacement' WHERE singleton = 1"
+            )
+            .execute(&mut *a)
+            .is_err()
+        );
+        assert!(
+            diesel::sql_query("DELETE FROM forge_daemon_binding")
+                .execute(&mut *a)
+                .is_err()
+        );
+        assert!(
+            a.revert_last_migration(crate::database::MIGRATIONS)
+                .is_err()
+        );
+        assert_eq!(
+            diesel::sql_query(query)
+                .get_result::<StringResult>(&mut *a)?
+                .name,
+            token_a
+        );
         Ok(())
     }
 

@@ -105,6 +105,18 @@ enum DaemonWriteOutcome {
 }
 
 impl DaemonConversationRepository {
+    fn daemon_routing_available(&self) -> anyhow::Result<bool> {
+        let path = self.inner.daemon_database_path();
+        if path == std::path::Path::new(":memory:") || !path.is_absolute() {
+            return Ok(false);
+        }
+        anyhow::ensure!(
+            path.is_absolute() && path.is_file(),
+            "daemon routing requires an existing absolute database path"
+        );
+        Ok(true)
+    }
+
     pub fn new(
         inner: Arc<ConversationRepositoryImpl>,
         socket_path: PathBuf,
@@ -296,11 +308,7 @@ impl DaemonConversationRepository {
     /// Returns `false` (after logging) when the binary cannot be spawned,
     /// e.g. `FORGE_DBD_BIN` points at a missing file.
     ///
-    /// The child inherits `FORGE_WRITE_DB_PATH` when the parent has it set,
-    /// so the daemon writes to the same database as the client, and
-    /// `FORGE_DBD_SOCKET` when set, so a daemon bound to a custom socket path
-    /// is reachable at the same place the client expects it (both sides honor
-    /// the variable; the default `~/.forge/.forge.db.sock` is used when unset).
+    /// The child receives the repository's resolved write path and socket path.
     fn spawn_daemon(&self) -> bool {
         #[cfg(test)]
         if self.test_spawn_succeeds {
@@ -311,13 +319,13 @@ impl DaemonConversationRepository {
             .dbd_bin
             .clone()
             .unwrap_or_else(|| PathBuf::from("forge_dbd"));
-        let mut cmd = std::process::Command::new(&bin);
-        if let Ok(write_db) = std::env::var("FORGE_WRITE_DB_PATH") {
-            cmd.env("FORGE_WRITE_DB_PATH", write_db);
-        }
-        if let Ok(socket) = std::env::var("FORGE_DBD_SOCKET") {
-            cmd.env("FORGE_DBD_SOCKET", socket);
-        }
+        let mut cmd = match self.daemon_command(&bin) {
+            Ok(cmd) => cmd,
+            Err(error) => {
+                warn!(error = %error, "cannot resolve daemon database path; using direct storage");
+                return false;
+            }
+        };
         cmd.stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null());
         match cmd.spawn() {
@@ -338,6 +346,22 @@ impl DaemonConversationRepository {
             }
         }
     }
+
+    fn daemon_command(&self, bin: &std::path::Path) -> anyhow::Result<std::process::Command> {
+        let database = resolve_daemon_database_path(self.inner.daemon_database_path())?;
+        let mut cmd = std::process::Command::new(bin);
+        cmd.env("FORGE_WRITE_DB_PATH", database);
+        cmd.env("FORGE_DBD_SOCKET", &self.socket_path);
+        Ok(cmd)
+    }
+}
+
+fn resolve_daemon_database_path(configured: &std::path::Path) -> anyhow::Result<PathBuf> {
+    anyhow::ensure!(
+        configured.is_absolute() && configured.is_file(),
+        "daemon spawn requires an existing absolute database path"
+    );
+    Ok(configured.canonicalize()?)
 }
 
 /// Resolves the daemon binary path from the environment, mirroring
@@ -364,9 +388,17 @@ impl ConversationRepository for DaemonConversationRepository {
     // -----------------------------------------------------------------------
 
     async fn upsert_conversation(&self, conversation: Conversation) -> anyhow::Result<()> {
+        if !self.daemon_routing_available()? {
+            return self.inner.upsert_conversation(conversation).await;
+        }
+        if !self.inner.daemon_has_local_owned(&conversation.id).await? {
+            return self.inner.upsert_conversation(conversation).await;
+        }
+        let database_token = self.inner.daemon_database_token().await?;
         self.write_or_fallback(
-            Request::MutationV2 {
+            Request::MutationV3 {
                 workspace_id: self.inner.workspace_id(),
+                database_token,
                 mutation: ConversationMutation::UpsertConversation {
                     conversation: conversation.clone(),
                     workspace_id: None,
@@ -378,9 +410,17 @@ impl ConversationRepository for DaemonConversationRepository {
     }
 
     async fn upsert_conversation_ref(&self, conversation: &Conversation) -> anyhow::Result<()> {
+        if !self.daemon_routing_available()? {
+            return self.inner.upsert_conversation_ref(conversation).await;
+        }
+        if !self.inner.daemon_has_local_owned(&conversation.id).await? {
+            return self.inner.upsert_conversation_ref(conversation).await;
+        }
+        let database_token = self.inner.daemon_database_token().await?;
         self.write_or_fallback(
-            Request::MutationV2 {
+            Request::MutationV3 {
                 workspace_id: self.inner.workspace_id(),
+                database_token,
                 mutation: ConversationMutation::UpsertConversationRef {
                     conversation: conversation.clone(),
                     workspace_id: None,
@@ -396,9 +436,23 @@ impl ConversationRepository for DaemonConversationRepository {
         conversation_id: &ConversationId,
         new_parent_id: Option<&ConversationId>,
     ) -> anyhow::Result<()> {
+        if !self.daemon_routing_available()? {
+            return self
+                .inner
+                .update_parent_id(conversation_id, new_parent_id)
+                .await;
+        }
+        if !self.inner.daemon_has_local_owned(conversation_id).await? {
+            return self
+                .inner
+                .update_parent_id(conversation_id, new_parent_id)
+                .await;
+        }
+        let database_token = self.inner.daemon_database_token().await?;
         self.write_or_fallback(
-            Request::MutationV2 {
+            Request::MutationV3 {
                 workspace_id: self.inner.workspace_id(),
+                database_token,
                 mutation: ConversationMutation::UpdateParentId {
                     conversation_id: *conversation_id,
                     new_parent_id: new_parent_id.cloned(),
@@ -410,6 +464,9 @@ impl ConversationRepository for DaemonConversationRepository {
     }
 
     async fn delete_conversation(&self, conversation_id: &ConversationId) -> anyhow::Result<()> {
+        if !self.daemon_routing_available()? {
+            return self.inner.delete_conversation(conversation_id).await;
+        }
         self.write_or_fallback(
             Request::DeleteWithLedger {
                 workspace_id: self.inner.workspace_id(),
@@ -645,6 +702,226 @@ mod tests {
         Arc::new(ConversationRepositoryImpl::new(pool, WorkspaceHash::new(0)))
     }
 
+    fn file_inner(root: &std::path::Path) -> Arc<ConversationRepositoryImpl> {
+        let pool = Arc::new(
+            DatabasePool::try_from(crate::database::PoolConfig::new(root.join("write.db")))
+                .expect("file pool"),
+        );
+        Arc::new(ConversationRepositoryImpl::new(pool, WorkspaceHash::new(0)))
+    }
+
+    #[tokio::test]
+    #[allow(clippy::await_holding_lock)]
+    async fn bound_in_memory_mutations_stay_direct() -> anyhow::Result<()> {
+        let _serial = SPAWN_GUARD.lock().unwrap();
+        SPAWN_ATTEMPTED.store(false, Ordering::SeqCst);
+        let inner = in_memory_inner();
+        let conversation =
+            Conversation::new(ConversationId::generate()).title(Some("before".into()));
+        let id = conversation.id;
+        inner.upsert_conversation(conversation.clone()).await?;
+        let repo =
+            DaemonConversationRepository::new(inner.clone(), PathBuf::from("unused.sock"), 0);
+        repo.upsert_conversation(conversation.title(Some("after".into())))
+            .await?;
+        assert_eq!(
+            inner
+                .get_conversation(&id)
+                .await?
+                .and_then(|row| row.title)
+                .as_deref(),
+            Some("after")
+        );
+        assert!(!SPAWN_ATTEMPTED.load(Ordering::SeqCst));
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[allow(clippy::await_holding_lock)]
+    async fn bound_relative_database_mutations_stay_direct() -> anyhow::Result<()> {
+        const ROOT: &str = "HELIOSLITE_RELATIVE_REPO_TEST_ROOT";
+        if let Some(root) = std::env::var_os(ROOT) {
+            std::env::set_current_dir(root)?;
+            let _serial = SPAWN_GUARD.lock().unwrap();
+            SPAWN_ATTEMPTED.store(false, Ordering::SeqCst);
+            let inner = file_inner(std::path::Path::new("."));
+            let conversation = Conversation::new(ConversationId::generate());
+            let id = conversation.id;
+            inner.upsert_conversation(conversation.clone()).await?;
+            let repo =
+                DaemonConversationRepository::new(inner.clone(), PathBuf::from("unused.sock"), 0);
+            repo.upsert_conversation(conversation.title(Some("updated".into())))
+                .await?;
+            assert_eq!(
+                inner
+                    .get_conversation(&id)
+                    .await?
+                    .and_then(|row| row.title)
+                    .as_deref(),
+                Some("updated")
+            );
+            assert!(!SPAWN_ATTEMPTED.load(Ordering::SeqCst));
+            return Ok(());
+        }
+        let temp = tempfile::tempdir()?;
+        let output = std::process::Command::new(std::env::current_exe()?)
+            .arg("--exact")
+            .arg("daemon_repo::tests::bound_relative_database_mutations_stay_direct")
+            .arg("--nocapture")
+            .env(ROOT, temp.path())
+            .output()?;
+        assert!(
+            output.status.success(),
+            "child failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(String::from_utf8_lossy(&output.stdout).contains("test result: ok. 1 passed"));
+        Ok(())
+    }
+
+    #[test]
+    fn bound_spawn_uses_resolved_repository_and_socket_paths() -> anyhow::Result<()> {
+        use crate::database::PoolConfig;
+        let temp = tempfile::tempdir()?;
+        let database = temp.path().join("custom write.db");
+        let socket = temp.path().join("custom.sock");
+        let pool = Arc::new(DatabasePool::try_from(PoolConfig::new(database.clone()))?);
+        let inner = Arc::new(ConversationRepositoryImpl::new(pool, WorkspaceHash::new(0)));
+        let repo = DaemonConversationRepository::new(inner, socket.clone(), 0);
+        let command = repo.daemon_command(std::path::Path::new("daemon"))?;
+        let env: std::collections::HashMap<_, _> = command.get_envs().collect();
+        assert_eq!(
+            env.get(std::ffi::OsStr::new("FORGE_WRITE_DB_PATH"))
+                .copied()
+                .flatten(),
+            Some(database.canonicalize()?.as_os_str())
+        );
+        assert_eq!(
+            env.get(std::ffi::OsStr::new("FORGE_DBD_SOCKET"))
+                .copied()
+                .flatten(),
+            Some(socket.as_os_str())
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn bound_spawn_refuses_in_memory_repository() {
+        let repo =
+            DaemonConversationRepository::new(in_memory_inner(), PathBuf::from("daemon.sock"), 0);
+        assert!(repo.daemon_command(std::path::Path::new("daemon")).is_err());
+    }
+
+    #[test]
+    fn bound_spawn_refuses_relative_paths_after_cwd_change() -> anyhow::Result<()> {
+        const ROOT: &str = "HELIOSLITE_BOUND_PATH_TEST_ROOT";
+        if let Some(root) = std::env::var_os(ROOT) {
+            let root = PathBuf::from(root);
+            let first = root.join("first");
+            let second = root.join("second");
+            std::fs::create_dir_all(&first)?;
+            std::fs::create_dir_all(&second)?;
+            std::fs::write(first.join("relative.db"), b"first")?;
+            std::fs::write(second.join("relative.db"), b"second")?;
+            #[cfg(unix)]
+            std::fs::write(second.join(":memory:"), b"literal file")?;
+            std::env::set_current_dir(&first)?;
+            assert!(resolve_daemon_database_path(std::path::Path::new("relative.db")).is_err());
+            std::env::set_current_dir(&second)?;
+            assert!(resolve_daemon_database_path(std::path::Path::new("relative.db")).is_err());
+            assert!(resolve_daemon_database_path(std::path::Path::new(":memory:")).is_err());
+            assert!(resolve_daemon_database_path(&root.join("missing").join("db")).is_err());
+            return Ok(());
+        }
+        let temp = tempfile::tempdir()?;
+        let output = std::process::Command::new(std::env::current_exe()?)
+            .arg("--exact")
+            .arg("daemon_repo::tests::bound_spawn_refuses_relative_paths_after_cwd_change")
+            .arg("--nocapture")
+            .env(ROOT, temp.path())
+            .output()?;
+        assert!(
+            output.status.success(),
+            "child failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(String::from_utf8_lossy(&output.stdout).contains("test result: ok. 1 passed"));
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[allow(clippy::await_holding_lock)]
+    async fn bound_new_and_unowned_rows_use_direct_validation() -> anyhow::Result<()> {
+        use crate::database::PoolConfig;
+        use diesel::prelude::*;
+        let _serial = SPAWN_GUARD.lock().unwrap();
+        SPAWN_ATTEMPTED.store(false, Ordering::SeqCst);
+        let temp = tempfile::tempdir()?;
+        let legacy = temp.path().join("legacy.db");
+        let mut source = diesel::sqlite::SqliteConnection::establish(legacy.to_str().unwrap())?;
+        diesel::sql_query("CREATE TABLE conversations (conversation_id TEXT PRIMARY KEY NOT NULL, title TEXT, created_at TIMESTAMP NOT NULL)").execute(&mut source)?;
+        let legacy_id = ConversationId::generate();
+        diesel::sql_query("INSERT INTO conversations VALUES (?, 'legacy', CURRENT_TIMESTAMP)")
+            .bind::<diesel::sql_types::Text, _>(legacy_id.into_string())
+            .execute(&mut source)?;
+        drop(source);
+        let pool = Arc::new(DatabasePool::try_from(
+            PoolConfig::new(temp.path().join("write.db")).with_legacy_database_path(Some(legacy)),
+        )?);
+        let foreign_id = ConversationId::generate();
+        {
+            let mut conn = pool.get_connection()?;
+            diesel::sql_query("INSERT INTO conversations (conversation_id, workspace_id, title, created_at) VALUES (?, 9, 'foreign', CURRENT_TIMESTAMP)")
+                .bind::<diesel::sql_types::Text, _>(foreign_id.into_string()).execute(&mut *conn)?;
+        }
+        let inner = Arc::new(ConversationRepositoryImpl::new(
+            pool.clone(),
+            WorkspaceHash::new(0),
+        ));
+        let repo =
+            DaemonConversationRepository::new(inner.clone(), temp.path().join("missing.sock"), 0);
+        assert!(
+            repo.upsert_conversation(Conversation::new(legacy_id).title(Some("shadow".into())))
+                .await
+                .is_err()
+        );
+        assert!(repo.update_parent_id(&legacy_id, None).await.is_err());
+        assert!(
+            repo.upsert_conversation(Conversation::new(foreign_id).title(Some("overwrite".into())))
+                .await
+                .is_err()
+        );
+        assert!(repo.update_parent_id(&foreign_id, None).await.is_err());
+        let fresh = Conversation::new(ConversationId::generate()).title(Some("fresh".into()));
+        let fresh_id = fresh.id;
+        repo.upsert_conversation(fresh).await?;
+        assert_eq!(
+            inner
+                .get_conversation(&fresh_id)
+                .await?
+                .and_then(|row| row.title)
+                .as_deref(),
+            Some("fresh")
+        );
+        assert!(
+            !SPAWN_ATTEMPTED.load(Ordering::SeqCst),
+            "new or unowned rows must not reach daemon spawn"
+        );
+        let mut conn = pool.get_connection()?;
+        #[derive(diesel::QueryableByName)]
+        struct Count {
+            #[diesel(sql_type = diesel::sql_types::BigInt)]
+            n: i64,
+        }
+        let local =
+            diesel::sql_query("SELECT COUNT(*) AS n FROM conversations WHERE conversation_id = ?")
+                .bind::<diesel::sql_types::Text, _>(legacy_id.into_string())
+                .get_result::<Count>(&mut *conn)?
+                .n;
+        assert_eq!(local, 0);
+        Ok(())
+    }
+
     /// The decorator must fall back to the direct implementation when the
     /// daemon is absent: a socket path that does not exist makes
     /// `DbClient::connect` fail, and the write still lands in the inner
@@ -657,7 +934,8 @@ mod tests {
         // real daemon; the assertion is about the fallback, not the spawn.
         SPAWN_ATTEMPTED.store(true, Ordering::SeqCst);
 
-        let inner = in_memory_inner();
+        let temp = tempfile::tempdir()?;
+        let inner = file_inner(temp.path());
         let repo = DaemonConversationRepository::new(
             inner.clone(),
             PathBuf::from("/nonexistent/.forge.db.sock"),
@@ -668,6 +946,7 @@ mod tests {
             .title(Some("daemon-fallback".to_string()));
         let id = conversation.id;
 
+        inner.upsert_conversation(conversation.clone()).await?;
         repo.upsert_conversation(conversation).await?;
 
         let actual = inner.get_conversation(&id).await?;
@@ -691,7 +970,8 @@ mod tests {
         // deterministically.
         SPAWN_ATTEMPTED.store(false, Ordering::SeqCst);
 
-        let inner = in_memory_inner();
+        let temp = tempfile::tempdir()?;
+        let inner = file_inner(temp.path());
         let repo = DaemonConversationRepository::new_with_bin(
             inner.clone(),
             PathBuf::from("/nonexistent/.forge.db.sock"),
@@ -703,6 +983,7 @@ mod tests {
             Conversation::new(ConversationId::generate()).title(Some("spawn-fallback".to_string()));
         let id = conversation.id;
 
+        inner.upsert_conversation(conversation.clone()).await?;
         repo.upsert_conversation(conversation).await?;
         let actual = inner.get_conversation(&id).await?;
         assert_eq!(
@@ -737,9 +1018,10 @@ mod tests {
         let _serial = SPAWN_GUARD.lock().unwrap();
         SPAWN_ATTEMPTED.store(false, Ordering::SeqCst);
 
-        let inner = in_memory_inner();
+        let temp = tempfile::tempdir()?;
+        let inner = file_inner(temp.path());
         let repo = DaemonConversationRepository::new_with_spawn_success(
-            inner,
+            inner.clone(),
             PathBuf::from("/nonexistent/forge-dbd-delayed.sock"),
             0,
         );
@@ -747,6 +1029,8 @@ mod tests {
             .title(Some("first-startup-write".to_string()));
         let second = Conversation::new(ConversationId::generate())
             .title(Some("second-startup-write".to_string()));
+        inner.upsert_conversation(first.clone()).await?;
+        inner.upsert_conversation(second.clone()).await?;
 
         let first_write = repo.upsert_conversation(first);
         tokio::pin!(first_write);
@@ -862,6 +1146,87 @@ mod tests {
         Ok(())
     }
 
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn bound_lost_ack_never_replays_through_direct_repository() -> anyhow::Result<()> {
+        use forge_dbd::protocol::{HealthStatus, read_frame, write_frame};
+        use tokio::net::windows::named_pipe::ServerOptions;
+        let temp = tempfile::tempdir()?;
+        let socket = temp.path().join("lost-ack.sock");
+        let pipe = forge_dbd::protocol::named_pipe_name(&socket);
+        let first = ServerOptions::new()
+            .first_pipe_instance(true)
+            .create(&pipe)?;
+        let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
+        let (recorded_tx, recorded_rx) = tokio::sync::oneshot::channel();
+        let task = tokio::spawn(async move {
+            first.connect().await.unwrap();
+            let mut first = first;
+            assert!(matches!(
+                read_frame::<_, Request>(&mut first).await.unwrap(),
+                Request::Ping
+            ));
+            write_frame(
+                &mut first,
+                &Response::Health(HealthStatus {
+                    protocol_version: 3,
+                    uptime_secs: 0,
+                    queue_depth: 0,
+                    db_reachable: true,
+                }),
+            )
+            .await
+            .unwrap();
+            let second = ServerOptions::new().create(&pipe).unwrap();
+            drop(first);
+            ready_tx.send(()).unwrap();
+            second.connect().await.unwrap();
+            let mut second = second;
+            assert!(matches!(
+                read_frame::<_, Request>(&mut second).await.unwrap(),
+                Request::Ping
+            ));
+            write_frame(
+                &mut second,
+                &Response::Health(HealthStatus {
+                    protocol_version: 3,
+                    uptime_secs: 0,
+                    queue_depth: 0,
+                    db_reachable: true,
+                }),
+            )
+            .await
+            .unwrap();
+            let request = read_frame::<_, Request>(&mut second).await.unwrap();
+            assert!(matches!(request, Request::MutationV3 { .. }));
+            recorded_tx.send(()).unwrap();
+        });
+        let inner = file_inner(temp.path());
+        let conversation =
+            Conversation::new(ConversationId::generate()).title(Some("before".into()));
+        let id = conversation.id;
+        inner.upsert_conversation(conversation.clone()).await?;
+        let repo = DaemonConversationRepository::new(inner.clone(), socket, 0);
+        let client = DbClient::connect(&repo.socket_path).await?;
+        *repo.client.lock().await = Some(Arc::new(client));
+        ready_rx.await?;
+        let result = repo
+            .upsert_conversation(conversation.title(Some("after".into())))
+            .await;
+        assert!(result.is_err());
+        recorded_rx.await?;
+        assert_eq!(
+            inner
+                .get_conversation(&id)
+                .await?
+                .and_then(|row| row.title)
+                .as_deref(),
+            Some("before")
+        );
+        task.await?;
+        Ok(())
+    }
+
     /// `DbClient` is only a successful probe cache; every send opens a new
     /// stream. If the daemon exits after that probe, a refusal while opening
     /// the fresh stream is pre-send and may safely use the direct writer.
@@ -875,7 +1240,7 @@ mod tests {
         let temp_dir = tempfile::tempdir()?;
         let socket_path = temp_dir.path().join("forge-dbd.sock");
         let listener = UnixListener::bind(&socket_path)?;
-        let inner = in_memory_inner();
+        let inner = file_inner(temp_dir.path());
         let repo = DaemonConversationRepository::new(inner.clone(), socket_path, 0);
         let server = tokio::spawn(async move {
             // `DbClient::connect` first negotiates the mutation protocol.
@@ -904,10 +1269,18 @@ mod tests {
         let conversation = Conversation::new(ConversationId::generate())
             .title(Some("stale-client-direct-fallback".to_string()));
         let id = conversation.id;
+        inner
+            .upsert_conversation(conversation.clone().title(Some("before".into())))
+            .await?;
         repo.upsert_conversation(conversation).await?;
 
         assert!(
-            inner.get_conversation(&id).await?.is_some(),
+            inner
+                .get_conversation(&id)
+                .await?
+                .and_then(|row| row.title)
+                .as_deref()
+                == Some("stale-client-direct-fallback"),
             "a pre-send connection refusal must fall back without replay risk"
         );
         Ok(())
@@ -934,7 +1307,7 @@ mod tests {
             write_frame(
                 &mut probe,
                 &Response::Health(HealthStatus {
-                    protocol_version: 2,
+                    protocol_version: 3,
                     uptime_secs: 0,
                     queue_depth: 0,
                     db_reachable: true,
@@ -945,30 +1318,48 @@ mod tests {
             drop(probe);
 
             let (mut write_stream, _) = listener.accept().await.unwrap();
+            let probe: Request = read_frame(&mut write_stream).await.unwrap();
+            assert!(matches!(probe, Request::Ping));
+            write_frame(
+                &mut write_stream,
+                &Response::Health(HealthStatus {
+                    protocol_version: 3,
+                    uptime_secs: 0,
+                    queue_depth: 0,
+                    db_reachable: true,
+                }),
+            )
+            .await
+            .unwrap();
             let request: Request = read_frame(&mut write_stream).await.unwrap();
             recorded_tx.send(request).unwrap();
             // Simulate a daemon that committed/recorded the request, then
             // crashes before emitting Ack.
         });
 
-        let inner = in_memory_inner();
+        let inner = file_inner(temp_dir.path());
         let repo = DaemonConversationRepository::new(inner.clone(), socket_path, 0);
         let conversation =
             Conversation::new(ConversationId::generate()).title(Some("ack-loss".to_string()));
         let id = conversation.id;
+        inner
+            .upsert_conversation(conversation.clone().title(Some("before".into())))
+            .await?;
+        let database_token = inner.daemon_database_token().await?;
 
         let actual = repo.upsert_conversation(conversation.clone()).await;
         assert!(actual.is_err());
 
         let actual = recorded_rx.await.expect("daemon recorded request");
-        let expected = Request::MutationV2 {
+        let expected = Request::MutationV3 {
             workspace_id: TEST_WORKSPACE_ID,
+            database_token,
             mutation: ConversationMutation::UpsertConversation { conversation, workspace_id: None },
         };
         assert_eq!(format!("{actual:?}"), format!("{expected:?}"));
 
         let actual = inner.get_conversation(&id).await?;
-        assert!(actual.is_none());
+        assert_eq!(actual.and_then(|row| row.title).as_deref(), Some("before"));
         Ok(())
     }
 }
