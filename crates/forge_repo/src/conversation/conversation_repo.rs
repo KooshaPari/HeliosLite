@@ -558,6 +558,39 @@ impl ConversationRepositoryImpl {
         self.wid.id() as i64
     }
 
+    pub(crate) fn daemon_database_path(&self) -> &std::path::Path {
+        self.pool.database_path()
+    }
+
+    pub(crate) async fn daemon_database_token(&self) -> anyhow::Result<String> {
+        self.run_with_connection(|conn, _| {
+            #[derive(diesel::QueryableByName)]
+            struct Binding {
+                #[diesel(sql_type = diesel::sql_types::Text)]
+                token: String,
+            }
+            Ok(
+                diesel::sql_query("SELECT token FROM forge_daemon_binding WHERE singleton = 1")
+                    .get_result::<Binding>(conn)?
+                    .token,
+            )
+        })
+        .await
+    }
+
+    pub(crate) async fn daemon_has_local_owned(&self, id: &ConversationId) -> anyhow::Result<bool> {
+        let id = id.into_string();
+        self.run_with_connection(move |conn, wid| {
+            let owner = conversations::table
+                .filter(conversations::conversation_id.eq(id))
+                .select(conversations::workspace_id)
+                .first::<Option<i64>>(conn)
+                .optional()?;
+            Ok(owner == Some(Some(wid.id() as i64)))
+        })
+        .await
+    }
+
     async fn run_blocking<F, T>(&self, operation: F) -> anyhow::Result<T>
     where
         F: FnOnce(Arc<DatabasePool>, WorkspaceHash) -> anyhow::Result<T> + Send + 'static,

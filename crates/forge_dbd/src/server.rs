@@ -13,12 +13,12 @@ use std::time::{Duration, Instant};
 #[cfg(windows)]
 use crate::protocol::named_pipe_name;
 use crate::protocol::{
-    ConversationMutation, HealthStatus, MUTATION_PROTOCOL_VERSION, Request, Response, read_frame,
-    write_frame,
+    BOUND_MUTATION_PROTOCOL_VERSION, ConversationMutation, HealthStatus, MUTATION_PROTOCOL_VERSION,
+    Request, Response, read_frame, write_frame,
 };
 use anyhow::{Context, Result};
 use forge_domain::{Conversation, ConversationId};
-use rusqlite::Connection;
+use rusqlite::{Connection, OptionalExtension};
 #[cfg(unix)]
 use tokio::net::UnixListener;
 #[cfg(windows)]
@@ -44,7 +44,7 @@ pub(crate) struct DaemonState {
 impl DaemonState {
     fn health(&self) -> HealthStatus {
         HealthStatus {
-            protocol_version: MUTATION_PROTOCOL_VERSION,
+            protocol_version: BOUND_MUTATION_PROTOCOL_VERSION,
             uptime_secs: self.started_at.elapsed().as_secs(),
             queue_depth: self.queue_depth.load(Ordering::Relaxed),
             db_reachable: db_reachable(&self.db_path),
@@ -477,33 +477,43 @@ impl DbServer {
     ) {
         debug!(count = batch.len(), "flushing batch");
 
-        // Open the writer connection on first use. A failed open fails every
-        // request in the batch with a path-tagged error and is retried on the
-        // next batch.
-        if conn.is_none() {
-            match Self::open_writer_connection(db_path) {
-                Ok(open) => *conn = Some(open),
-                Err(e) => {
-                    for queued in batch.drain(..) {
+        for queued in batch.drain(..) {
+            if conn.is_none() {
+                let bound = matches!(
+                    &queued.request,
+                    Request::MutationV3 { .. } | Request::DeleteWithLedger { .. }
+                );
+                let opened = if bound {
+                    Self::open_bound_writer_connection(db_path)
+                } else {
+                    Self::open_writer_connection(db_path)
+                };
+                match opened {
+                    Ok(open) => *conn = Some(open),
+                    Err(error) => {
                         let _ = queued.response_tx.send(Response::Error {
-                            message: format!("db error ({}): {e}", db_path.display()),
+                            message: format!("db error ({}): {error}", db_path.display()),
                         });
+                        continue;
                     }
-                    return;
                 }
             }
-        }
-
-        let conn = conn.as_ref().expect("writer connection opened above");
-        for queued in batch.drain(..) {
-            let resp = match Self::execute_with_conn(conn, &queued.request) {
-                Ok(resp) => resp,
-                Err(e) => {
-                    Response::Error { message: format!("db error ({}): {e}", db_path.display()) }
-                }
+            let writer = conn.as_ref().expect("writer connection opened above");
+            let response = match Self::execute_with_conn(writer, &queued.request) {
+                Ok(response) => response,
+                Err(error) => Response::Error {
+                    message: format!("db error ({}): {error}", db_path.display()),
+                },
             };
-            let _ = queued.response_tx.send(resp);
+            let _ = queued.response_tx.send(response);
         }
+    }
+
+    fn open_bound_writer_connection(db_path: &Path) -> Result<Connection> {
+        let conn =
+            Connection::open_with_flags(db_path, rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE)?;
+        conn.busy_timeout(Duration::from_secs(5))?;
+        Ok(conn)
     }
 
     /// Opens the daemon's single writer connection.
@@ -545,6 +555,9 @@ impl DbServer {
             Request::OptimizeFts | Request::RefreshFts => {
                 conn.execute_batch("PRAGMA optimize;")?;
                 Ok(Response::Ack)
+            }
+            Request::MutationV3 { workspace_id, database_token, mutation } => {
+                Self::execute_bound_mutation(conn, *workspace_id, database_token, mutation)
             }
             Request::MutationV2 { workspace_id, mutation } => {
                 match mutation {
@@ -593,6 +606,63 @@ impl DbServer {
                           not by the batch writer"
                     .to_string(),
             }),
+        }
+    }
+
+    fn execute_bound_mutation(
+        conn: &Connection,
+        workspace_id: i64,
+        database_token: &str,
+        mutation: &ConversationMutation,
+    ) -> Result<Response> {
+        conn.execute_batch("BEGIN IMMEDIATE")?;
+        let result = (|| -> Result<Response> {
+            let stored: String = conn.query_row(
+                "SELECT token FROM forge_daemon_binding WHERE singleton = 1",
+                [],
+                |row| row.get(0),
+            )?;
+            anyhow::ensure!(stored == database_token, "daemon database binding mismatch");
+            let id = match mutation {
+                ConversationMutation::UpsertConversation { conversation, .. }
+                | ConversationMutation::UpsertConversationRef { conversation, .. } => {
+                    conversation.id
+                }
+                ConversationMutation::UpdateParentId { conversation_id, .. }
+                | ConversationMutation::DeleteConversation { conversation_id } => *conversation_id,
+            };
+            let owner: Option<Option<i64>> = conn
+                .query_row(
+                    "SELECT workspace_id FROM conversations WHERE conversation_id = ?",
+                    [id.into_string()],
+                    |row| row.get(0),
+                )
+                .optional()?;
+            anyhow::ensure!(
+                owner == Some(Some(workspace_id)),
+                "daemon mutation requires an existing conversation in the caller workspace"
+            );
+            Self::execute_with_conn(
+                conn,
+                &Request::MutationV2 { workspace_id, mutation: mutation.clone() },
+            )
+        })();
+        match result {
+            Ok(Response::Ack) => {
+                if let Err(error) = conn.execute_batch("COMMIT") {
+                    conn.execute_batch("ROLLBACK")?;
+                    return Err(error.into());
+                }
+                Ok(Response::Ack)
+            }
+            Ok(response) => {
+                conn.execute_batch("ROLLBACK")?;
+                Ok(response)
+            }
+            Err(error) => {
+                conn.execute_batch("ROLLBACK")?;
+                Err(error)
+            }
         }
     }
 
@@ -1507,6 +1577,7 @@ mod windows_tests {
         let schema_conn = rusqlite::Connection::open(&db).unwrap();
         create_conversations_schema(&schema_conn);
         schema_conn.execute_batch(include_str!("../../forge_repo/src/database/migrations/2026-11-11-120000_forge_import_ledger/up.sql")).unwrap();
+        schema_conn.execute_batch(include_str!("../../forge_repo/src/database/migrations/2026-11-11-130000_bound_daemon_identity/up.sql")).unwrap();
         drop(schema_conn);
 
         let server = DbServer::new(sock.clone(), db.clone());
@@ -1544,6 +1615,46 @@ mod windows_tests {
             )
             .unwrap();
         assert_eq!(title.as_deref(), Some("windows pipe test"));
+        let token: String = verify
+            .query_row(
+                "SELECT token FROM forge_daemon_binding WHERE singleton = 1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let changed = Conversation::new(id).title(Some("bound update".to_string()));
+        let wrong = client
+            .send(Request::MutationV3 {
+                workspace_id: 42,
+                database_token: "wrong".into(),
+                mutation: ConversationMutation::UpsertConversation {
+                    conversation: changed.clone(),
+                    workspace_id: None,
+                },
+            })
+            .await
+            .expect("send wrong binding");
+        assert!(matches!(wrong, Response::Error { .. }));
+        let bound = client
+            .send(Request::MutationV3 {
+                workspace_id: 42,
+                database_token: token,
+                mutation: ConversationMutation::UpsertConversation {
+                    conversation: changed,
+                    workspace_id: None,
+                },
+            })
+            .await
+            .expect("send bound update");
+        assert!(matches!(bound, Response::Ack));
+        let title: Option<String> = verify
+            .query_row(
+                "SELECT title FROM conversations WHERE conversation_id = ?",
+                [id.into_string()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(title.as_deref(), Some("bound update"));
         let legacy_delete = client
             .send(Request::MutationV2 {
                 workspace_id: 42,
@@ -1641,5 +1752,136 @@ mod ledger_delete_tests {
             )
             .unwrap();
         assert_eq!(ledger, 0);
+    }
+}
+
+#[cfg(test)]
+mod bound_mutation_tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    fn seed(conn: &Connection, id: ConversationId) -> String {
+        create_conversations_schema(conn);
+        conn.execute_batch(include_str!("../../forge_repo/src/database/migrations/2026-11-11-130000_bound_daemon_identity/up.sql")).unwrap();
+        conn.execute("INSERT INTO conversations (conversation_id, workspace_id, title) VALUES (?, 7, 'before')", [id.into_string()]).unwrap();
+        conn.query_row(
+            "SELECT token FROM forge_daemon_binding WHERE singleton = 1",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap()
+    }
+
+    fn bound(id: ConversationId, workspace: i64, token: &str) -> Request {
+        Request::MutationV3 {
+            workspace_id: workspace,
+            database_token: token.into(),
+            mutation: ConversationMutation::UpsertConversation {
+                conversation: Conversation::new(id).title(Some("after".into())),
+                workspace_id: None,
+            },
+        }
+    }
+
+    #[test]
+    fn bound_mutation_rejects_wrong_database_and_foreign_or_missing_owner() {
+        let conn = Connection::open_in_memory().unwrap();
+        let id = ConversationId::generate();
+        let token = seed(&conn, id);
+        assert!(DbServer::execute_with_conn(&conn, &bound(id, 7, "wrong")).is_err());
+        assert!(DbServer::execute_with_conn(&conn, &bound(id, 8, &token)).is_err());
+        assert!(
+            DbServer::execute_with_conn(&conn, &bound(ConversationId::generate(), 7, &token))
+                .is_err()
+        );
+        let before: String = conn
+            .query_row(
+                "SELECT title FROM conversations WHERE conversation_id = ?",
+                [id.into_string()],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(before, "before");
+        assert!(matches!(
+            DbServer::execute_with_conn(&conn, &bound(id, 7, &token)).unwrap(),
+            Response::Ack
+        ));
+        let after: String = conn
+            .query_row(
+                "SELECT title FROM conversations WHERE conversation_id = ?",
+                [id.into_string()],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(after, "after");
+        let delete = Request::MutationV3 {
+            workspace_id: 7,
+            database_token: token,
+            mutation: ConversationMutation::DeleteConversation { conversation_id: id },
+        };
+        assert!(matches!(
+            DbServer::execute_with_conn(&conn, &delete).unwrap(),
+            Response::Error { .. }
+        ));
+        assert_eq!(
+            conn.query_row::<i64, _, _>("SELECT COUNT(*) FROM conversations", [], |r| r.get(0))
+                .unwrap(),
+            1
+        );
+    }
+
+    #[test]
+    fn bound_mutation_fails_when_binding_table_is_missing() {
+        let conn = Connection::open_in_memory().unwrap();
+        create_conversations_schema(&conn);
+        let id = ConversationId::generate();
+        conn.execute("INSERT INTO conversations (conversation_id, workspace_id, title) VALUES (?, 7, 'before')", [id.into_string()]).unwrap();
+        assert!(DbServer::execute_with_conn(&conn, &bound(id, 7, "missing")).is_err());
+        let title: String = conn
+            .query_row("SELECT title FROM conversations", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(title, "before");
+    }
+
+    #[tokio::test]
+    async fn bound_missing_target_does_not_create_database_or_parent() {
+        let dir = TempDir::new().unwrap();
+        let parent = dir.path().join("absent-parent");
+        let target = parent.join("missing.db");
+        let (response_tx, response_rx) = tokio::sync::oneshot::channel();
+        let mut batch = vec![QueuedRequest {
+            request: bound(ConversationId::generate(), 7, "missing"),
+            response_tx,
+        }];
+        let mut conn = None;
+        DbServer::flush_batch(&mut batch, &mut conn, &target).await;
+        assert!(matches!(response_rx.await.unwrap(), Response::Error { .. }));
+        assert!(conn.is_none());
+        assert!(!target.exists());
+        assert!(!parent.exists());
+    }
+
+    #[test]
+    fn cloned_database_retains_token_and_is_not_distinguished() {
+        let dir = TempDir::new().unwrap();
+        let first = dir.path().join("first.db");
+        let second = dir.path().join("clone.db");
+        let conn = Connection::open(&first).unwrap();
+        let id = ConversationId::generate();
+        let token = seed(&conn, id);
+        drop(conn);
+        std::fs::copy(&first, &second).unwrap();
+        let clone = Connection::open(&second).unwrap();
+        assert!(matches!(
+            DbServer::execute_with_conn(&clone, &bound(id, 7, &token)).unwrap(),
+            Response::Ack
+        ));
+        let title: String = clone
+            .query_row("SELECT title FROM conversations", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(
+            title, "after",
+            "a clone shares the token: physical identity is not established"
+        );
     }
 }

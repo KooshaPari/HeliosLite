@@ -113,14 +113,19 @@ impl DbClient {
     where
         S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
     {
+        Self::verify_protocol(stream, MUTATION_PROTOCOL_VERSION).await
+    }
+
+    async fn verify_protocol<S>(stream: &mut S, minimum: u16) -> Result<()>
+    where
+        S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+    {
         match Self::request_response(stream, Request::Ping).await? {
-            Response::Health(status) if status.protocol_version >= MUTATION_PROTOCOL_VERSION => {
-                Ok(())
-            }
+            Response::Health(status) if status.protocol_version >= minimum => Ok(()),
             Response::Health(status) => bail!(
                 "forge_dbd protocol v{} is too old for scoped mutations (requires v{})",
                 status.protocol_version,
-                MUTATION_PROTOCOL_VERSION,
+                minimum,
             ),
             Response::Error { message } => bail!("forge_dbd protocol probe failed: {message}"),
             other => bail!("unexpected response to protocol probe: {other:?}"),
@@ -159,9 +164,7 @@ impl DbClient {
                     )
                 })
                 .map_err(DbClientSendError::Unavailable)?;
-            Self::request_response(&mut stream, request)
-                .await
-                .map_err(DbClientSendError::Indeterminate)
+            Self::send_on_stream(&mut stream, request).await
         }
 
         #[cfg(windows)]
@@ -171,10 +174,25 @@ impl DbClient {
                 .await
                 .with_context(|| format!("failed to connect to forge_dbd at {pipe_name}"))
                 .map_err(DbClientSendError::Unavailable)?;
-            Self::request_response(&mut stream, request)
-                .await
-                .map_err(DbClientSendError::Indeterminate)
+            Self::send_on_stream(&mut stream, request).await
         }
+    }
+
+    async fn send_on_stream<S>(
+        stream: &mut S,
+        request: Request,
+    ) -> std::result::Result<Response, DbClientSendError>
+    where
+        S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+    {
+        if matches!(&request, Request::MutationV3 { .. }) {
+            Self::verify_protocol(stream, crate::protocol::BOUND_MUTATION_PROTOCOL_VERSION)
+                .await
+                .map_err(DbClientSendError::Unavailable)?;
+        }
+        Self::request_response(stream, request)
+            .await
+            .map_err(DbClientSendError::Indeterminate)
     }
 
     /// Opens the daemon pipe, retrying while the previous connection is still
@@ -343,5 +361,94 @@ mod tests {
             actual.is_err(),
             "legacy protocol must be rejected before mutation"
         );
+    }
+}
+
+#[cfg(test)]
+mod bound_protocol_tests {
+    use super::{DbClient, DbClientSendError};
+    use crate::protocol::{
+        ConversationMutation, HealthStatus, Request, Response, read_frame, write_frame,
+    };
+    use forge_domain::ConversationId;
+
+    fn request() -> Request {
+        Request::MutationV3 {
+            workspace_id: 7,
+            database_token: "binding".into(),
+            mutation: ConversationMutation::UpdateParentId {
+                conversation_id: ConversationId::generate(),
+                new_parent_id: None,
+            },
+        }
+    }
+
+    fn health(version: u16) -> Response {
+        Response::Health(HealthStatus {
+            protocol_version: version,
+            uptime_secs: 0,
+            queue_depth: 0,
+            db_reachable: true,
+        })
+    }
+
+    #[tokio::test]
+    async fn bound_old_server_receives_no_mutation() {
+        let (mut client, mut server) = tokio::io::duplex(4096);
+        let task = tokio::spawn(async move {
+            assert!(matches!(
+                read_frame::<_, Request>(&mut server).await.unwrap(),
+                Request::Ping
+            ));
+            write_frame(&mut server, &health(2)).await.unwrap();
+            read_frame::<_, Request>(&mut server).await.is_err()
+        });
+        let result = DbClient::send_on_stream(&mut client, request()).await;
+        assert!(matches!(result, Err(DbClientSendError::Unavailable(_))));
+        drop(client);
+        assert!(task.await.unwrap(), "old daemon must receive no mutation");
+    }
+
+    #[tokio::test]
+    async fn bound_lost_ack_is_indeterminate_after_send() {
+        let (mut client, mut server) = tokio::io::duplex(4096);
+        let task = tokio::spawn(async move {
+            assert!(matches!(
+                read_frame::<_, Request>(&mut server).await.unwrap(),
+                Request::Ping
+            ));
+            write_frame(&mut server, &health(3)).await.unwrap();
+            assert!(matches!(
+                read_frame::<_, Request>(&mut server).await.unwrap(),
+                Request::MutationV3 { .. }
+            ));
+        });
+        let result = DbClient::send_on_stream(&mut client, request()).await;
+        assert!(matches!(result, Err(DbClientSendError::Indeterminate(_))));
+        task.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn bound_success_uses_one_negotiated_stream() {
+        let (mut client, mut server) = tokio::io::duplex(4096);
+        let task = tokio::spawn(async move {
+            assert!(matches!(
+                read_frame::<_, Request>(&mut server).await.unwrap(),
+                Request::Ping
+            ));
+            write_frame(&mut server, &health(3)).await.unwrap();
+            assert!(matches!(
+                read_frame::<_, Request>(&mut server).await.unwrap(),
+                Request::MutationV3 { .. }
+            ));
+            write_frame(&mut server, &Response::Ack).await.unwrap();
+        });
+        assert!(matches!(
+            DbClient::send_on_stream(&mut client, request())
+                .await
+                .unwrap(),
+            Response::Ack
+        ));
+        task.await.unwrap();
     }
 }
