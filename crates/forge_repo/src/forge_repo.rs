@@ -43,6 +43,7 @@ pub struct ForgeRepo<F> {
     infra: Arc<F>,
     file_snapshot_service: Arc<ForgeFileSnapshotService>,
     conversation_repository: Arc<dyn ConversationRepository>,
+    conversation_import_repository: Arc<ConversationRepositoryImpl>,
     mcp_cache_repository: Arc<CacacheStorage>,
     provider_repository: Arc<ForgeProviderRepository<F>>,
     chat_repository: Arc<ForgeChatRepository<F>>,
@@ -51,6 +52,21 @@ pub struct ForgeRepo<F> {
     skill_repository: Arc<ForgeSkillRepository<F>>,
     validation_repository: Arc<ForgeValidationRepository<F>>,
     fuzzy_search_repository: Arc<ForgeFuzzySearchRepository<F>>,
+}
+
+impl<F> ForgeRepo<F> {
+    /// Imports only conversations with parseable context for background discovery.
+    ///
+    /// # Errors
+    /// Returns an error if the source cannot be scanned or the destination cannot be accessed.
+    pub async fn import_forge_db_for_background(
+        &self,
+        source: PathBuf,
+    ) -> anyhow::Result<ForgeImportReport> {
+        self.conversation_import_repository
+            .import_forge_db_inner(source, &forge_domain::ForgeImportOptions::default(), true)
+            .await
+    }
 }
 
 impl<
@@ -83,6 +99,7 @@ impl<
             db_pool.clone(),
             env.workspace_hash(),
         ));
+        let conversation_import_repository = conversation_repository.clone();
         // Daemon mode (P3 single-writer daemon): when FORGE_DBD_ENABLED, route
         // the hot-path conversation writes through forge-dbd and keep reads
         // direct. The decorator is best-effort — any daemon failure falls back
@@ -114,6 +131,7 @@ impl<
             infra,
             file_snapshot_service,
             conversation_repository,
+            conversation_import_repository,
             mcp_cache_repository,
             provider_repository,
             chat_repository,
