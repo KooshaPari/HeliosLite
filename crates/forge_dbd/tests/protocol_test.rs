@@ -583,3 +583,49 @@ fn named_pipe_name_lowercase() {
         "pipe name should be lowercase: {name}"
     );
 }
+
+#[test]
+fn ledger_delete_wire_variant_is_rejected_by_old_decoder() {
+    #[allow(dead_code)]
+    #[derive(serde::Deserialize)]
+    enum OldRequest {
+        Ping,
+        MutationV2 {
+            workspace_id: i64,
+            mutation: serde_json::Value,
+        },
+    }
+    let request =
+        Request::DeleteWithLedger { workspace_id: 7, conversation_id: ConversationId::generate() };
+    let bytes = serde_json::to_vec(&request).unwrap();
+    assert!(serde_json::from_slice::<OldRequest>(&bytes).is_err());
+    assert!(matches!(
+        serde_json::from_slice::<Request>(&bytes).unwrap(),
+        Request::DeleteWithLedger { .. }
+    ));
+}
+
+#[tokio::test]
+async fn ledger_delete_frame_is_rejected_by_old_decoder() {
+    #[allow(dead_code)]
+    #[derive(serde::Deserialize)]
+    enum OldRequest {
+        Ping,
+        MutationV2 {
+            workspace_id: i64,
+            mutation: serde_json::Value,
+        },
+    }
+    let (mut client, mut server) = tokio::io::duplex(4096);
+    let old_server = tokio::spawn(async move {
+        forge_dbd::protocol::read_frame::<_, OldRequest>(&mut server)
+            .await
+            .is_err()
+    });
+    let request =
+        Request::DeleteWithLedger { workspace_id: 7, conversation_id: ConversationId::generate() };
+    forge_dbd::protocol::write_frame(&mut client, &request)
+        .await
+        .unwrap();
+    assert!(old_server.await.unwrap());
+}

@@ -276,21 +276,18 @@ impl ForgeAPI<ForgeServices<ForgeRepo<ForgeInfra>>, ForgeRepo<ForgeInfra>> {
                                 errors = report.errors,
                                 invalid_id = report.invalid_id,
                                 context_parse_failed = report.context_parse_failed,
-                                imported = report.imported,
+                                unknown = report.imported,
                                 skipped = report.skipped_existing,
-                                "Upstream import incomplete; remaining rows will be retried"
+                                "Forge session preview incomplete; no rows imported"
                             );
                         }
-                        Ok(report) => {
-                            if report.imported > 0 {
-                                debug!(
-                                    imported = report.imported,
-                                    skipped = report.skipped_existing,
-                                    source_total = report.source_total,
-                                    "Upstream import scan completed"
-                                );
-                            }
-                        }
+                        Ok(report) if report.imported > 0 => warn!(
+                            unknown = report.imported,
+                            skipped = report.skipped_existing,
+                            source_total = report.source_total,
+                            "Forge sessions need explicit selection before import"
+                        ),
+                        Ok(_) => {}
                         Err(error) => warn!(%error, "Upstream import failed; will retry"),
                     }
                 }
@@ -811,6 +808,27 @@ impl<
     ) -> Result<ForgeImportReport> {
         self.services
             .import_forge_db_with_options(source, options)
+            .await
+    }
+
+    async fn import_forge_db_selected(
+        &self,
+        source: PathBuf,
+        ids: &[ConversationId],
+        restore_deleted: bool,
+        accept_unknown: bool,
+        expected_digest: Option<&str>,
+        options: &ForgeImportOptions,
+    ) -> Result<ForgeImportReport> {
+        self.services
+            .import_forge_db_selected(
+                source,
+                ids,
+                restore_deleted,
+                accept_unknown,
+                expected_digest,
+                options,
+            )
             .await
     }
 

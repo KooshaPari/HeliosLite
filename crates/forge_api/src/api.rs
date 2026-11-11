@@ -387,6 +387,19 @@ pub trait API: Sync + Send {
         options: &ForgeImportOptions,
     ) -> Result<ForgeImportReport>;
 
+    /// Import explicitly selected IDs, restoring deleted IDs only when requested.
+    async fn import_forge_db_selected(
+        &self,
+        _source: PathBuf,
+        _ids: &[ConversationId],
+        _restore_deleted: bool,
+        _accept_unknown: bool,
+        _expected_digest: Option<&str>,
+        _options: &ForgeImportOptions,
+    ) -> Result<ForgeImportReport> {
+        anyhow::bail!("selected Forge import is not supported by this API")
+    }
+
     /// One-way export to a freshly-created official-schema SQLite file.
     /// Compressed rows are decompressed during the export.
     async fn export_forge_db(

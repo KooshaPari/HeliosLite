@@ -158,6 +158,7 @@ pub struct HeliosdoctorDbStats {
 }
 
 /// Filter for `forget_conversations`. At least one selector must be set.
+/// Filters apply only to rows owned by the current workspace in the write DB.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ForgeForgetOptions {
     /// Delete by exact conversation_id. Any ID that does not match is silently
@@ -612,10 +613,8 @@ pub trait ConversationRepository: Send + Sync {
     /// this repository.
     ///
     /// The source database is opened read-only and is never modified.
-    /// Conversations whose `conversation_id` already exists in this
-    /// repository are skipped, making the operation idempotent. Rows whose
-    /// context cannot be parsed into the heliosLite schema are imported
-    /// without a context blob and reported via [`ForgeImportReport`].
+    /// Unselected writes are disabled because historical deletions are unknown.
+    /// Use selected import with a preview digest and explicit acknowledgment.
     ///
     /// # Errors
     /// Returns an error if the source file is missing, is not a forge
@@ -625,9 +624,8 @@ pub trait ConversationRepository: Send + Sync {
 
     /// One-way import with explicit [`ForgeImportOptions`].
     ///
-    /// When `options.dry_run` is `true`, the source DB is scanned exactly
-    /// as for a real import but no rows are inserted. The returned
-    /// [`ForgeImportReport`] reflects what *would* have been written.
+    /// Only dry-run is supported without an explicit selection. It scans the
+    /// source without inserting rows; preview candidates are not authorization.
     ///
     /// When `options.verbose` is `true`, each row's outcome is logged
     /// (imported / skipped / failed) for visibility on large source DBs.
@@ -646,6 +644,22 @@ pub trait ConversationRepository: Send + Sync {
         source: PathBuf,
         options: &ForgeImportOptions,
     ) -> Result<ForgeImportReport>;
+
+    /// Import explicitly selected source IDs. Deleted IDs require explicit restoration.
+    ///
+    /// # Errors
+    /// Returns an error if selection is empty, unsupported, ambiguous, or cannot be applied.
+    async fn import_forge_db_selected(
+        &self,
+        _source: PathBuf,
+        _ids: &[ConversationId],
+        _restore_deleted: bool,
+        _accept_unknown: bool,
+        _expected_digest: Option<&str>,
+        _options: &ForgeImportOptions,
+    ) -> Result<ForgeImportReport> {
+        anyhow::bail!("selected Forge import is not supported by this repository")
+    }
 
     /// One-way export of conversations from this heliosLite repository to a
     /// freshly-created official-schema SQLite file at `destination`.

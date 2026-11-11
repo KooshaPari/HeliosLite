@@ -55,7 +55,7 @@ pub struct ForgeRepo<F> {
 }
 
 impl<F> ForgeRepo<F> {
-    /// Imports only conversations with parseable context for background discovery.
+    /// Previews conversations for background discovery without importing them.
     ///
     /// # Errors
     /// Returns an error if the source cannot be scanned or the destination cannot be accessed.
@@ -64,7 +64,11 @@ impl<F> ForgeRepo<F> {
         source: PathBuf,
     ) -> anyhow::Result<ForgeImportReport> {
         self.conversation_import_repository
-            .import_forge_db_inner(source, &forge_domain::ForgeImportOptions::default(), true)
+            .import_forge_db_inner(
+                source,
+                &forge_domain::ForgeImportOptions { dry_run: true, verbose: false },
+                true,
+            )
             .await
     }
 }
@@ -88,7 +92,7 @@ impl<
         // (e.g. fresh install) the legacy attachment is a no-op.
         let write_path = env.write_database_path();
         let legacy_path = env.legacy_database_path();
-        let legacy_for_pool = if legacy_path != write_path && legacy_path.exists() {
+        let legacy_for_pool = if legacy_path != write_path {
             Some(legacy_path.clone())
         } else {
             None
@@ -348,6 +352,27 @@ impl<F: Send + Sync> ConversationRepository for ForgeRepo<F> {
     ) -> anyhow::Result<ForgeImportReport> {
         self.conversation_repository
             .import_forge_db_with_options(source, options)
+            .await
+    }
+
+    async fn import_forge_db_selected(
+        &self,
+        source: PathBuf,
+        ids: &[ConversationId],
+        restore_deleted: bool,
+        accept_unknown: bool,
+        expected_digest: Option<&str>,
+        options: &forge_domain::ForgeImportOptions,
+    ) -> anyhow::Result<ForgeImportReport> {
+        self.conversation_repository
+            .import_forge_db_selected(
+                source,
+                ids,
+                restore_deleted,
+                accept_unknown,
+                expected_digest,
+                options,
+            )
             .await
     }
 

@@ -57,6 +57,56 @@ mod integration_tests {
         context: Option<String>,
     }
 
+    #[test]
+    fn test_import_ledger_migration_rollback_preserves_tombstone() -> Result<()> {
+        use diesel_migrations::MigrationHarness;
+        let pool = DatabasePool::in_memory()?;
+        let mut conn = pool.get_connection()?;
+        diesel::sql_query("INSERT INTO conversations (conversation_id, workspace_id, created_at) VALUES ('deleted-id', 0, CURRENT_TIMESTAMP)").execute(&mut *conn)?;
+        diesel::sql_query("DELETE FROM conversations WHERE conversation_id = 'deleted-id'")
+            .execute(&mut *conn)?;
+        let error = conn.revert_last_migration(crate::database::MIGRATIONS);
+        assert!(error.is_err());
+        let row = diesel::sql_query(
+            "SELECT state AS name FROM forge_import_ledger WHERE conversation_id = 'deleted-id'",
+        )
+        .get_result::<StringResult>(&mut *conn)?;
+        assert_eq!(row.name, "deleted");
+        Ok(())
+    }
+
+    #[test]
+    fn test_import_ledger_rejects_cross_workspace_id_reuse() -> Result<()> {
+        let pool = DatabasePool::in_memory()?;
+        let mut conn = pool.get_connection()?;
+        diesel::sql_query("INSERT INTO forge_import_ledger (conversation_id, workspace_id, origin, state) VALUES ('owned-id', 7, 'unknown', 'deleted')").execute(&mut *conn)?;
+        assert!(diesel::sql_query("INSERT INTO conversations (conversation_id, workspace_id, created_at) VALUES ('owned-id', 8, CURRENT_TIMESTAMP)").execute(&mut *conn).is_err());
+        let owner = diesel::sql_query("SELECT CAST(workspace_id AS TEXT) AS name FROM forge_import_ledger WHERE conversation_id = 'owned-id'").get_result::<StringResult>(&mut *conn)?;
+        assert_eq!(owner.name, "7");
+        diesel::sql_query("INSERT INTO conversations (conversation_id, workspace_id, created_at) VALUES ('owned-id', 7, CURRENT_TIMESTAMP)").execute(&mut *conn)?;
+        assert!(
+            diesel::sql_query(
+                "UPDATE conversations SET workspace_id = 8 WHERE conversation_id = 'owned-id'"
+            )
+            .execute(&mut *conn)
+            .is_err()
+        );
+        diesel::sql_query("DELETE FROM conversations WHERE conversation_id = 'owned-id'")
+            .execute(&mut *conn)?;
+        let owner = diesel::sql_query("SELECT CAST(workspace_id AS TEXT) AS name FROM forge_import_ledger WHERE conversation_id = 'owned-id' AND state = 'deleted'").get_result::<StringResult>(&mut *conn)?;
+        assert_eq!(owner.name, "7");
+        diesel::sql_query("INSERT INTO conversations (conversation_id, workspace_id, created_at) VALUES ('conflict-id', 8, CURRENT_TIMESTAMP)").execute(&mut *conn)?;
+        diesel::sql_query("INSERT INTO forge_import_ledger (conversation_id, workspace_id, origin, state) VALUES ('conflict-id', 7, 'unknown', 'deleted')").execute(&mut *conn)?;
+        assert!(
+            diesel::sql_query("DELETE FROM conversations WHERE conversation_id = 'conflict-id'")
+                .execute(&mut *conn)
+                .is_err()
+        );
+        let owner = diesel::sql_query("SELECT CAST(workspace_id AS TEXT) AS name FROM forge_import_ledger WHERE conversation_id = 'conflict-id'").get_result::<StringResult>(&mut *conn)?;
+        assert_eq!(owner.name, "7");
+        Ok(())
+    }
+
     /// Test 1: MIGRATION round-trip
     /// Verify all migrations apply cleanly on a fresh in-memory SQLite DB.
     /// Checks:

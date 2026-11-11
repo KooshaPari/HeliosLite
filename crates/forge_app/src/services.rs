@@ -407,6 +407,19 @@ pub trait ConversationService: Send + Sync {
         options: &forge_domain::ForgeImportOptions,
     ) -> anyhow::Result<ForgeImportReport>;
 
+    /// Import explicitly selected IDs, restoring deleted IDs only when requested.
+    async fn import_forge_db_selected(
+        &self,
+        _source: PathBuf,
+        _ids: &[ConversationId],
+        _restore_deleted: bool,
+        _accept_unknown: bool,
+        _expected_digest: Option<&str>,
+        _options: &forge_domain::ForgeImportOptions,
+    ) -> anyhow::Result<ForgeImportReport> {
+        anyhow::bail!("selected Forge import is not supported by this service")
+    }
+
     /// One-way export from this heliosLite repository to a freshly-created
     /// official-schema SQLite file at `destination`.
     ///
@@ -942,6 +955,27 @@ impl<I: Services> ConversationService for I {
     ) -> anyhow::Result<ForgeImportReport> {
         self.conversation_service()
             .import_forge_db_with_options(source, options)
+            .await
+    }
+
+    async fn import_forge_db_selected(
+        &self,
+        source: PathBuf,
+        ids: &[ConversationId],
+        restore_deleted: bool,
+        accept_unknown: bool,
+        expected_digest: Option<&str>,
+        options: &forge_domain::ForgeImportOptions,
+    ) -> anyhow::Result<ForgeImportReport> {
+        self.conversation_service()
+            .import_forge_db_selected(
+                source,
+                ids,
+                restore_deleted,
+                accept_unknown,
+                expected_digest,
+                options,
+            )
             .await
     }
 
