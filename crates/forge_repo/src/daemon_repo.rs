@@ -66,8 +66,16 @@ static SPAWN_ATTEMPTED: AtomicBool = AtomicBool::new(false);
 /// error, daemon error response, or unexpected response is indeterminate: the
 /// daemon may have committed the write. Those outcomes are surfaced to the
 /// caller and are never replayed through `inner`.
+///
+/// `FORGE_DBD_STRICT_PROTOCOL=1` requires a same-stream strict daemon
+/// advertisement for these four methods and refuses their direct fallback,
+/// including new/unowned rows and unsupported database paths. It does not
+/// constrain other repository methods, older clients, or independent writers.
+/// The strict daemon must already be running; strict clients never spawn it.
 pub struct DaemonConversationRepository {
     inner: Arc<ConversationRepositoryImpl>,
+    strict_daemon_protocol: bool,
+    strict_daemon_config_invalid: bool,
     socket_path: PathBuf,
     client: tokio::sync::Mutex<Option<Arc<DbClient>>>,
     /// Serializes recovery from an unavailable daemon. A second write must
@@ -105,6 +113,22 @@ enum DaemonWriteOutcome {
 }
 
 impl DaemonConversationRepository {
+    fn validate_strict_configuration(&self) -> anyhow::Result<()> {
+        anyhow::ensure!(
+            !self.strict_daemon_config_invalid,
+            "FORGE_DBD_STRICT_PROTOCOL must be unset or 1"
+        );
+        Ok(())
+    }
+
+    fn require_direct_allowed(&self) -> anyhow::Result<()> {
+        anyhow::ensure!(
+            !self.strict_daemon_protocol,
+            "strict daemon protocol requires daemon routing; direct write refused"
+        );
+        Ok(())
+    }
+
     fn daemon_routing_available(&self) -> anyhow::Result<bool> {
         let path = self.inner.daemon_database_path();
         if path == std::path::Path::new(":memory:") || !path.is_absolute() {
@@ -122,8 +146,11 @@ impl DaemonConversationRepository {
         socket_path: PathBuf,
         workspace_id: i64,
     ) -> Self {
+        let strict_setting = std::env::var_os("FORGE_DBD_STRICT_PROTOCOL");
         Self {
             inner,
+            strict_daemon_protocol: strict_setting.is_some(),
+            strict_daemon_config_invalid: strict_setting.is_some_and(|value| value != "1"),
             socket_path,
             client: tokio::sync::Mutex::new(None),
             lifecycle_lock: tokio::sync::Mutex::new(()),
@@ -145,6 +172,8 @@ impl DaemonConversationRepository {
     ) -> Self {
         Self {
             inner,
+            strict_daemon_protocol: false,
+            strict_daemon_config_invalid: false,
             socket_path,
             client: tokio::sync::Mutex::new(None),
             lifecycle_lock: tokio::sync::Mutex::new(()),
@@ -195,7 +224,10 @@ impl DaemonConversationRepository {
             };
             client.clone()
         };
-        match client.send_classified(request).await {
+        match client
+            .send_classified_with_policy(request, self.strict_daemon_protocol)
+            .await
+        {
             Ok(Response::Ack) => DaemonWriteOutcome::Ack,
             Ok(Response::Error { message }) => {
                 warn!(
@@ -258,6 +290,9 @@ impl DaemonConversationRepository {
     {
         match self.try_daemon(request).await {
             DaemonWriteOutcome::Ack => Ok(()),
+            DaemonWriteOutcome::Unavailable if self.strict_daemon_protocol => {
+                anyhow::bail!("strict daemon protocol unavailable; direct fallback refused")
+            }
             DaemonWriteOutcome::Unavailable => fallback().await,
             DaemonWriteOutcome::Indeterminate(error) => Err(error),
         }
@@ -280,6 +315,12 @@ impl DaemonConversationRepository {
         if let Ok(client) = DbClient::connect(&self.socket_path).await {
             *self.client.lock().await = Some(Arc::new(client));
             return true;
+        }
+        // A reachable older daemon can fail its protocol probe. Starting a
+        // second daemon here could displace its socket before we can verify
+        // strict policy, so strict clients require a separately started daemon.
+        if self.strict_daemon_protocol {
+            return false;
         }
         debug!(
             socket = %self.socket_path.display(),
@@ -388,10 +429,13 @@ impl ConversationRepository for DaemonConversationRepository {
     // -----------------------------------------------------------------------
 
     async fn upsert_conversation(&self, conversation: Conversation) -> anyhow::Result<()> {
+        self.validate_strict_configuration()?;
         if !self.daemon_routing_available()? {
+            self.require_direct_allowed()?;
             return self.inner.upsert_conversation(conversation).await;
         }
         if !self.inner.daemon_has_local_owned(&conversation.id).await? {
+            self.require_direct_allowed()?;
             return self.inner.upsert_conversation(conversation).await;
         }
         let database_token = self.inner.daemon_database_token().await?;
@@ -410,10 +454,13 @@ impl ConversationRepository for DaemonConversationRepository {
     }
 
     async fn upsert_conversation_ref(&self, conversation: &Conversation) -> anyhow::Result<()> {
+        self.validate_strict_configuration()?;
         if !self.daemon_routing_available()? {
+            self.require_direct_allowed()?;
             return self.inner.upsert_conversation_ref(conversation).await;
         }
         if !self.inner.daemon_has_local_owned(&conversation.id).await? {
+            self.require_direct_allowed()?;
             return self.inner.upsert_conversation_ref(conversation).await;
         }
         let database_token = self.inner.daemon_database_token().await?;
@@ -436,13 +483,16 @@ impl ConversationRepository for DaemonConversationRepository {
         conversation_id: &ConversationId,
         new_parent_id: Option<&ConversationId>,
     ) -> anyhow::Result<()> {
+        self.validate_strict_configuration()?;
         if !self.daemon_routing_available()? {
+            self.require_direct_allowed()?;
             return self
                 .inner
                 .update_parent_id(conversation_id, new_parent_id)
                 .await;
         }
         if !self.inner.daemon_has_local_owned(conversation_id).await? {
+            self.require_direct_allowed()?;
             return self
                 .inner
                 .update_parent_id(conversation_id, new_parent_id)
@@ -464,7 +514,9 @@ impl ConversationRepository for DaemonConversationRepository {
     }
 
     async fn delete_conversation(&self, conversation_id: &ConversationId) -> anyhow::Result<()> {
+        self.validate_strict_configuration()?;
         if !self.daemon_routing_available()? {
+            self.require_direct_allowed()?;
             return self.inner.delete_conversation(conversation_id).await;
         }
         self.write_or_fallback(
@@ -733,6 +785,112 @@ mod tests {
             Some("after")
         );
         assert!(!SPAWN_ATTEMPTED.load(Ordering::SeqCst));
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[allow(clippy::await_holding_lock)]
+    async fn strict_daemon_unavailable_refuses_direct_replay() -> anyhow::Result<()> {
+        let _serial = SPAWN_GUARD.lock().unwrap();
+        SPAWN_ATTEMPTED.store(false, Ordering::SeqCst);
+        let temp = tempfile::tempdir()?;
+        let inner = file_inner(temp.path());
+        let conversation =
+            Conversation::new(ConversationId::generate()).title(Some("before".into()));
+        let id = conversation.id;
+        inner.upsert_conversation(conversation.clone()).await?;
+        let mut repo = DaemonConversationRepository::new_with_bin(
+            inner.clone(),
+            temp.path().join("absent.sock"),
+            None,
+            0,
+        );
+        repo.strict_daemon_protocol = true;
+        assert!(
+            repo.upsert_conversation(conversation.title(Some("after".into())))
+                .await
+                .is_err()
+        );
+        assert_eq!(
+            inner
+                .get_conversation(&id)
+                .await?
+                .and_then(|row| row.title)
+                .as_deref(),
+            Some("before")
+        );
+        assert!(!SPAWN_ATTEMPTED.load(Ordering::SeqCst));
+        // Independent direct writers are outside the daemon protocol policy.
+        inner
+            .upsert_conversation(Conversation::new(id).title(Some("direct".into())))
+            .await?;
+        assert_eq!(
+            inner
+                .get_conversation(&id)
+                .await?
+                .and_then(|row| row.title)
+                .as_deref(),
+            Some("direct")
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn strict_refuses_direct_only_paths_and_invalid_configuration() -> anyhow::Result<()> {
+        let inner = in_memory_inner();
+        let existing = Conversation::new(ConversationId::generate()).title(Some("before".into()));
+        let id = existing.id;
+        inner.upsert_conversation(existing.clone()).await?;
+        let mut repo = DaemonConversationRepository::new_with_bin(
+            inner.clone(),
+            PathBuf::from("unused"),
+            None,
+            0,
+        );
+        repo.strict_daemon_protocol = true;
+        assert!(
+            repo.upsert_conversation(existing.clone().title(Some("after".into())))
+                .await
+                .is_err()
+        );
+        assert!(repo.upsert_conversation_ref(&existing).await.is_err());
+        assert!(repo.update_parent_id(&id, None).await.is_err());
+        assert!(repo.delete_conversation(&id).await.is_err());
+        assert_eq!(
+            inner
+                .get_conversation(&id)
+                .await?
+                .and_then(|row| row.title)
+                .as_deref(),
+            Some("before")
+        );
+        repo.strict_daemon_config_invalid = true;
+        assert!(
+            repo.upsert_conversation(existing)
+                .await
+                .unwrap_err()
+                .to_string()
+                .contains("must be unset or 1")
+        );
+
+        let temp = tempfile::tempdir()?;
+        let file = file_inner(temp.path());
+        let mut file_repo = DaemonConversationRepository::new_with_bin(
+            file.clone(),
+            temp.path().join("unused"),
+            None,
+            0,
+        );
+        file_repo.strict_daemon_protocol = true;
+        let new_conversation = Conversation::new(ConversationId::generate());
+        let new_id = new_conversation.id;
+        assert!(
+            file_repo
+                .upsert_conversation(new_conversation)
+                .await
+                .is_err()
+        );
+        assert!(file.get_conversation(&new_id).await?.is_none());
         Ok(())
     }
 
@@ -1080,6 +1238,7 @@ mod tests {
             write_frame(
                 &mut probe,
                 &Response::Health(HealthStatus {
+                    strict_daemon_protocol: false,
                     protocol_version: 2,
                     uptime_secs: 0,
                     queue_depth: 0,
@@ -1169,6 +1328,7 @@ mod tests {
             write_frame(
                 &mut first,
                 &Response::Health(HealthStatus {
+                    strict_daemon_protocol: false,
                     protocol_version: 3,
                     uptime_secs: 0,
                     queue_depth: 0,
@@ -1189,6 +1349,7 @@ mod tests {
             write_frame(
                 &mut second,
                 &Response::Health(HealthStatus {
+                    strict_daemon_protocol: false,
                     protocol_version: 3,
                     uptime_secs: 0,
                     queue_depth: 0,
@@ -1251,6 +1412,7 @@ mod tests {
             write_frame(
                 &mut probe,
                 &Response::Health(HealthStatus {
+                    strict_daemon_protocol: false,
                     protocol_version: 2,
                     uptime_secs: 0,
                     queue_depth: 0,
@@ -1307,6 +1469,7 @@ mod tests {
             write_frame(
                 &mut probe,
                 &Response::Health(HealthStatus {
+                    strict_daemon_protocol: false,
                     protocol_version: 3,
                     uptime_secs: 0,
                     queue_depth: 0,
@@ -1323,6 +1486,7 @@ mod tests {
             write_frame(
                 &mut write_stream,
                 &Response::Health(HealthStatus {
+                    strict_daemon_protocol: false,
                     protocol_version: 3,
                     uptime_secs: 0,
                     queue_depth: 0,

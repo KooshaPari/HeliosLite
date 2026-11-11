@@ -36,6 +36,7 @@ use tracing::{debug, error, info};
 #[derive(Clone)]
 pub(crate) struct DaemonState {
     pub db_path: PathBuf,
+    pub strict_daemon_protocol: bool,
     pub started_at: Instant,
     /// Approximate number of items currently sitting in the write queue.
     pub queue_depth: Arc<AtomicUsize>,
@@ -44,6 +45,7 @@ pub(crate) struct DaemonState {
 impl DaemonState {
     fn health(&self) -> HealthStatus {
         HealthStatus {
+            strict_daemon_protocol: self.strict_daemon_protocol,
             protocol_version: BOUND_MUTATION_PROTOCOL_VERSION,
             uptime_secs: self.started_at.elapsed().as_secs(),
             queue_depth: self.queue_depth.load(Ordering::Relaxed),
@@ -97,11 +99,17 @@ impl DbServer {
             socket_path,
             state: DaemonState {
                 db_path,
+                strict_daemon_protocol: false,
                 started_at: Instant::now(),
                 queue_depth: Arc::new(AtomicUsize::new(0)),
             },
             idle_timeout,
         }
+    }
+
+    pub fn with_strict_daemon_protocol(mut self, enabled: bool) -> Self {
+        self.state.strict_daemon_protocol = enabled;
+        self
     }
 
     pub async fn run(self) -> Result<()> {
@@ -126,6 +134,12 @@ impl DbServer {
 
         // Remove stale socket if present
         if self.socket_path.exists() {
+            if self.state.strict_daemon_protocol {
+                anyhow::bail!(
+                    "strict daemon refuses to replace an existing socket: {}",
+                    self.socket_path.display()
+                );
+            }
             warn!(path = %self.socket_path.display(), "removing stale socket");
             tokio::fs::remove_file(&self.socket_path).await?;
         }
@@ -229,7 +243,7 @@ impl DbServer {
         }
 
         // Remove the socket file so the next start-up doesn't need to clean up.
-        if self.socket_path.exists() {
+        if !self.state.strict_daemon_protocol && self.socket_path.exists() {
             let _ = tokio::fs::remove_file(&self.socket_path).await;
         }
 
@@ -239,6 +253,15 @@ impl DbServer {
     #[cfg(windows)]
     async fn run_windows(self) -> Result<()> {
         let pipe_name = named_pipe_name(&self.socket_path);
+        let mut strict_first_pipe = if self.state.strict_daemon_protocol {
+            Some(
+                ServerOptions::new()
+                    .first_pipe_instance(true)
+                    .create(&pipe_name)?,
+            )
+        } else {
+            None
+        };
         info!(
             pipe = %pipe_name,
             db   = %self.state.db_path.display(),
@@ -282,7 +305,11 @@ impl DbServer {
         // loop and the frame protocol are shared with the unix transport via
         // the stream-generic `handle_client`.
         loop {
-            let pipe = match ServerOptions::new().create(&pipe_name) {
+            let pipe = match strict_first_pipe
+                .take()
+                .map(Ok)
+                .unwrap_or_else(|| ServerOptions::new().create(&pipe_name))
+            {
                 Ok(pipe) => pipe,
                 Err(e) => {
                     error!("failed to create named pipe instance: {e}");
@@ -376,6 +403,25 @@ impl DbServer {
             if matches!(request, Request::Ping) {
                 let resp = Response::Health(state.health());
                 let _ = write_frame(&mut stream, &resp).await;
+                continue;
+            }
+
+            if state.strict_daemon_protocol
+                && matches!(
+                    request,
+                    Request::MutationV2 { .. }
+                        | Request::UpsertConversation { .. }
+                        | Request::UpsertConversationRef { .. }
+                        | Request::UpdateParentId { .. }
+                        | Request::DeleteConversation { .. }
+                )
+            {
+                let response = Response::Error {
+                    message: "strict daemon protocol rejects legacy mutations".to_string(),
+                };
+                if write_frame(&mut stream, &response).await.is_err() {
+                    break;
+                }
                 continue;
             }
 
@@ -1527,6 +1573,168 @@ mod db_tests {
             }
             other => panic!("expected Error response, got {other:?}"),
         }
+    }
+}
+
+#[cfg(test)]
+mod strict_protocol_tests {
+    use super::*;
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn strict_startup_refuses_existing_named_pipe() {
+        let temp = tempfile::tempdir().unwrap();
+        let socket = temp.path().join("live.sock");
+        let pipe = named_pipe_name(&socket);
+        let existing = ServerOptions::new()
+            .first_pipe_instance(true)
+            .create(&pipe)
+            .unwrap();
+        let result = DbServer::new(socket, temp.path().join("write.db"))
+            .with_strict_daemon_protocol(true)
+            .run()
+            .await;
+        assert!(result.is_err());
+        let client = tokio::net::windows::named_pipe::ClientOptions::new()
+            .open(&pipe)
+            .unwrap();
+        existing.connect().await.unwrap();
+        drop(client);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn strict_startup_preserves_existing_live_socket() {
+        let temp = tempfile::tempdir().unwrap();
+        let socket = temp.path().join("live.sock");
+        let listener = UnixListener::bind(&socket).unwrap();
+        let result = DbServer::new(socket.clone(), temp.path().join("write.db"))
+            .with_strict_daemon_protocol(true)
+            .run()
+            .await;
+        assert!(result.is_err());
+        assert!(socket.exists());
+        let client = tokio::net::UnixStream::connect(&socket).await.unwrap();
+        let (_accepted, _) = listener.accept().await.unwrap();
+        drop(client);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn strict_shutdown_preserves_replacement_path() {
+        let temp = tempfile::tempdir().unwrap();
+        let socket = temp.path().join("server.sock");
+        let server = DbServer::new_with_idle(
+            socket.clone(),
+            temp.path().join("write.db"),
+            Duration::from_millis(500),
+        )
+        .with_strict_daemon_protocol(true);
+        let task = tokio::spawn(server.run());
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while !socket.exists() {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
+        std::fs::remove_file(&socket).unwrap();
+        std::fs::write(&socket, b"replacement").unwrap();
+        assert!(task.await.unwrap().is_ok());
+        assert_eq!(std::fs::read(&socket).unwrap(), b"replacement");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn strict_clean_shutdown_leaves_socket_for_operator_recovery() {
+        let temp = tempfile::tempdir().unwrap();
+        let socket = temp.path().join("server.sock");
+        let server = DbServer::new_with_idle(
+            socket.clone(),
+            temp.path().join("write.db"),
+            Duration::from_millis(150),
+        )
+        .with_strict_daemon_protocol(true);
+        server.run().await.unwrap();
+        assert!(socket.exists());
+        assert!(
+            DbServer::new(socket, temp.path().join("write.db"))
+                .with_strict_daemon_protocol(true)
+                .run()
+                .await
+                .is_err()
+        );
+    }
+
+    #[tokio::test]
+    async fn strict_rejects_v2_before_queue_and_leaves_database_absent() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("missing").join("write.db");
+        let state = DbServer::new(PathBuf::new(), path.clone())
+            .with_strict_daemon_protocol(true)
+            .state;
+        let (tx, mut rx) = mpsc::channel(1);
+        let (mut client, server) = tokio::io::duplex(4096);
+        let task = tokio::spawn(DbServer::handle_client(server, Arc::new(tx), state));
+        write_frame(&mut client, &Request::Ping).await.unwrap();
+        assert!(matches!(
+            read_frame::<_, Response>(&mut client).await.unwrap(),
+            Response::Health(HealthStatus { strict_daemon_protocol: true, .. })
+        ));
+        let request = Request::MutationV2 {
+            workspace_id: 7,
+            mutation: ConversationMutation::UpdateParentId {
+                conversation_id: ConversationId::generate(),
+                new_parent_id: None,
+            },
+        };
+        write_frame(&mut client, &request).await.unwrap();
+        assert!(matches!(
+            read_frame::<_, Response>(&mut client).await.unwrap(),
+            Response::Error { .. }
+        ));
+        assert!(rx.try_recv().is_err());
+        assert!(!path.exists());
+        assert!(!path.parent().unwrap().exists());
+        // An older client can ignore the rejection and write directly; the
+        // daemon protocol policy is not a database-wide lock.
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let direct = Connection::open(&path).unwrap();
+        direct.execute_batch("CREATE TABLE independent_writer (value INTEGER); INSERT INTO independent_writer VALUES (1);").unwrap();
+        assert_eq!(
+            direct
+                .query_row("SELECT value FROM independent_writer", [], |row| row
+                    .get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
+        drop(client);
+        task.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn default_mode_still_enqueues_v2() {
+        let state = DbServer::new(PathBuf::new(), PathBuf::from("unused")).state;
+        let (tx, mut rx) = mpsc::channel(1);
+        let (mut client, server) = tokio::io::duplex(4096);
+        let task = tokio::spawn(DbServer::handle_client(server, Arc::new(tx), state));
+        let request = Request::MutationV2 {
+            workspace_id: 7,
+            mutation: ConversationMutation::UpdateParentId {
+                conversation_id: ConversationId::generate(),
+                new_parent_id: None,
+            },
+        };
+        write_frame(&mut client, &request).await.unwrap();
+        let queued = rx.recv().await.unwrap();
+        assert!(matches!(queued.request, Request::MutationV2 { .. }));
+        queued.response_tx.send(Response::Ack).unwrap();
+        assert!(matches!(
+            read_frame::<_, Response>(&mut client).await.unwrap(),
+            Response::Ack
+        ));
+        drop(client);
+        task.await.unwrap();
     }
 }
 

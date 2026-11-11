@@ -266,6 +266,7 @@ fn response_error_roundtrip() {
 #[test]
 fn response_health_roundtrip() {
     let status = HealthStatus {
+        strict_daemon_protocol: false,
         protocol_version: MUTATION_PROTOCOL_VERSION,
         uptime_secs: 3600,
         queue_depth: 42,
@@ -440,6 +441,7 @@ async fn write_read_frame_response_error_roundtrip() {
 async fn write_read_frame_health_roundtrip() {
     let mut buf = Vec::new();
     let status = HealthStatus {
+        strict_daemon_protocol: false,
         protocol_version: MUTATION_PROTOCOL_VERSION,
         uptime_secs: 42,
         queue_depth: 0,
