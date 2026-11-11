@@ -372,7 +372,28 @@ impl ConversationRepositoryImpl {
         options: &forge_domain::ForgeImportOptions,
         require_valid_context: bool,
     ) -> anyhow::Result<ForgeImportReport> {
+        anyhow::ensure!(
+            options.dry_run,
+            "unselected import is disabled; select IDs explicitly"
+        );
+        self.import_forge_db_plan(source, options, require_valid_context, None)
+            .await
+    }
+
+    async fn import_forge_db_plan(
+        &self,
+        source: PathBuf,
+        options: &forge_domain::ForgeImportOptions,
+        require_valid_context: bool,
+        selection: Option<(Vec<String>, bool, bool, Option<String>)>,
+    ) -> anyhow::Result<ForgeImportReport> {
         let options = options.clone();
+        let legacy = self
+            .pool
+            .legacy_database_path()
+            .map(std::path::Path::to_path_buf);
+        let primary = self.pool.database_path().to_path_buf();
+        let acknowledgement = std::env::var_os("HELIOSLITE_ACCEPT_MISSING_LEGACY");
         self.run_with_connection(move |connection, wid| {
             use diesel::Connection;
             use diesel::sql_types::Text;
@@ -419,42 +440,108 @@ impl ConversationRepositoryImpl {
                 }
             }
 
-            let rows: Vec<DecodedSourceRow> = diesel::sql_query(
-                "SELECT conversation_id, title, context, created_at, updated_at, metrics \
-                 FROM conversations",
-            )
-            .load(&mut src)?;
+            let rows: Vec<DecodedSourceRow> = if let Some((ids, _, _, _)) = &selection {
+                anyhow::ensure!(
+                    ids.len() == 1,
+                    "select exactly one conversation ID per preview and import"
+                );
+                let selected = diesel::sql_query(
+                    "SELECT conversation_id, title, context, created_at, updated_at, metrics \
+                     FROM conversations WHERE conversation_id = ? AND \
+                     COALESCE(length(CAST(title AS BLOB)), 0) + \
+                     COALESCE(length(CAST(context AS BLOB)), 0) + \
+                     COALESCE(length(CAST(created_at AS BLOB)), 0) + \
+                     COALESCE(length(CAST(updated_at AS BLOB)), 0) + \
+                     COALESCE(length(CAST(metrics AS BLOB)), 0) <= 8388608 LIMIT 2",
+                )
+                .bind::<Text, _>(&ids[0])
+                .load(&mut src)?;
+                anyhow::ensure!(
+                    selected.len() == 1,
+                    "selected ID is absent, duplicated, or exceeds the 8 MiB preview limit"
+                );
+                selected
+            } else {
+                diesel::sql_query(
+                    "SELECT conversation_id, title, context, created_at, updated_at, metrics \
+                     FROM conversations",
+                )
+                .load(&mut src)?
+            };
 
             let mut report = ForgeImportReport {
                 source_total: rows.len(),
                 dry_run: options.dry_run,
                 ..Default::default()
             };
-
-            // Wrap the inserts in a single transaction so a partial import
-            // cannot leave the destination DB in an inconsistent state.
-            // dry_run skips BEGIN entirely (nothing is written).
-            if !options.dry_run {
-                connection.transaction::<_, anyhow::Error, _>(|conn| {
-                    import_rows(
+            let execute = |conn: &mut diesel::SqliteConnection| -> anyhow::Result<()> {
+                let observation = if selection.is_some() {
+                    Some(inspect_legacy_projection(
                         conn,
-                        wid,
-                        &rows,
-                        &options,
-                        require_valid_context,
-                        &mut report,
-                    );
-                    Ok(())
-                })?;
-            } else {
+                        legacy.as_deref(),
+                        &primary,
+                        acknowledgement.as_deref(),
+                    )?)
+                } else {
+                    None
+                };
+                let digest = if let Some(observation) = &observation {
+                    verify_forge_import_ledger_schema(conn)?;
+                    Some(forge_selection_digest(
+                        conn,
+                        &source_url,
+                        wid.id() as i64,
+                        &rows[0],
+                        observation,
+                    )?)
+                } else {
+                    None
+                };
+                if let Some((_, _, _, expected)) = &selection {
+                    if options.dry_run {
+                        eprintln!(
+                            "[import] selected {} preview digest {}",
+                            rows[0].conversation_id,
+                            digest.as_deref().unwrap()
+                        );
+                    } else {
+                        anyhow::ensure!(
+                            expected.as_deref() == digest.as_deref(),
+                            "source or destination changed since preview (digest mismatch)"
+                        );
+                    }
+                }
                 import_rows(
-                    connection,
+                    conn,
                     wid,
                     &rows,
                     &options,
                     require_valid_context,
+                    selection.as_ref().map(|(_, restore, accept, _)| {
+                        (
+                            *restore,
+                            *accept,
+                            source_url.as_str(),
+                            digest.as_deref().unwrap(),
+                        )
+                    }),
                     &mut report,
-                );
+                )?;
+                if let Some(observation) = &observation {
+                    ensure_legacy_unchanged(
+                        conn,
+                        legacy.as_deref(),
+                        &primary,
+                        acknowledgement.as_deref(),
+                        observation,
+                    )?;
+                }
+                Ok(())
+            };
+            if options.dry_run {
+                (&mut **connection).transaction::<_, anyhow::Error, _>(execute)?;
+            } else {
+                connection.immediate_transaction::<_, anyhow::Error, _>(execute)?;
             }
 
             Ok(report)
@@ -822,16 +909,41 @@ impl ConversationRepository for ConversationRepositoryImpl {
 
     async fn delete_conversation(&self, conversation_id: &ConversationId) -> anyhow::Result<()> {
         let conversation_id = *conversation_id;
+        let legacy = self
+            .pool
+            .legacy_database_path()
+            .map(std::path::Path::to_path_buf);
+        let primary = self.pool.database_path().to_path_buf();
+        let acknowledgement = std::env::var_os("HELIOSLITE_ACCEPT_MISSING_LEGACY");
         self.run_with_connection(move |connection, wid| {
             let workspace_id = wid.id() as i64;
-            validate_local_mutation(connection, &conversation_id.into_string(), workspace_id)?;
-
-            // Security: Ensure users can only delete conversations within their
-            // workspace
-            diesel::delete(conversations::table)
-                .filter(conversations::workspace_id.eq(&workspace_id))
-                .filter(conversations::conversation_id.eq(conversation_id.into_string()))
-                .execute(connection)?;
+            connection.immediate_transaction::<_, anyhow::Error, _>(|conn| {
+                verify_forge_import_ledger_schema(conn)?;
+                let id = conversation_id.into_string();
+                let observation = inspect_legacy_projection(
+                    conn,
+                    legacy.as_deref(),
+                    &primary,
+                    acknowledgement.as_deref(),
+                )?;
+                validate_local_mutation(conn, &id, workspace_id)?;
+                ensure_no_legacy_collision(conn, &id)?;
+                let deleted = diesel::delete(conversations::table)
+                    .filter(conversations::workspace_id.eq(workspace_id))
+                    .filter(conversations::conversation_id.eq(&id))
+                    .execute(conn)?;
+                if deleted == 0 {
+                    record_missing_delete(conn, &id, workspace_id)?;
+                }
+                ensure_legacy_unchanged(
+                    conn,
+                    legacy.as_deref(),
+                    &primary,
+                    acknowledgement.as_deref(),
+                    &observation,
+                )?;
+                Ok(())
+            })?;
 
             Ok(())
         })
@@ -1603,7 +1715,35 @@ impl ConversationRepository for ConversationRepositoryImpl {
         source: PathBuf,
         options: &forge_domain::ForgeImportOptions,
     ) -> anyhow::Result<ForgeImportReport> {
+        anyhow::ensure!(
+            options.dry_run,
+            "bulk import cannot distinguish prior deletions; select IDs explicitly"
+        );
         self.import_forge_db_inner(source, options, false).await
+    }
+
+    async fn import_forge_db_selected(
+        &self,
+        source: PathBuf,
+        ids: &[ConversationId],
+        restore_deleted: bool,
+        accept_unknown: bool,
+        expected_digest: Option<&str>,
+        options: &forge_domain::ForgeImportOptions,
+    ) -> anyhow::Result<ForgeImportReport> {
+        let ids = ids.iter().map(|id| id.into_string()).collect();
+        self.import_forge_db_plan(
+            source,
+            options,
+            true,
+            Some((
+                ids,
+                restore_deleted,
+                accept_unknown,
+                expected_digest.map(str::to_owned),
+            )),
+        )
+        .await
     }
 
     async fn export_forge_db(
@@ -1822,7 +1962,13 @@ impl ConversationRepository for ConversationRepositoryImpl {
         options: &forge_domain::ForgeForgetOptions,
     ) -> anyhow::Result<forge_domain::ForgeForgetReport> {
         let options = options.clone();
-        self.run_with_connection(move |connection, _wid| {
+        let legacy = self
+            .pool
+            .legacy_database_path()
+            .map(std::path::Path::to_path_buf);
+        let primary = self.pool.database_path().to_path_buf();
+        let acknowledgement = std::env::var_os("HELIOSLITE_ACCEPT_MISSING_LEGACY");
+        self.run_with_connection(move |connection, wid| {
             use diesel::sql_types::BigInt;
 
             // Validate: at least one selector must be set.
@@ -1835,7 +1981,7 @@ impl ConversationRepository for ConversationRepositoryImpl {
                 ));
             }
 
-            let mut conditions: Vec<String> = Vec::new();
+            let mut conditions: Vec<String> = vec![format!("workspace_id = {}", wid.id() as i64)];
             if !options.ids.is_empty() {
                 let id_list: Vec<String> =
                     options.ids.iter().map(|id| format!("'{}'", id)).collect();
@@ -1856,25 +2002,60 @@ impl ConversationRepository for ConversationRepositoryImpl {
                 #[diesel(sql_type = BigInt)]
                 n: i64,
             }
-            let matched: usize = diesel::sql_query(format!(
-                "SELECT COUNT(*) AS n FROM conversations {}",
-                where_clause
-            ))
-            .get_result::<CountRow>(connection)?
-            .n
-            .max(0) as usize;
-
             if options.dry_run {
+                let matched = diesel::sql_query(format!(
+                    "SELECT COUNT(*) AS n FROM conversations {}",
+                    where_clause
+                ))
+                .get_result::<CountRow>(connection)?
+                .n
+                .max(0) as usize;
+                eprintln!("[forget] preview is a count only; legacy availability and deletion collisions are checked when deleting");
                 return Ok(forge_domain::ForgeForgetReport { matched, deleted: 0, dry_run: true });
             }
 
-            // Use plain `execute` so we read the row count from the
-            // diesel `usize` return value (works on every SQLite version).
-            let deleted: usize =
-                diesel::sql_query(format!("DELETE FROM conversations {}", where_clause))
-                    .execute(connection)?;
-
-            Ok(forge_domain::ForgeForgetReport { matched, deleted, dry_run: false })
+            connection.immediate_transaction::<_, anyhow::Error, _>(|conn| {
+                verify_forge_import_ledger_schema(conn)?;
+                let matched = diesel::sql_query(format!(
+                    "SELECT COUNT(*) AS n FROM conversations {}",
+                    where_clause
+                ))
+                .get_result::<CountRow>(conn)?
+                .n
+                .max(0) as usize;
+                let observation = if matched > 0 || !options.ids.is_empty() {
+                    let observation = inspect_legacy_projection(conn, legacy.as_deref(), &primary, acknowledgement.as_deref())?;
+                    let collisions = diesel::sql_query(format!("SELECT COUNT(*) AS n FROM conversations_all WHERE __forge_legacy_source = 1 AND conversation_id IN (SELECT conversation_id FROM conversations {})", where_clause)).get_result::<CountRow>(conn)?.n;
+                    anyhow::ensure!(collisions == 0, "deletion would reveal an attached legacy conversation; reconciliation is required");
+                    Some(observation)
+                } else { None };
+                let mut missing = Vec::new();
+                for id in &options.ids {
+                    let id = id.into_string();
+                    let exists = diesel::select(diesel::dsl::exists(
+                        conversations::table.filter(conversations::conversation_id.eq(&id)),
+                    ))
+                    .get_result::<bool>(conn)?;
+                    if !exists {
+                        validate_local_mutation(conn, &id, wid.id() as i64)?;
+                        anyhow::ensure!(
+                            options.source.is_none() && options.older_than_secs.is_none(),
+                            "cannot determine whether missing ID matches additional forget filters"
+                        );
+                        missing.push(id);
+                    }
+                }
+                let deleted =
+                    diesel::sql_query(format!("DELETE FROM conversations {}", where_clause))
+                        .execute(conn)?;
+                for id in missing {
+                    record_missing_delete(conn, &id, wid.id() as i64)?;
+                }
+                if let Some(observation) = &observation {
+                    ensure_legacy_unchanged(conn, legacy.as_deref(), &primary, acknowledgement.as_deref(), observation)?;
+                }
+                Ok(forge_domain::ForgeForgetReport { matched, deleted, dry_run: false })
+            })
         })
         .await
     }
@@ -2086,6 +2267,292 @@ impl ConversationRepository for ConversationRepositoryImpl {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct LegacyObservation {
+    path: Option<String>,
+    present: bool,
+    acknowledged: bool,
+}
+
+#[cfg(test)]
+fn ensure_legacy_projection_with_ack(
+    connection: &mut diesel::SqliteConnection,
+    legacy: Option<&std::path::Path>,
+    primary: &std::path::Path,
+    acknowledgement: Option<&std::ffi::OsStr>,
+) -> anyhow::Result<()> {
+    inspect_legacy_projection(connection, legacy, primary, acknowledgement).map(|_| ())
+}
+
+fn inspect_legacy_projection(
+    connection: &mut diesel::SqliteConnection,
+    legacy: Option<&std::path::Path>,
+    primary: &std::path::Path,
+    acknowledgement: Option<&std::ffi::OsStr>,
+) -> anyhow::Result<LegacyObservation> {
+    use diesel::sql_types::Text;
+    let Some(legacy) = legacy else {
+        return Ok(LegacyObservation { path: None, present: false, acknowledged: false });
+    };
+    let path = legacy
+        .to_str()
+        .ok_or_else(|| anyhow::anyhow!("legacy path cannot be represented in a preview"))?
+        .to_owned();
+    let present = legacy.try_exists()?;
+    let acknowledged = acknowledgement.is_some_and(|value| std::path::Path::new(value) == legacy);
+    let observation = LegacyObservation { path: Some(path), present, acknowledged };
+    if !present {
+        #[derive(diesel::QueryableByName)]
+        struct Count {
+            #[diesel(sql_type = diesel::sql_types::BigInt)]
+            n: i64,
+        }
+        let attached = diesel::sql_query(
+            "SELECT COUNT(*) AS n FROM pragma_database_list WHERE name = 'legacy_read'",
+        )
+        .get_result::<Count>(connection)?
+        .n;
+        anyhow::ensure!(
+            attached == 0,
+            "missing legacy path still has an attached database; history identity is unknown"
+        );
+        anyhow::ensure!(
+            acknowledged,
+            "configured legacy history is missing; to accept the risk for this exact path, set HELIOSLITE_ACCEPT_MISSING_LEGACY to {}",
+            legacy.display()
+        );
+        eprintln!(
+            "[history] accepted risk of missing legacy path {}; past history is unknown",
+            legacy.display()
+        );
+        return Ok(observation);
+    }
+    let legacy = legacy
+        .canonicalize()
+        .map_err(|_| anyhow::anyhow!("configured legacy history is unavailable"))?;
+    if primary.canonicalize().ok().as_ref() == Some(&legacy) {
+        return Ok(observation);
+    }
+    #[derive(diesel::QueryableByName)]
+    struct Value {
+        #[diesel(sql_type = Text)]
+        value: String,
+    }
+    let attached = diesel::sql_query(
+        "SELECT file AS value FROM pragma_database_list WHERE name = 'legacy_read'",
+    )
+    .get_result::<Value>(connection)
+    .optional()?;
+    let attached = attached.and_then(|row| std::path::PathBuf::from(row.value).canonicalize().ok());
+    anyhow::ensure!(
+        attached.as_ref() == Some(&legacy),
+        "configured legacy history is not attached"
+    );
+    let view = diesel::sql_query("SELECT sql AS value FROM sqlite_temp_master WHERE type = 'view' AND name = 'conversations_all'")
+        .get_result::<Value>(connection).optional()?;
+    anyhow::ensure!(
+        view.is_some_and(|row| row.value.contains("legacy_read.conversations")),
+        "configured legacy history is not visible in the read projection"
+    );
+    diesel::sql_query("SELECT 1 FROM conversations_all LIMIT 1").execute(connection)?;
+    Ok(observation)
+}
+
+fn ensure_legacy_unchanged(
+    connection: &mut diesel::SqliteConnection,
+    legacy: Option<&std::path::Path>,
+    primary: &std::path::Path,
+    acknowledgement: Option<&std::ffi::OsStr>,
+    expected: &LegacyObservation,
+) -> anyhow::Result<()> {
+    #[cfg(test)]
+    if let Some(path) = legacy {
+        let hook = {
+            let mut slot = legacy_recheck_hook().lock().unwrap();
+            if slot.as_ref().is_some_and(|(target, _)| target == path) {
+                slot.take().map(|(_, hook)| hook)
+            } else {
+                None
+            }
+        };
+        if let Some(hook) = hook {
+            hook(connection);
+        }
+    }
+    let current = inspect_legacy_projection(connection, legacy, primary, acknowledgement)?;
+    anyhow::ensure!(
+        &current == expected,
+        "legacy history configuration changed during operation"
+    );
+    Ok(())
+}
+
+#[cfg(test)]
+fn legacy_recheck_hook() -> &'static std::sync::Mutex<
+    Option<(
+        std::path::PathBuf,
+        Box<dyn FnOnce(&mut diesel::SqliteConnection) + Send>,
+    )>,
+> {
+    static HOOK: std::sync::OnceLock<
+        std::sync::Mutex<
+            Option<(
+                std::path::PathBuf,
+                Box<dyn FnOnce(&mut diesel::SqliteConnection) + Send>,
+            )>,
+        >,
+    > = std::sync::OnceLock::new();
+    HOOK.get_or_init(|| std::sync::Mutex::new(None))
+}
+
+fn ensure_no_legacy_collision(
+    connection: &mut diesel::SqliteConnection,
+    id: &str,
+) -> anyhow::Result<()> {
+    use diesel::sql_types::{BigInt, Text};
+    #[derive(diesel::QueryableByName)]
+    struct Count {
+        #[diesel(sql_type = BigInt)]
+        n: i64,
+    }
+    let collisions = diesel::sql_query("SELECT COUNT(*) AS n FROM conversations_all WHERE __forge_legacy_source = 1 AND conversation_id = ?")
+        .bind::<Text, _>(id).get_result::<Count>(connection)?.n;
+    anyhow::ensure!(
+        collisions == 0,
+        "deletion would reveal an attached legacy conversation; reconciliation is required"
+    );
+    Ok(())
+}
+
+fn record_missing_delete(
+    connection: &mut diesel::SqliteConnection,
+    conversation_id: &str,
+    workspace_id: i64,
+) -> anyhow::Result<()> {
+    use diesel::sql_types::{BigInt, Text};
+    let changed = diesel::sql_query("INSERT INTO forge_import_ledger (conversation_id, workspace_id, origin, state) VALUES (?, ?, 'unknown', 'deleted') ON CONFLICT(conversation_id) DO UPDATE SET state = 'deleted', generation = forge_import_ledger.generation + 1 WHERE forge_import_ledger.workspace_id = excluded.workspace_id")
+        .bind::<Text, _>(conversation_id).bind::<BigInt, _>(workspace_id).execute(connection)?;
+    anyhow::ensure!(
+        changed == 1,
+        "deleted ID has unknown or different workspace ownership"
+    );
+    Ok(())
+}
+
+fn verify_forge_import_ledger_schema(
+    connection: &mut diesel::SqliteConnection,
+) -> anyhow::Result<()> {
+    use diesel::sql_types::BigInt;
+    #[derive(diesel::QueryableByName)]
+    struct Count {
+        #[diesel(sql_type = BigInt)]
+        n: i64,
+    }
+    let count = diesel::sql_query("SELECT COUNT(*) AS n FROM sqlite_master WHERE (type = 'table' AND name = 'forge_import_ledger') OR (type = 'trigger' AND name IN ('forge_import_record_insert', 'forge_import_record_update', 'forge_import_record_delete'))")
+        .get_result::<Count>(connection)?.n;
+    anyhow::ensure!(
+        count == 4,
+        "Forge import deletion ledger schema is incomplete"
+    );
+    Ok(())
+}
+
+fn forge_row_digest(locator: &str, workspace_id: i64, row: &DecodedSourceRow) -> String {
+    use sha2::{Digest, Sha256};
+    let mut hash = Sha256::new();
+    hash.update(b"helioslite-forge-row-v1\0");
+    hash.update(workspace_id.to_be_bytes());
+    for field in [
+        Some(locator),
+        Some(row.conversation_id.as_str()),
+        row.title.as_deref(),
+        row.context.as_deref(),
+        Some(row.created_at.as_str()),
+        row.updated_at.as_deref(),
+        row.metrics.as_deref(),
+    ] {
+        match field {
+            Some(value) => {
+                hash.update([1]);
+                hash.update((value.len() as u64).to_be_bytes());
+                hash.update(value.as_bytes());
+            }
+            None => hash.update([0]),
+        }
+    }
+    hex::encode(hash.finalize())
+}
+
+fn forge_selection_digest(
+    connection: &mut diesel::SqliteConnection,
+    locator: &str,
+    workspace_id: i64,
+    row: &DecodedSourceRow,
+    observation: &LegacyObservation,
+) -> anyhow::Result<String> {
+    use diesel::sql_types::{BigInt, Nullable, Text};
+    use sha2::{Digest, Sha256};
+    #[derive(diesel::QueryableByName)]
+    struct Disposition {
+        #[diesel(sql_type = Nullable<BigInt>)]
+        workspace_id: Option<i64>,
+        #[diesel(sql_type = Text)]
+        state: String,
+        #[diesel(sql_type = BigInt)]
+        generation: i64,
+    }
+    #[derive(diesel::QueryableByName)]
+    struct Count {
+        #[diesel(sql_type = BigInt)]
+        n: i64,
+    }
+    let previous = diesel::sql_query(
+        "SELECT workspace_id, state, generation FROM forge_import_ledger WHERE conversation_id = ?",
+    )
+    .bind::<Text, _>(&row.conversation_id)
+    .get_result::<Disposition>(connection)
+    .optional()?;
+    let present =
+        diesel::sql_query("SELECT COUNT(*) AS n FROM conversations WHERE conversation_id = ?")
+            .bind::<Text, _>(&row.conversation_id)
+            .get_result::<Count>(connection)?
+            .n;
+    let visible = conversations_all::table
+        .filter(conversations_all::conversation_id.eq(&row.conversation_id))
+        .count()
+        .get_result::<i64>(connection)?;
+    let mut hash = Sha256::new();
+    hash.update(b"helioslite-forge-preview-v2\0");
+    hash.update(forge_row_digest(locator, workspace_id, row).as_bytes());
+    if let Some(path) = &observation.path {
+        hash.update([1]);
+        hash.update((path.len() as u64).to_be_bytes());
+        hash.update(path.as_bytes());
+        hash.update([u8::from(observation.present)]);
+        hash.update([u8::from(observation.acknowledged)]);
+    } else {
+        hash.update([0]);
+    }
+    hash.update(present.to_be_bytes());
+    hash.update(visible.to_be_bytes());
+    if let Some(previous) = previous {
+        hash.update([1]);
+        match previous.workspace_id {
+            Some(owner) => {
+                hash.update([1]);
+                hash.update(owner.to_be_bytes());
+            }
+            None => hash.update([0]),
+        }
+        hash.update((previous.state.len() as u64).to_be_bytes());
+        hash.update(previous.state.as_bytes());
+        hash.update(previous.generation.to_be_bytes());
+    } else {
+        hash.update([0]);
+    }
+    Ok(hex::encode(hash.finalize()))
+}
+
 fn source_readonly_uri(path: &std::path::Path) -> anyhow::Result<String> {
     let absolute = std::path::absolute(path)?;
     let mut uri = url::Url::from_file_path(&absolute)
@@ -2104,15 +2571,17 @@ fn source_readonly_uri(path: &std::path::Path) -> anyhow::Result<String> {
 /// Performs per-row decoding (idempotency lookup, context parsing) and either
 /// inserts the row (transactional path) or just counts the outcome (dry-run).
 fn import_rows(
-    connection: &mut PooledSqliteConnection,
+    connection: &mut diesel::SqliteConnection,
     wid: WorkspaceHash,
     rows: &[DecodedSourceRow],
     options: &forge_domain::ForgeImportOptions,
     require_valid_context: bool,
+    selection: Option<(bool, bool, &str, &str)>,
     report: &mut ForgeImportReport,
-) {
+) -> anyhow::Result<()> {
     for row in rows {
         let Ok(id) = ConversationId::parse(&row.conversation_id) else {
+            anyhow::ensure!(selection.is_none(), "selected ID is invalid");
             report.invalid_id += 1;
             if options.verbose {
                 eprintln!("[import] skip invalid-id {}", row.conversation_id);
@@ -2130,6 +2599,9 @@ fn import_rows(
         {
             Ok(count) => count,
             Err(error) => {
+                if selection.is_some() {
+                    return Err(error.into());
+                }
                 eprintln!(
                     "Failed to check conversation {}: {}",
                     row.conversation_id, error
@@ -2144,6 +2616,50 @@ fn import_rows(
                 eprintln!("[import] skip existing {}", row.conversation_id);
             }
             continue;
+        }
+
+        if let Some((allow_restore, accept_unknown, _locator, _digest)) = selection {
+            use diesel::sql_types::{BigInt, Nullable, Text};
+            #[derive(diesel::QueryableByName)]
+            struct LedgerRow {
+                #[diesel(sql_type = Nullable<BigInt>)]
+                workspace_id: Option<i64>,
+                #[diesel(sql_type = Text)]
+                state: String,
+            }
+            let previous = diesel::sql_query(
+                "SELECT workspace_id, state FROM forge_import_ledger WHERE conversation_id = ?",
+            )
+            .bind::<Text, _>(&row.conversation_id)
+            .get_result::<LedgerRow>(connection)
+            .optional()?;
+            if !options.dry_run {
+                anyhow::ensure!(
+                    accept_unknown,
+                    "source installation identity and prior history are unverified; explicit acceptance is required"
+                );
+            }
+            if let Some(previous) = previous {
+                anyhow::ensure!(
+                    previous.workspace_id == Some(wid.id() as i64),
+                    "selected ID has unknown or different workspace ownership"
+                );
+                if options.dry_run && previous.state == "deleted" {
+                    eprintln!(
+                        "[import] selected {} has a recorded deletion; restoration requires --restore-deleted",
+                        row.conversation_id
+                    );
+                }
+                anyhow::ensure!(
+                    previous.state == "deleted" && (allow_restore || options.dry_run),
+                    "selected ID has a deletion record; explicit restoration is required"
+                );
+            } else if options.dry_run {
+                eprintln!(
+                    "[import] selected {} has UNKNOWN prior deletion history",
+                    row.conversation_id
+                );
+            }
         }
 
         // Parse the plain-text context with the heliosLite record type.
@@ -2173,19 +2689,36 @@ fn import_rows(
         if context_parse_failed {
             report.context_parse_failed += 1;
             if require_valid_context {
+                anyhow::ensure!(
+                    selection.is_none(),
+                    "selected conversation has missing, empty, or invalid context"
+                );
                 continue;
             }
         }
 
-        let created_at =
-            parse_naive_datetime(&row.created_at).unwrap_or_else(|| chrono::Utc::now().naive_utc());
+        let parsed_created_at = parse_naive_datetime(&row.created_at);
+        anyhow::ensure!(
+            selection.is_none() || parsed_created_at.is_some(),
+            "selected conversation has an invalid creation timestamp"
+        );
+        let created_at = parsed_created_at.unwrap_or_else(|| chrono::Utc::now().naive_utc());
         let updated_at = row.updated_at.as_deref().and_then(parse_naive_datetime);
+        anyhow::ensure!(
+            selection.is_none() || row.updated_at.is_none() || updated_at.is_some(),
+            "selected conversation has an invalid update timestamp"
+        );
 
-        let metrics = row
+        let parsed_metrics = row
             .metrics
             .as_deref()
             .and_then(|json| serde_json::from_str::<MetricsRecord>(json).ok())
-            .map(forge_domain::Metrics::from)
+            .map(forge_domain::Metrics::from);
+        anyhow::ensure!(
+            selection.is_none() || row.metrics.is_none() || parsed_metrics.is_some(),
+            "selected conversation has invalid metrics"
+        );
+        let metrics = parsed_metrics
             .unwrap_or_else(|| forge_domain::Metrics::default().started_at(created_at.and_utc()));
 
         let conversation = forge_domain::Conversation::new(id)
@@ -2208,6 +2741,10 @@ fn import_rows(
 
         let record = ConversationRecord::new(conversation, wid);
         if require_valid_context && record.context.is_none() && record.context_zstd.is_none() {
+            anyhow::ensure!(
+                selection.is_none(),
+                "selected conversation context could not be persisted"
+            );
             report.errors += 1;
             continue;
         }
@@ -2216,12 +2753,25 @@ fn import_rows(
             .execute(connection)
         {
             Ok(_) => {
+                if let Some((_, _, locator, digest)) = selection {
+                    use diesel::sql_types::{BigInt, Text};
+                    let changed = diesel::sql_query("INSERT INTO forge_import_ledger (conversation_id, workspace_id, origin, state, source_locator, source_digest) VALUES (?, ?, 'forge', 'imported', ?, ?) ON CONFLICT(conversation_id) DO UPDATE SET origin = 'forge', state = 'imported', source_locator = excluded.source_locator, source_digest = excluded.source_digest WHERE forge_import_ledger.workspace_id = excluded.workspace_id")
+                        .bind::<Text, _>(&row.conversation_id)
+                        .bind::<BigInt, _>(wid.id() as i64)
+                        .bind::<Text, _>(locator)
+                        .bind::<Text, _>(digest)
+                        .execute(connection)?;
+                    anyhow::ensure!(changed == 1, "selected ID provenance ownership changed");
+                }
                 report.imported += 1;
                 if options.verbose {
                     eprintln!("[import] imported {}", row.conversation_id);
                 }
             }
             Err(error) => {
+                if selection.is_some() {
+                    return Err(error.into());
+                }
                 eprintln!(
                     "Failed to import conversation {}: {}",
                     row.conversation_id, error
@@ -2230,6 +2780,7 @@ fn import_rows(
             }
         }
     }
+    Ok(())
 }
 
 /// Diesel row type used by `import_forge_db_with_options`. Renamed from
@@ -4109,6 +4660,52 @@ mod tests {
         insert("not-a-uuid", "invalid id", None);
     }
 
+    async fn fixture_digest(
+        repo: &ConversationRepositoryImpl,
+        source: &std::path::Path,
+        id: ConversationId,
+    ) -> anyhow::Result<String> {
+        use diesel::Connection;
+        use diesel::sql_types::Text;
+        let uri = source_readonly_uri(source)?;
+        let mut conn = diesel::sqlite::SqliteConnection::establish(&uri)?;
+        let row = diesel::sql_query("SELECT conversation_id, title, context, created_at, updated_at, metrics FROM conversations WHERE conversation_id = ?")
+            .bind::<Text, _>(id.into_string()).get_result::<DecodedSourceRow>(&mut conn)?;
+        let legacy = repo
+            .pool
+            .legacy_database_path()
+            .map(std::path::Path::to_path_buf);
+        let acknowledgement = std::env::var_os("HELIOSLITE_ACCEPT_MISSING_LEGACY");
+        let repo_primary = repo.pool.database_path().to_path_buf();
+        repo.run_with_connection(move |conn, wid| {
+            let observation = inspect_legacy_projection(
+                conn,
+                legacy.as_deref(),
+                repo_primary.as_path(),
+                acknowledgement.as_deref(),
+            )?;
+            forge_selection_digest(conn, &uri, wid.id() as i64, &row, &observation)
+        })
+        .await
+    }
+
+    async fn fixture_selected_import(
+        repo: &ConversationRepositoryImpl,
+        source: &std::path::Path,
+        id: ConversationId,
+    ) -> anyhow::Result<ForgeImportReport> {
+        let digest = fixture_digest(repo, source, id).await?;
+        repo.import_forge_db_selected(
+            source.to_path_buf(),
+            &[id],
+            false,
+            true,
+            Some(&digest),
+            &Default::default(),
+        )
+        .await
+    }
+
     #[tokio::test]
     async fn test_import_forge_db_imports_and_reports() -> anyhow::Result<()> {
         let temp = tempfile::tempdir()?;
@@ -4116,27 +4713,10 @@ mod tests {
         seed_official_source_db(&source);
         let repo = repository()?;
 
-        let report = repo.import_forge_db(source.clone()).await?;
-
-        // 4 rows read: 3 imported (one of which had a parse failure), 1 invalid id.
-        assert_eq!(report.source_total, 4, "all rows counted");
-        assert_eq!(report.imported, 3, "valid ids import");
-        assert_eq!(report.invalid_id, 1, "non-uuid id is reported separately");
-        assert_eq!(
-            report.context_parse_failed, 1,
-            "unparseable context is counted but the row still imports"
-        );
-        assert_eq!(
-            report.skipped_existing, 0,
-            "first run imports everything new"
-        );
-        assert_eq!(report.errors, 0, "no insert errors");
-
-        // The imported conversations are readable through the normal read path.
+        let error = repo.import_forge_db(source.clone()).await.unwrap_err();
+        assert!(error.to_string().contains("select IDs explicitly"));
         let id = ConversationId::parse("11111111-1111-1111-1111-111111111111")?;
-        let fetched = repo.get_conversation(&id).await?;
-        assert!(fetched.is_some(), "imported row should be readable");
-        assert_eq!(fetched.unwrap().title.as_deref(), Some("imported fully"));
+        assert!(repo.get_conversation(&id).await?.is_none());
 
         Ok(())
     }
@@ -4160,11 +4740,9 @@ mod tests {
             .bind::<diesel::sql_types::Text, _>("2026-08-05 10:00:00")
             .execute(&mut writer)?;
         let repo = repository()?;
-        let report = repo
-            .import_forge_db_inner(source, &Default::default(), true)
-            .await?;
-        assert_eq!(report.imported, 2);
         let id = ConversationId::parse("44444444-4444-4444-4444-444444444444")?;
+        let report = fixture_selected_import(&repo, &source, id).await?;
+        assert_eq!(report.imported, 1);
         assert_eq!(
             repo.get_conversation(&id).await?.unwrap().title.as_deref(),
             Some("wal row")
@@ -4196,20 +4774,20 @@ mod tests {
     #[cfg(windows)]
     #[tokio::test]
     async fn test_import_from_opt_in_unc_share() -> anyhow::Result<()> {
-        let Some(share) = std::env::var_os("FORGE_TEST_UNC_C_DRIVE") else {
+        let Some(share) = std::env::var_os("FORGE_TEST_UNC_ROOT") else {
             return Ok(());
         };
+        let local_root = std::env::var_os("FORGE_TEST_UNC_LOCAL_ROOT")
+            .ok_or_else(|| anyhow::anyhow!("FORGE_TEST_UNC_LOCAL_ROOT is required"))?;
         let temp = tempfile::tempdir()?;
         let source = temp.path().join("unc #source.db");
         seed_official_source_db(&source);
-        let relative = source.strip_prefix("C:/")?;
+        let relative = source.strip_prefix(local_root)?;
         let unc = std::path::PathBuf::from(share).join(relative);
         let repo = repository()?;
-        let report = repo
-            .import_forge_db_inner(unc, &Default::default(), true)
-            .await?;
-        assert_eq!(report.imported, 1);
         let id = ConversationId::parse("11111111-1111-1111-1111-111111111111")?;
+        let report = fixture_selected_import(&repo, &unc, id).await?;
+        assert_eq!(report.imported, 1);
         assert_eq!(
             repo.get_conversation(&id)
                 .await?
@@ -4239,10 +4817,784 @@ mod tests {
         drop(writer);
         let repo = repository()?;
         let report = repo
-            .import_forge_db_inner(source, &Default::default(), true)
+            .import_forge_db_inner(
+                source,
+                &forge_domain::ForgeImportOptions { dry_run: true, verbose: false },
+                true,
+            )
             .await?;
         assert_eq!((report.imported, report.context_parse_failed), (0, 3));
         let id = ConversationId::parse("11111111-1111-1111-1111-111111111111")?;
+        assert!(repo.get_conversation(&id).await?.is_none());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_forget_does_not_delete_another_workspace() -> anyhow::Result<()> {
+        use diesel::sql_types::{BigInt, Text};
+        let repo = repository()?;
+        let local = Conversation::new(ConversationId::generate());
+        let foreign = ConversationId::generate();
+        repo.upsert_conversation(local.clone()).await?;
+        repo.run_with_connection(move |conn, _| {
+            diesel::sql_query("INSERT INTO conversations (conversation_id, workspace_id, created_at) VALUES (?, ?, CURRENT_TIMESTAMP)")
+                .bind::<Text, _>(foreign.into_string()).bind::<BigInt, _>(42_i64).execute(conn)?;
+            Ok(())
+        }).await?;
+        let report = repo
+            .forget_conversations(&forge_domain::ForgeForgetOptions {
+                ids: vec![local.id, foreign],
+                ..Default::default()
+            })
+            .await?;
+        assert_eq!((report.matched, report.deleted), (1, 1));
+        let local_id = local.id;
+        let tombstones = repo.run_with_connection(move |conn, _| {
+            #[derive(diesel::QueryableByName)]
+            struct Count { #[diesel(sql_type = BigInt)] n: i64 }
+            Ok(diesel::sql_query("SELECT COUNT(*) AS n FROM forge_import_ledger WHERE conversation_id = ? AND state = 'deleted'")
+                .bind::<Text, _>(local_id.into_string()).get_result::<Count>(conn)?.n)
+        }).await?;
+        assert_eq!(tombstones, 1);
+        let foreign_count = repo
+            .run_with_connection(move |conn, _| {
+                Ok(conversations::table
+                    .filter(conversations::conversation_id.eq(foreign.into_string()))
+                    .count()
+                    .get_result::<i64>(conn)?)
+            })
+            .await?;
+        assert_eq!(foreign_count, 1);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_selected_import_requires_review_and_explicit_restore() -> anyhow::Result<()> {
+        use diesel::Connection;
+        let temp = tempfile::tempdir()?;
+        let source = temp.path().join("official.db");
+        seed_official_source_db(&source);
+        let fixture_context = forge_domain::Context::default()
+            .messages(vec![ContextMessage::user("source message", None).into()]);
+        let row = DecodedSourceRow {
+            conversation_id: "11111111-1111-1111-1111-111111111111".into(),
+            title: Some("imported fully".into()),
+            context: Some(serde_json::to_string(&ContextRecord::from(
+                &fixture_context,
+            ))?),
+            created_at: "2026-08-05 10:00:00".into(),
+            updated_at: Some("2026-08-05 10:05:00".into()),
+            metrics: None,
+        };
+        let id = ConversationId::parse(&row.conversation_id)?;
+        let repo = repository()?;
+        let digest = fixture_digest(&repo, &source, id).await?;
+        let options = forge_domain::ForgeImportOptions::default();
+        let preview = repo
+            .import_forge_db_selected(
+                source.clone(),
+                &[id],
+                false,
+                false,
+                None,
+                &forge_domain::ForgeImportOptions { dry_run: true, verbose: false },
+            )
+            .await?;
+        assert_eq!((preview.dry_run, preview.imported), (true, 1));
+        assert!(repo.get_conversation(&id).await?.is_none());
+        let other_source = temp.path().join("other.db");
+        std::fs::copy(&source, &other_source)?;
+        assert!(
+            repo.import_forge_db_selected(
+                other_source,
+                &[id],
+                false,
+                true,
+                Some(&digest),
+                &options
+            )
+            .await
+            .is_err()
+        );
+        assert!(repo.get_conversation(&id).await?.is_none());
+        assert!(
+            repo.import_forge_db_selected(
+                source.clone(),
+                &[id],
+                false,
+                false,
+                Some(&digest),
+                &options
+            )
+            .await
+            .is_err()
+        );
+        assert!(
+            repo.import_forge_db_selected(
+                source.clone(),
+                &[id],
+                false,
+                true,
+                Some("wrong"),
+                &options
+            )
+            .await
+            .is_err()
+        );
+        let mut writer = diesel::sqlite::SqliteConnection::establish(&source.to_string_lossy())?;
+        diesel::sql_query("UPDATE conversations SET title = 'changed after preview' WHERE conversation_id = '11111111-1111-1111-1111-111111111111'").execute(&mut writer)?;
+        assert!(
+            repo.import_forge_db_selected(
+                source.clone(),
+                &[id],
+                false,
+                true,
+                Some(&digest),
+                &options
+            )
+            .await
+            .is_err()
+        );
+        assert!(repo.get_conversation(&id).await?.is_none());
+        diesel::sql_query("UPDATE conversations SET title = 'imported fully' WHERE conversation_id = '11111111-1111-1111-1111-111111111111'").execute(&mut writer)?;
+        drop(writer);
+        let imported = repo
+            .import_forge_db_selected(source.clone(), &[id], false, true, Some(&digest), &options)
+            .await?;
+        assert_eq!(imported.imported, 1);
+        let edited = repo
+            .get_conversation(&id)
+            .await?
+            .unwrap()
+            .title(Some("local edit".to_string()));
+        repo.upsert_conversation(edited).await?;
+        let current_digest = fixture_digest(&repo, &source, id).await?;
+        let unchanged = repo
+            .import_forge_db_selected(
+                source.clone(),
+                &[id],
+                false,
+                true,
+                Some(&current_digest),
+                &options,
+            )
+            .await?;
+        assert_eq!(unchanged.skipped_existing, 1);
+        assert_eq!(
+            repo.get_conversation(&id).await?.unwrap().title.as_deref(),
+            Some("local edit")
+        );
+        repo.delete_conversation(&id).await?;
+        assert!(repo.get_conversation(&id).await?.is_none());
+        assert!(
+            repo.import_forge_db_selected(
+                source.clone(),
+                &[id],
+                false,
+                true,
+                Some(&digest),
+                &options
+            )
+            .await
+            .is_err()
+        );
+        assert!(repo.get_conversation(&id).await?.is_none());
+        let restore_digest = fixture_digest(&repo, &source, id).await?;
+        repo.delete_conversation(&id).await?;
+        assert!(
+            repo.import_forge_db_selected(
+                source.clone(),
+                &[id],
+                true,
+                true,
+                Some(&restore_digest),
+                &options
+            )
+            .await
+            .is_err()
+        );
+        let restore_digest = fixture_digest(&repo, &source, id).await?;
+        let restored = repo
+            .import_forge_db_selected(source, &[id], true, true, Some(&restore_digest), &options)
+            .await?;
+        assert_eq!(restored.imported, 1);
+        assert!(repo.get_conversation(&id).await?.unwrap().context.is_some());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_selected_import_rejects_unavailable_configured_legacy() -> anyhow::Result<()> {
+        use crate::database::PoolConfig;
+        let temp = tempfile::tempdir()?;
+        let source = temp.path().join("source.db");
+        seed_official_source_db(&source);
+        let missing_legacy = temp.path().join("missing.db");
+        let mut config = PoolConfig::new(temp.path().join("write.db"))
+            .with_legacy_database_path(Some(missing_legacy.clone()));
+        config.max_size = 1;
+        let pool = Arc::new(DatabasePool::try_from(config)?);
+        let repo = ConversationRepositoryImpl::new(pool, WorkspaceHash::new(0));
+        let id = ConversationId::parse("11111111-1111-1111-1111-111111111111")?;
+        assert!(
+            repo.get_all_conversations(None)
+                .await?
+                .is_none_or(|rows| rows.is_empty())
+        );
+        assert!(repo.delete_conversation(&id).await.is_err());
+        let forget = forge_domain::ForgeForgetOptions { ids: vec![id], ..Default::default() };
+        assert!(repo.forget_conversations(&forget).await.is_err());
+        let options = forge_domain::ForgeImportOptions { dry_run: true, ..Default::default() };
+        assert!(
+            repo.import_forge_db_selected(source.clone(), &[id], false, false, None, &options)
+                .await
+                .is_err()
+        );
+        let legacy_for_ack = missing_legacy.clone();
+        let primary_for_ack = temp.path().join("write.db");
+        repo.run_with_connection(move |conn, _| {
+            assert!(
+                ensure_legacy_projection_with_ack(
+                    conn,
+                    Some(&legacy_for_ack),
+                    &primary_for_ack,
+                    Some(std::ffi::OsStr::new("wrong"))
+                )
+                .is_err()
+            );
+            ensure_legacy_projection_with_ack(
+                conn,
+                Some(&legacy_for_ack),
+                &primary_for_ack,
+                Some(legacy_for_ack.as_os_str()),
+            )?;
+            diesel::sql_query("ATTACH DATABASE ':memory:' AS legacy_read").execute(conn)?;
+            let blocked = ensure_legacy_projection_with_ack(
+                conn,
+                Some(&legacy_for_ack),
+                &primary_for_ack,
+                Some(legacy_for_ack.as_os_str()),
+            )
+            .is_err();
+            diesel::sql_query("DETACH DATABASE legacy_read").execute(conn)?;
+            anyhow::ensure!(
+                blocked,
+                "stale legacy attachment must block acknowledgement"
+            );
+            Ok(())
+        })
+        .await?;
+        seed_official_source_db(&missing_legacy);
+        let legacy_for_ack = missing_legacy.clone();
+        let primary_for_ack = temp.path().join("write.db");
+        assert!(
+            repo.run_with_connection(move |conn, _| ensure_legacy_projection_with_ack(
+                conn,
+                Some(&legacy_for_ack),
+                &primary_for_ack,
+                Some(legacy_for_ack.as_os_str())
+            ))
+            .await
+            .is_err()
+        );
+        assert!(repo.delete_conversation(&id).await.is_err());
+        assert!(
+            repo.import_forge_db_selected(source, &[id], false, false, None, &options)
+                .await
+                .is_err()
+        );
+        let count = repo
+            .run_with_connection(move |conn, _| {
+                #[derive(diesel::QueryableByName)]
+                struct Count {
+                    #[diesel(sql_type = diesel::sql_types::BigInt)]
+                    n: i64,
+                }
+                Ok(
+                    diesel::sql_query("SELECT COUNT(*) AS n FROM forge_import_ledger")
+                        .get_result::<Count>(conn)?
+                        .n,
+                )
+            })
+            .await?;
+        assert_eq!(count, 0);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_selected_import_accepts_usable_legacy_projection() -> anyhow::Result<()> {
+        use crate::database::PoolConfig;
+        let temp = tempfile::tempdir()?;
+        let legacy = temp.path().join("legacy.db");
+        seed_official_source_db(&legacy);
+        let pool = Arc::new(DatabasePool::try_from(
+            PoolConfig::new(temp.path().join("write.db"))
+                .with_legacy_database_path(Some(legacy.clone())),
+        )?);
+        let repo = ConversationRepositoryImpl::new(pool, WorkspaceHash::new(0));
+        let id = ConversationId::parse("11111111-1111-1111-1111-111111111111")?;
+        let options = forge_domain::ForgeImportOptions { dry_run: true, ..Default::default() };
+        let report = repo
+            .import_forge_db_selected(legacy, &[id], false, false, None, &options)
+            .await?;
+        assert_eq!(report.skipped_existing, 1);
+        assert!(repo.delete_conversation(&id).await.is_err());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_selected_import_digest_binds_legacy_acknowledgement() -> anyhow::Result<()> {
+        use diesel::Connection;
+        let temp = tempfile::tempdir()?;
+        let source = temp.path().join("source.db");
+        let missing = temp.path().join("missing.db");
+        seed_official_source_db(&source);
+        let uri = source_readonly_uri(&source)?;
+        let mut conn = diesel::sqlite::SqliteConnection::establish(&uri)?;
+        let row = diesel::sql_query("SELECT conversation_id, title, context, created_at, updated_at, metrics FROM conversations WHERE conversation_id = '11111111-1111-1111-1111-111111111111'").get_result::<DecodedSourceRow>(&mut conn)?;
+        let repo = repository()?;
+        repo.run_with_connection(move |conn, wid| {
+            let without = LegacyObservation {
+                path: Some(missing.to_string_lossy().into_owned()),
+                present: false,
+                acknowledged: false,
+            };
+            let with = LegacyObservation { acknowledged: true, ..without.clone() };
+            let first = forge_selection_digest(conn, &uri, wid.id() as i64, &row, &without)?;
+            let second = forge_selection_digest(conn, &uri, wid.id() as i64, &row, &with)?;
+            assert_ne!(first, second);
+            Ok(())
+        })
+        .await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_selected_import_rechecks_legacy_before_commit() -> anyhow::Result<()> {
+        let temp = tempfile::tempdir()?;
+        let missing = temp.path().join("appears.db");
+        let primary = temp.path().join("write.db");
+        let repo = repository()?;
+        let result = repo
+            .run_with_connection(move |conn, _| {
+                conn.immediate_transaction::<_, anyhow::Error, _>(|conn| {
+                    let observation = inspect_legacy_projection(
+                        conn,
+                        Some(&missing),
+                        &primary,
+                        Some(missing.as_os_str()),
+                    )?;
+                    record_missing_delete(conn, "recheck-id", 0)?;
+                    std::fs::write(&missing, b"appeared")?;
+                    ensure_legacy_unchanged(
+                        conn,
+                        Some(&missing),
+                        &primary,
+                        Some(missing.as_os_str()),
+                        &observation,
+                    )?;
+                    Ok(())
+                })
+            })
+            .await;
+        assert!(result.is_err());
+        let count = repo.run_with_connection(|conn, _| {
+            #[derive(diesel::QueryableByName)] struct Count { #[diesel(sql_type = diesel::sql_types::BigInt)] n: i64 }
+            Ok(diesel::sql_query("SELECT COUNT(*) AS n FROM forge_import_ledger WHERE conversation_id = 'recheck-id'").get_result::<Count>(conn)?.n)
+        }).await?;
+        assert_eq!(count, 0);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_selected_import_entrypoints_recheck_before_commit() -> anyhow::Result<()> {
+        use crate::database::PoolConfig;
+        use diesel::sql_types::{BigInt, Nullable, Text};
+        const MODE: &str = "HELIOSLITE_RECHECK_TEST_MODE";
+        const ROOT: &str = "HELIOSLITE_RECHECK_TEST_ROOT";
+        #[derive(Debug, PartialEq, diesel::QueryableByName)]
+        struct Snapshot {
+            #[diesel(sql_type = Nullable<Text>)]
+            conversation: Option<String>,
+            #[diesel(sql_type = Nullable<Text>)]
+            ledger: Option<String>,
+        }
+        fn snapshot(conn: &mut diesel::SqliteConnection, id: &str) -> anyhow::Result<Snapshot> {
+            Ok(diesel::sql_query("SELECT (SELECT json_array(conversation_id, title, workspace_id, context, created_at, updated_at, metrics, parent_id, source, cwd, message_count, intent_state, extracted_at, memory_id, intent_hash, CASE WHEN context_zstd IS NULL THEN NULL ELSE hex(context_zstd) END, is_compressed) FROM conversations WHERE conversation_id = ?) AS conversation, (SELECT json_array(conversation_id, workspace_id, origin, source_locator, source_digest, state, generation) FROM forge_import_ledger WHERE conversation_id = ?) AS ledger")
+                .bind::<Text, _>(id).bind::<Text, _>(id).get_result::<Snapshot>(conn)?)
+        }
+        if let Some(mode) = std::env::var_os(MODE) {
+            let root = std::path::PathBuf::from(
+                std::env::var_os(ROOT).ok_or_else(|| anyhow::anyhow!("missing test root"))?,
+            );
+            let legacy = root.join("legacy.db");
+            let source = root.join("source.db");
+            seed_official_source_db(&source);
+            let mut config = PoolConfig::new(root.join("write.db"))
+                .with_legacy_database_path(Some(legacy.clone()));
+            config.max_size = 1;
+            let pool = Arc::new(DatabasePool::try_from(config)?);
+            let repo = ConversationRepositoryImpl::new(pool, WorkspaceHash::new(0));
+            let id = ConversationId::parse("11111111-1111-1111-1111-111111111111")?;
+            let digest = fixture_digest(&repo, &source, id).await?;
+            let existing = mode == "delete_existing" || mode == "forget_existing";
+            if existing {
+                repo.run_with_connection(move |conn, _| {
+                    diesel::sql_query("INSERT INTO conversations (conversation_id, workspace_id, title, context, context_zstd, created_at, source) VALUES (?, 0, 'preserve title', 'preserve context', X'', '2026-01-01 00:00:00', 'local')")
+                        .bind::<Text, _>(id.into_string()).execute(conn)?;
+                    diesel::sql_query("INSERT INTO forge_import_ledger (conversation_id, workspace_id, origin, source_locator, source_digest, state) VALUES (?, 0, 'forge', 'fixture-source', 'fixture-digest', 'imported')")
+                        .bind::<Text, _>(id.into_string()).execute(conn)?;
+                    Ok(())
+                }).await?;
+            }
+            let before = repo
+                .run_with_connection(move |conn, _| snapshot(conn, &id.into_string()))
+                .await?;
+            assert_eq!(before.conversation.is_some(), existing);
+            assert_eq!(before.ledger.is_some(), existing);
+            let created = legacy.clone();
+            let is_import = mode == "import";
+            *legacy_recheck_hook().lock().unwrap() = Some((
+                legacy,
+                Box::new(move |conn| {
+                    #[derive(diesel::QueryableByName)]
+                    struct Count {
+                        #[diesel(sql_type = BigInt)]
+                        n: i64,
+                    }
+                    #[derive(diesel::QueryableByName)]
+                    struct State {
+                        #[diesel(sql_type = Text)]
+                        state: String,
+                    }
+                    let rows = diesel::sql_query("SELECT COUNT(*) AS n FROM conversations")
+                        .get_result::<Count>(conn)
+                        .unwrap()
+                        .n;
+                    let state = diesel::sql_query(
+                        "SELECT state FROM forge_import_ledger WHERE conversation_id = ?",
+                    )
+                    .bind::<Text, _>(id.into_string())
+                    .get_result::<State>(conn)
+                    .unwrap()
+                    .state;
+                    assert_eq!(
+                        rows,
+                        i64::from(is_import),
+                        "mutation must run before recheck"
+                    );
+                    assert_eq!(state, if is_import { "imported" } else { "deleted" });
+                    std::fs::write(created, b"appeared").unwrap();
+                }),
+            ));
+            let result = match mode.to_str() {
+                Some("import") => repo
+                    .import_forge_db_selected(
+                        source,
+                        &[id],
+                        false,
+                        true,
+                        Some(&digest),
+                        &Default::default(),
+                    )
+                    .await
+                    .map(|_| ()),
+                Some("delete" | "delete_existing") => repo.delete_conversation(&id).await,
+                Some("forget" | "forget_existing") => repo
+                    .forget_conversations(&forge_domain::ForgeForgetOptions {
+                        ids: vec![id],
+                        ..Default::default()
+                    })
+                    .await
+                    .map(|_| ()),
+                _ => anyhow::bail!("unknown test mode"),
+            };
+            assert!(
+                result.is_err(),
+                "entrypoint must refuse the changed legacy source"
+            );
+            assert!(
+                root.join("legacy.db").is_file(),
+                "recheck injection must run"
+            );
+            let after = repo
+                .run_with_connection(move |conn, _| snapshot(conn, &id.into_string()))
+                .await?;
+            assert_eq!(
+                after, before,
+                "entrypoint must roll back the full conversation and ledger rows"
+            );
+            return Ok(());
+        }
+        let temp = tempfile::tempdir()?;
+        for mode in [
+            "import",
+            "delete",
+            "forget",
+            "delete_existing",
+            "forget_existing",
+        ] {
+            let root = temp.path().join(mode);
+            std::fs::create_dir_all(&root)?;
+            let output = std::process::Command::new(std::env::current_exe()?)
+                .arg("--exact")
+                .arg("conversation::conversation_repo::tests::test_selected_import_entrypoints_recheck_before_commit")
+                .arg("--nocapture")
+                .env(MODE, mode)
+                .env(ROOT, &root)
+                .env("HELIOSLITE_ACCEPT_MISSING_LEGACY", root.join("legacy.db"))
+                .output()?;
+            assert!(
+                output.status.success(),
+                "{mode} child failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            assert!(
+                String::from_utf8_lossy(&output.stdout).contains("test result: ok. 1 passed"),
+                "{mode} child did not run the exact test"
+            );
+        }
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_selected_import_rejects_changed_legacy_configuration() -> anyhow::Result<()> {
+        use crate::database::PoolConfig;
+        let temp = tempfile::tempdir()?;
+        let source = temp.path().join("source.db");
+        let first = temp.path().join("first.db");
+        let second = temp.path().join("second.db");
+        seed_official_source_db(&source);
+        seed_official_source_db(&first);
+        seed_official_source_db(&second);
+        let primary = temp.path().join("write.db");
+        let first_pool = Arc::new(DatabasePool::try_from(
+            PoolConfig::new(primary.clone()).with_legacy_database_path(Some(first)),
+        )?);
+        let second_pool = Arc::new(DatabasePool::try_from(
+            PoolConfig::new(primary).with_legacy_database_path(Some(second)),
+        )?);
+        let first_repo = ConversationRepositoryImpl::new(first_pool, WorkspaceHash::new(0));
+        let second_repo = ConversationRepositoryImpl::new(second_pool, WorkspaceHash::new(0));
+        let id = ConversationId::parse("11111111-1111-1111-1111-111111111111")?;
+        let digest = fixture_digest(&first_repo, &source, id).await?;
+        let error = second_repo
+            .import_forge_db_selected(
+                source,
+                &[id],
+                false,
+                true,
+                Some(&digest),
+                &Default::default(),
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            error.to_string().contains("digest mismatch"),
+            "unexpected error: {error}"
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_selected_import_legacy_collision_blocks_local_delete() -> anyhow::Result<()> {
+        use crate::database::PoolConfig;
+        let temp = tempfile::tempdir()?;
+        let legacy = temp.path().join("legacy.db");
+        seed_official_source_db(&legacy);
+        let pool = Arc::new(DatabasePool::try_from(
+            PoolConfig::new(temp.path().join("write.db")).with_legacy_database_path(Some(legacy)),
+        )?);
+        let repo = ConversationRepositoryImpl::new(pool, WorkspaceHash::new(0));
+        let id = ConversationId::parse("11111111-1111-1111-1111-111111111111")?;
+        repo.run_with_connection(move |conn, _| {
+            diesel::sql_query("INSERT INTO conversations (conversation_id, workspace_id, title, created_at) VALUES (?, 0, 'local', CURRENT_TIMESTAMP)")
+                .bind::<diesel::sql_types::Text, _>(id.into_string()).execute(conn)?;
+            Ok(())
+        }).await?;
+        let error = repo.delete_conversation(&id).await.unwrap_err();
+        assert!(error.to_string().contains("reveal an attached legacy"));
+        let forget = forge_domain::ForgeForgetOptions { ids: vec![id], ..Default::default() };
+        assert!(repo.forget_conversations(&forget).await.is_err());
+        let title = repo.get_conversation(&id).await?.unwrap().title;
+        assert_eq!(title.as_deref(), Some("local"));
+        let counts = repo
+            .run_with_connection(move |conn, _| {
+                #[derive(diesel::QueryableByName)]
+                struct Count {
+                    #[diesel(sql_type = diesel::sql_types::BigInt)]
+                    n: i64,
+                }
+                let local = diesel::sql_query(
+                    "SELECT COUNT(*) AS n FROM conversations WHERE conversation_id = ?",
+                )
+                .bind::<diesel::sql_types::Text, _>(id.into_string())
+                .get_result::<Count>(conn)?
+                .n;
+                let ledger = diesel::sql_query(
+                    "SELECT COUNT(*) AS n FROM forge_import_ledger WHERE conversation_id = ?",
+                )
+                .bind::<diesel::sql_types::Text, _>(id.into_string())
+                .get_result::<Count>(conn)?
+                .n;
+                Ok((local, ledger))
+            })
+            .await?;
+        assert_eq!(counts, (1, 0));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_selected_import_rejects_concurrent_deletion() -> anyhow::Result<()> {
+        use crate::database::PoolConfig;
+        let temp = tempfile::tempdir()?;
+        let source = temp.path().join("source.db");
+        seed_official_source_db(&source);
+        let pool = Arc::new(DatabasePool::try_from(PoolConfig::new(
+            temp.path().join("write.db"),
+        ))?);
+        let repo = Arc::new(ConversationRepositoryImpl::new(pool, WorkspaceHash::new(0)));
+        let id = ConversationId::parse("11111111-1111-1111-1111-111111111111")?;
+        let digest = fixture_digest(&repo, &source, id).await?;
+        let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let holder_repo = repo.clone();
+        let holder = tokio::spawn(async move {
+            holder_repo
+                .run_with_connection(move |conn, wid| {
+                    conn.immediate_transaction::<_, anyhow::Error, _>(|conn| {
+                        record_missing_delete(conn, &id.into_string(), wid.id() as i64)?;
+                        ready_tx
+                            .send(())
+                            .map_err(|_| anyhow::anyhow!("test readiness receiver closed"))?;
+                        release_rx.recv_timeout(std::time::Duration::from_secs(10))?;
+                        Ok(())
+                    })
+                })
+                .await
+        });
+        ready_rx.await?;
+        let import_repo = repo.clone();
+        let importer = tokio::spawn(async move {
+            import_repo
+                .import_forge_db_selected(
+                    source,
+                    &[id],
+                    true,
+                    true,
+                    Some(&digest),
+                    &Default::default(),
+                )
+                .await
+        });
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        assert!(
+            !importer.is_finished(),
+            "import should wait for the active writer"
+        );
+        release_tx.send(())?;
+        holder.await??;
+        let error = importer.await?.unwrap_err();
+        assert!(
+            error.to_string().contains("digest mismatch"),
+            "unexpected error: {error}"
+        );
+        assert!(repo.get_conversation(&id).await?.is_none());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_selected_import_missing_id_deletions_invalidate_preview() -> anyhow::Result<()> {
+        let temp = tempfile::tempdir()?;
+        let source = temp.path().join("official.db");
+        seed_official_source_db(&source);
+        let repo = repository()?;
+        let id = ConversationId::parse("11111111-1111-1111-1111-111111111111")?;
+        let options = forge_domain::ForgeImportOptions::default();
+        let before = fixture_digest(&repo, &source, id).await?;
+        repo.delete_conversation(&id).await?;
+        assert!(
+            repo.import_forge_db_selected(
+                source.clone(),
+                &[id],
+                true,
+                true,
+                Some(&before),
+                &options
+            )
+            .await
+            .is_err()
+        );
+        let after_delete = fixture_digest(&repo, &source, id).await?;
+        assert_ne!(before, after_delete);
+        let forget = forge_domain::ForgeForgetOptions { ids: vec![id], ..Default::default() };
+        repo.forget_conversations(&forget).await?;
+        assert!(
+            repo.import_forge_db_selected(
+                source.clone(),
+                &[id],
+                true,
+                true,
+                Some(&after_delete),
+                &options
+            )
+            .await
+            .is_err()
+        );
+        let after_forget = fixture_digest(&repo, &source, id).await?;
+        assert_ne!(after_delete, after_forget);
+        let dry = forge_domain::ForgeForgetOptions { dry_run: true, ..forget.clone() };
+        repo.forget_conversations(&dry).await?;
+        assert_eq!(after_forget, fixture_digest(&repo, &source, id).await?);
+        let mixed = forge_domain::ForgeForgetOptions { source: Some("agent".into()), ..forget };
+        assert!(repo.forget_conversations(&mixed).await.is_err());
+        assert_eq!(after_forget, fixture_digest(&repo, &source, id).await?);
+        assert_eq!(
+            repo.import_forge_db_selected(source, &[id], true, true, Some(&after_forget), &options)
+                .await?
+                .imported,
+            1
+        );
+        let report = repo.forget_conversations(&mixed).await?;
+        assert_eq!((report.matched, report.deleted), (0, 0));
+        assert!(repo.get_conversation(&id).await?.is_some());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_selected_import_rolls_back_if_ledger_write_fails() -> anyhow::Result<()> {
+        let temp = tempfile::tempdir()?;
+        let source = temp.path().join("official.db");
+        seed_official_source_db(&source);
+        let fixture_context = forge_domain::Context::default()
+            .messages(vec![ContextMessage::user("source message", None).into()]);
+        let row = DecodedSourceRow {
+            conversation_id: "11111111-1111-1111-1111-111111111111".into(),
+            title: Some("imported fully".into()),
+            context: Some(serde_json::to_string(&ContextRecord::from(
+                &fixture_context,
+            ))?),
+            created_at: "2026-08-05 10:00:00".into(),
+            updated_at: Some("2026-08-05 10:05:00".into()),
+            metrics: None,
+        };
+        let id = ConversationId::parse(&row.conversation_id)?;
+        let repo = repository()?;
+        let digest = fixture_digest(&repo, &source, id).await?;
+        repo.run_with_connection(|conn, _| {
+            diesel::sql_query("CREATE TRIGGER deny_provenance BEFORE INSERT ON forge_import_ledger WHEN NEW.origin = 'forge' BEGIN SELECT RAISE(ABORT, 'injected ledger failure'); END").execute(conn)?;
+            Ok(())
+        }).await?;
+        let result = repo
+            .import_forge_db_selected(
+                source,
+                &[id],
+                false,
+                true,
+                Some(&digest),
+                &Default::default(),
+            )
+            .await;
+        assert!(result.is_err());
         assert!(repo.get_conversation(&id).await?.is_none());
         Ok(())
     }
@@ -4256,7 +5608,7 @@ mod tests {
         seed_official_source_db(&source);
         let before = std::fs::read(&source)?;
         let repo = repository()?;
-        let options = forge_domain::ForgeImportOptions::default();
+        let options = forge_domain::ForgeImportOptions { dry_run: true, verbose: false };
         let first = repo
             .import_forge_db_inner(source.clone(), &options, true)
             .await?;
@@ -4265,6 +5617,13 @@ mod tests {
             (1, 2, 1)
         );
         assert_eq!(std::fs::read(&source)?, before);
+        let existing_id = ConversationId::parse("11111111-1111-1111-1111-111111111111")?;
+        assert_eq!(
+            fixture_selected_import(&repo, &source, existing_id)
+                .await?
+                .imported,
+            1
+        );
         let id = ConversationId::parse("33333333-3333-3333-3333-333333333333")?;
         assert!(repo.get_conversation(&id).await?.is_none());
 
@@ -4281,19 +5640,18 @@ mod tests {
             .execute(&mut connection)?;
         drop(connection);
 
-        let second = repo.import_forge_db_inner(source, &options, true).await?;
+        let second = fixture_selected_import(&repo, &source, id).await?;
         assert_eq!(
             (
                 second.imported,
                 second.skipped_existing,
                 second.context_parse_failed
             ),
-            (1, 1, 1)
+            (1, 0, 0)
         );
         let recovered = repo.get_conversation(&id).await?.unwrap();
         assert!(recovered.context.is_some());
         assert_eq!(recovered.context.unwrap().messages.len(), 1);
-        let existing_id = ConversationId::parse("11111111-1111-1111-1111-111111111111")?;
         assert_eq!(
             repo.get_conversation(&existing_id)
                 .await?
@@ -4312,16 +5670,17 @@ mod tests {
         seed_official_source_db(&source);
         let repo = repository()?;
 
-        let first = repo.import_forge_db(source.clone()).await?;
-        assert_eq!(first.imported, 3);
+        let id = ConversationId::parse("11111111-1111-1111-1111-111111111111")?;
+        let first = fixture_selected_import(&repo, &source, id).await?;
+        assert_eq!(first.imported, 1);
 
-        let second = repo.import_forge_db(source.clone()).await?;
+        let second = fixture_selected_import(&repo, &source, id).await?;
         assert_eq!(second.imported, 0, "re-run imports nothing");
         assert_eq!(
-            second.skipped_existing, 3,
+            second.skipped_existing, 1,
             "previously imported ids are skipped"
         );
-        assert_eq!(second.invalid_id, 1, "invalid id is re-reported");
+        assert_eq!(second.invalid_id, 0);
         assert_eq!(second.errors, 0);
 
         Ok(())
@@ -4335,7 +5694,8 @@ mod tests {
 
         let before = std::fs::read(&source)?;
         let repo = repository()?;
-        repo.import_forge_db(source.clone()).await?;
+        let id = ConversationId::parse("11111111-1111-1111-1111-111111111111")?;
+        fixture_selected_import(&repo, &source, id).await?;
         let after = std::fs::read(&source)?;
 
         assert_eq!(before, after, "source database bytes must be unchanged");
@@ -4364,7 +5724,10 @@ mod tests {
 
         let repo = repository()?;
         let error = repo
-            .import_forge_db(source.clone())
+            .import_forge_db_with_options(
+                source.clone(),
+                &forge_domain::ForgeImportOptions { dry_run: true, verbose: false },
+            )
             .await
             .expect_err("fork-schema source must be rejected");
         assert!(
@@ -4380,7 +5743,10 @@ mod tests {
         let missing =
             std::env::temp_dir().join(format!("forge-does-not-exist-{}.db", std::process::id()));
         let error = repo
-            .import_forge_db(missing)
+            .import_forge_db_with_options(
+                missing,
+                &forge_domain::ForgeImportOptions { dry_run: true, verbose: false },
+            )
             .await
             .expect_err("missing file must error");
         assert!(
@@ -4425,14 +5791,14 @@ mod tests {
         seed_official_source_db(&source);
         let repo = repository()?;
 
-        let options = forge_domain::ForgeImportOptions { dry_run: false, verbose: true };
+        let options = forge_domain::ForgeImportOptions { dry_run: true, verbose: true };
         let report = repo
             .import_forge_db_with_options(source.clone(), &options)
             .await?;
         assert_eq!(report.imported, 3);
         assert_eq!(report.invalid_id, 1);
         assert_eq!(report.context_parse_failed, 1);
-        assert!(!report.dry_run);
+        assert!(report.dry_run);
         Ok(())
     }
 

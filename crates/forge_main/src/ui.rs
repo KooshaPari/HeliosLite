@@ -1401,26 +1401,52 @@ impl<A: API + ConsoleWriter + 'static, F: Fn(ForgeConfig) -> A + Send + Sync> UI
             }
             TopLevelCommand::Import(import_group) => {
                 match import_group.command {
-                    ImportSubcommand::Forge { db, dry_run, verbose } => {
+                    ImportSubcommand::Forge {
+                        db,
+                        ids,
+                        restore_deleted,
+                        accept_unknown,
+                        expected_digest,
+                        dry_run,
+                        verbose,
+                    } => {
+                        if !ids.is_empty() {
+                            self.writeln("Source installation identity and source workspace are unverified. The preview digest binds the locator, destination workspace, and selected raw fields; it does not guarantee complete context fidelity.")?;
+                        }
                         let options = ForgeImportOptions { dry_run, verbose };
                         self.spinner.start(Some(if dry_run {
                             "Scanning (dry-run)"
                         } else {
                             "Importing"
                         }))?;
-                        let report = self.api.import_forge_db_with_options(db, &options).await?;
-                        self.spinner.stop(None)?;
-                        let prefix = if dry_run {
-                            "import (dry-run)"
+                        let result = if ids.is_empty() {
+                            self.api.import_forge_db_with_options(db, &options).await
                         } else {
-                            "import"
+                            self.api
+                                .import_forge_db_selected(
+                                    db,
+                                    &ids,
+                                    restore_deleted,
+                                    accept_unknown,
+                                    expected_digest.as_deref(),
+                                    &options,
+                                )
+                                .await
+                        };
+                        self.spinner.stop(None)?;
+                        let report = result?;
+                        let (prefix, outcome) = if dry_run {
+                            ("preview (no writes)", "candidates")
+                        } else {
+                            ("import", "imported")
                         };
                         self.writeln(format!(
-                            "{} complete: {} read, {} imported, {} skipped (already exist), \
+                            "{} complete: {} read, {} {}, {} skipped (already exist; not verified identical), \
                              {} invalid IDs, {} context parse failures, {} errors",
                             prefix,
                             report.source_total,
                             report.imported,
+                            outcome,
                             report.skipped_existing,
                             report.invalid_id,
                             report.context_parse_failed,

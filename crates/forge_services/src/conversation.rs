@@ -205,6 +205,27 @@ impl<S: ConversationRepository> ConversationService for ForgeConversationService
             .await
     }
 
+    async fn import_forge_db_selected(
+        &self,
+        source: PathBuf,
+        ids: &[ConversationId],
+        restore_deleted: bool,
+        accept_unknown: bool,
+        expected_digest: Option<&str>,
+        options: &ForgeImportOptions,
+    ) -> Result<ForgeImportReport> {
+        self.conversation_repository
+            .import_forge_db_selected(
+                source,
+                ids,
+                restore_deleted,
+                accept_unknown,
+                expected_digest,
+                options,
+            )
+            .await
+    }
+
     async fn export_forge_db(
         &self,
         destination: PathBuf,

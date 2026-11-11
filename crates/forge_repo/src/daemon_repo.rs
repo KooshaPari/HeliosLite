@@ -411,11 +411,9 @@ impl ConversationRepository for DaemonConversationRepository {
 
     async fn delete_conversation(&self, conversation_id: &ConversationId) -> anyhow::Result<()> {
         self.write_or_fallback(
-            Request::MutationV2 {
+            Request::DeleteWithLedger {
                 workspace_id: self.inner.workspace_id(),
-                mutation: ConversationMutation::DeleteConversation {
-                    conversation_id: *conversation_id,
-                },
+                conversation_id: *conversation_id,
             },
             || self.inner.delete_conversation(conversation_id),
         )
@@ -567,6 +565,27 @@ impl ConversationRepository for DaemonConversationRepository {
     ) -> anyhow::Result<ForgeImportReport> {
         self.inner
             .import_forge_db_with_options(source, options)
+            .await
+    }
+
+    async fn import_forge_db_selected(
+        &self,
+        source: PathBuf,
+        ids: &[ConversationId],
+        restore_deleted: bool,
+        accept_unknown: bool,
+        expected_digest: Option<&str>,
+        options: &ForgeImportOptions,
+    ) -> anyhow::Result<ForgeImportReport> {
+        self.inner
+            .import_forge_db_selected(
+                source,
+                ids,
+                restore_deleted,
+                accept_unknown,
+                expected_digest,
+                options,
+            )
             .await
     }
 

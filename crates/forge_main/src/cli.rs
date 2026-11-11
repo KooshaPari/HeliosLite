@@ -370,13 +370,32 @@ pub enum ImportSubcommand {
     /// Import conversations from an official forge-lineage SQLite database
     /// (plain `context` schema) into this repository.
     ///
-    /// The source database is opened **read-only** and is never modified.
+    /// The source database is opened read-only; SQLite may use WAL sidecars.
     /// Rows whose `conversation_id` already exists locally are skipped, so
-    /// re-running the import is safe and idempotent.
+    /// unselected import is preview-only; select an ID and confirm its digest to write.
+    /// For a missing configured legacy file, explicitly set HELIOSLITE_ACCEPT_MISSING_LEGACY
+    /// to that exact path to accept the risk that past history is unknown.
+    /// A file appearing before the next check fails closed.
     Forge {
         /// Path to the source `.forge.db` file to import from.
         #[arg(value_name = "DB_PATH")]
         db: PathBuf,
+
+        /// Select exactly one conversation ID to preview or import. Omit only for unselected preview.
+        #[arg(long = "id")]
+        ids: Vec<ConversationId>,
+
+        /// Permit selected IDs with recorded deletions to be restored.
+        #[arg(long, requires = "ids")]
+        restore_deleted: bool,
+
+        /// Acknowledge that source identity is unverified and prior deletions may be unknown.
+        #[arg(long, requires = "ids")]
+        accept_unknown: bool,
+
+        /// Digest printed by the selected dry-run preview; required for import.
+        #[arg(long, requires = "ids")]
+        expected_digest: Option<String>,
 
         /// Scan the source and report what would be imported, but do not
         /// write any rows. Honors `verbose` for per-row output.
@@ -1465,6 +1484,45 @@ mod tests {
             PathBuf::from("/tmp/helioslite/sessions/snapshot"),
         ));
         assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_forge_selected_reconciliation_flags() {
+        let actual = Cli::try_parse_from([
+            "helioslite",
+            "import",
+            "forge",
+            "source.db",
+            "--id",
+            "11111111-1111-1111-1111-111111111111",
+            "--accept-unknown",
+            "--restore-deleted",
+            "--expected-digest",
+            "abc",
+        ])
+        .unwrap();
+        let Some(TopLevelCommand::Import(group)) = actual.subcommands else {
+            panic!("expected import");
+        };
+        let ImportSubcommand::Forge {
+            ids, restore_deleted, accept_unknown, expected_digest, ..
+        } = group.command;
+        assert_eq!(
+            ids,
+            vec![ConversationId::parse("11111111-1111-1111-1111-111111111111").unwrap()]
+        );
+        assert!(restore_deleted && accept_unknown);
+        assert_eq!(expected_digest.as_deref(), Some("abc"));
+        assert!(
+            Cli::try_parse_from([
+                "helioslite",
+                "import",
+                "forge",
+                "source.db",
+                "--accept-unknown"
+            ])
+            .is_err()
+        );
     }
 
     #[test]

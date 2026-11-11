@@ -77,6 +77,11 @@ pub enum Request {
         workspace_id: i64,
         mutation: ConversationMutation,
     },
+    /// Deletion with ledger safeguards. Older daemons reject this unknown variant.
+    DeleteWithLedger {
+        workspace_id: i64,
+        conversation_id: ConversationId,
+    },
     OptimizeFts,
     RefreshFts,
     CheckpointWal,

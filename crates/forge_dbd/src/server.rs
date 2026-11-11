@@ -546,36 +546,40 @@ impl DbServer {
                 conn.execute_batch("PRAGMA optimize;")?;
                 Ok(Response::Ack)
             }
-            Request::MutationV2 { workspace_id, mutation } => match mutation {
-                ConversationMutation::UpsertConversation { conversation, .. } => {
-                    Self::upsert_conversation(conn, conversation, *workspace_id)?;
-                    Ok(Response::Ack)
-                }
-                ConversationMutation::UpsertConversationRef { conversation, .. } => {
-                    Self::upsert_conversation(conn, conversation, *workspace_id)?;
-                    Ok(Response::Ack)
-                }
-                ConversationMutation::UpdateParentId { conversation_id, new_parent_id } => {
-                    conn.execute(
-                        "UPDATE conversations SET parent_id = ?, \
+            Request::MutationV2 { workspace_id, mutation } => {
+                match mutation {
+                    ConversationMutation::UpsertConversation { conversation, .. } => {
+                        Self::upsert_conversation(conn, conversation, *workspace_id)?;
+                        Ok(Response::Ack)
+                    }
+                    ConversationMutation::UpsertConversationRef { conversation, .. } => {
+                        Self::upsert_conversation(conn, conversation, *workspace_id)?;
+                        Ok(Response::Ack)
+                    }
+                    ConversationMutation::UpdateParentId { conversation_id, new_parent_id } => {
+                        conn.execute(
+                            "UPDATE conversations SET parent_id = ?, \
                      updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') \
                      WHERE conversation_id = ? AND workspace_id = ?",
-                        rusqlite::params![
-                            new_parent_id.as_ref().map(ConversationId::into_string),
-                            conversation_id.into_string(),
-                            workspace_id,
-                        ],
-                    )?;
-                    Ok(Response::Ack)
+                            rusqlite::params![
+                                new_parent_id.as_ref().map(ConversationId::into_string),
+                                conversation_id.into_string(),
+                                workspace_id,
+                            ],
+                        )?;
+                        Ok(Response::Ack)
+                    }
+                    ConversationMutation::DeleteConversation { conversation_id } => {
+                        let _ = conversation_id;
+                        Ok(Response::Error { message: "daemon deletion is unavailable until deletion provenance is supported".to_string() })
+                    }
                 }
-                ConversationMutation::DeleteConversation { conversation_id } => {
-                    conn.execute(
-                        "DELETE FROM conversations WHERE conversation_id = ? AND workspace_id = ?",
-                        rusqlite::params![conversation_id.into_string(), workspace_id],
-                    )?;
-                    Ok(Response::Ack)
-                }
-            },
+            }
+            Request::DeleteWithLedger { .. } => Ok(Response::Error {
+                message:
+                    "daemon deletion is unavailable until legacy history visibility can be verified"
+                        .to_string(),
+            }),
             Request::UpsertConversation { .. }
             | Request::UpsertConversationRef { .. }
             | Request::UpdateParentId { .. }
@@ -1281,7 +1285,7 @@ mod db_tests {
                 )
             )
             .expect("delete"),
-            Response::Ack
+            Response::Error { .. }
         ));
 
         let total: i64 = conn
@@ -1328,7 +1332,7 @@ mod db_tests {
         };
         assert!(matches!(
             DbServer::execute_with_conn(&conn, &delete_b).expect("delete"),
-            Response::Ack
+            Response::Error { .. }
         ));
 
         let actual: Vec<(String, i64)> = conn
@@ -1340,7 +1344,10 @@ mod db_tests {
             .unwrap()
             .collect::<rusqlite::Result<_>>()
             .unwrap();
-        let expected = vec![(id_a.into_string(), workspace_a)];
+        let expected = vec![
+            (id_a.into_string(), workspace_a),
+            (id_b.into_string(), workspace_b),
+        ];
         assert_eq!(actual, expected);
     }
 
@@ -1426,14 +1433,15 @@ mod db_tests {
         let dir = TempDir::new().unwrap();
         let db_path = dir.path().join("test.db");
         let mut conn = Some(DbServer::open_writer_connection(&db_path).unwrap());
-        // No schema created: the DELETE hits a missing table.
+        // No schema created: the UPDATE hits a missing table.
 
         let (response_tx, response_rx) = tokio::sync::oneshot::channel();
         let mut batch = vec![QueuedRequest {
             request: scoped(
                 TEST_WORKSPACE,
-                ConversationMutation::DeleteConversation {
+                ConversationMutation::UpdateParentId {
                     conversation_id: ConversationId::default(),
+                    new_parent_id: None,
                 },
             ),
             response_tx,
@@ -1498,6 +1506,7 @@ mod windows_tests {
         // Create the schema up-front (the daemon never migrates).
         let schema_conn = rusqlite::Connection::open(&db).unwrap();
         create_conversations_schema(&schema_conn);
+        schema_conn.execute_batch(include_str!("../../forge_repo/src/database/migrations/2026-11-11-120000_forge_import_ledger/up.sql")).unwrap();
         drop(schema_conn);
 
         let server = DbServer::new(sock.clone(), db.clone());
@@ -1535,6 +1544,27 @@ mod windows_tests {
             )
             .unwrap();
         assert_eq!(title.as_deref(), Some("windows pipe test"));
+        let legacy_delete = client
+            .send(Request::MutationV2 {
+                workspace_id: 42,
+                mutation: ConversationMutation::DeleteConversation { conversation_id: id },
+            })
+            .await
+            .expect("send legacy delete");
+        assert!(matches!(legacy_delete, Response::Error { .. }));
+        let deleted = client
+            .send(Request::DeleteWithLedger { workspace_id: 42, conversation_id: id })
+            .await
+            .expect("send delete");
+        assert!(matches!(deleted, Response::Error { .. }));
+        let retained: i64 = verify
+            .query_row(
+                "SELECT COUNT(*) FROM conversations WHERE conversation_id = ?",
+                [id.into_string()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(retained, 1);
     }
 
     /// With no client ever connecting, the named-pipe server exits on its own
@@ -1556,5 +1586,60 @@ mod windows_tests {
             "server should have exited after idle timeout"
         );
         assert!(handle.await.expect("server task should not panic").is_ok());
+    }
+}
+
+#[cfg(test)]
+mod ledger_delete_tests {
+    use super::*;
+
+    #[test]
+    fn ledger_delete_preserves_ownership_and_refuses_legacy_or_missing() {
+        let conn = Connection::open_in_memory().unwrap();
+        create_conversations_schema(&conn);
+        conn.execute_batch(include_str!(
+            "../../forge_repo/src/database/migrations/2026-11-11-120000_forge_import_ledger/up.sql"
+        ))
+        .unwrap();
+        let id = ConversationId::generate();
+        conn.execute(
+            "INSERT INTO conversations (conversation_id, workspace_id) VALUES (?, ?)",
+            rusqlite::params![id.into_string(), 7],
+        )
+        .unwrap();
+        let legacy = Request::MutationV2 {
+            workspace_id: 7,
+            mutation: ConversationMutation::DeleteConversation { conversation_id: id },
+        };
+        assert!(matches!(
+            DbServer::execute_with_conn(&conn, &legacy).unwrap(),
+            Response::Error { .. }
+        ));
+        let foreign = Request::DeleteWithLedger { workspace_id: 8, conversation_id: id };
+        assert!(matches!(
+            DbServer::execute_with_conn(&conn, &foreign).unwrap(),
+            Response::Error { .. }
+        ));
+        let owned = Request::DeleteWithLedger { workspace_id: 7, conversation_id: id };
+        assert!(matches!(
+            DbServer::execute_with_conn(&conn, &owned).unwrap(),
+            Response::Error { .. }
+        ));
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM conversations WHERE conversation_id = ?",
+                [id.into_string()],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 1);
+        let ledger: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM forge_import_ledger WHERE conversation_id = ?",
+                [id.into_string()],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(ledger, 0);
     }
 }
