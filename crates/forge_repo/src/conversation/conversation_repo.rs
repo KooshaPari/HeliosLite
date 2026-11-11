@@ -2376,7 +2376,7 @@ fn ensure_legacy_unchanged(
             }
         };
         if let Some(hook) = hook {
-            hook();
+            hook(connection);
         }
     }
     let current = inspect_legacy_projection(connection, legacy, primary, acknowledgement)?;
@@ -2388,10 +2388,19 @@ fn ensure_legacy_unchanged(
 }
 
 #[cfg(test)]
-fn legacy_recheck_hook()
--> &'static std::sync::Mutex<Option<(std::path::PathBuf, Box<dyn FnOnce() + Send>)>> {
+fn legacy_recheck_hook() -> &'static std::sync::Mutex<
+    Option<(
+        std::path::PathBuf,
+        Box<dyn FnOnce(&mut diesel::SqliteConnection) + Send>,
+    )>,
+> {
     static HOOK: std::sync::OnceLock<
-        std::sync::Mutex<Option<(std::path::PathBuf, Box<dyn FnOnce() + Send>)>>,
+        std::sync::Mutex<
+            Option<(
+                std::path::PathBuf,
+                Box<dyn FnOnce(&mut diesel::SqliteConnection) + Send>,
+            )>,
+        >,
     > = std::sync::OnceLock::new();
     HOOK.get_or_init(|| std::sync::Mutex::new(None))
 }
@@ -5199,8 +5208,20 @@ mod tests {
     #[tokio::test]
     async fn test_selected_import_entrypoints_recheck_before_commit() -> anyhow::Result<()> {
         use crate::database::PoolConfig;
+        use diesel::sql_types::{BigInt, Nullable, Text};
         const MODE: &str = "HELIOSLITE_RECHECK_TEST_MODE";
         const ROOT: &str = "HELIOSLITE_RECHECK_TEST_ROOT";
+        #[derive(Debug, PartialEq, diesel::QueryableByName)]
+        struct Snapshot {
+            #[diesel(sql_type = Nullable<Text>)]
+            conversation: Option<String>,
+            #[diesel(sql_type = Nullable<Text>)]
+            ledger: Option<String>,
+        }
+        fn snapshot(conn: &mut diesel::SqliteConnection, id: &str) -> anyhow::Result<Snapshot> {
+            Ok(diesel::sql_query("SELECT (SELECT json_array(conversation_id, title, workspace_id, context, created_at, updated_at, metrics, parent_id, source, cwd, message_count, intent_state, extracted_at, memory_id, intent_hash, CASE WHEN context_zstd IS NULL THEN NULL ELSE hex(context_zstd) END, is_compressed) FROM conversations WHERE conversation_id = ?) AS conversation, (SELECT json_array(conversation_id, workspace_id, origin, source_locator, source_digest, state, generation) FROM forge_import_ledger WHERE conversation_id = ?) AS ledger")
+                .bind::<Text, _>(id).bind::<Text, _>(id).get_result::<Snapshot>(conn)?)
+        }
         if let Some(mode) = std::env::var_os(MODE) {
             let root = std::path::PathBuf::from(
                 std::env::var_os(ROOT).ok_or_else(|| anyhow::anyhow!("missing test root"))?,
@@ -5215,10 +5236,55 @@ mod tests {
             let repo = ConversationRepositoryImpl::new(pool, WorkspaceHash::new(0));
             let id = ConversationId::parse("11111111-1111-1111-1111-111111111111")?;
             let digest = fixture_digest(&repo, &source, id).await?;
+            let existing = mode == "delete_existing" || mode == "forget_existing";
+            if existing {
+                repo.run_with_connection(move |conn, _| {
+                    diesel::sql_query("INSERT INTO conversations (conversation_id, workspace_id, title, context, context_zstd, created_at, source) VALUES (?, 0, 'preserve title', 'preserve context', X'', '2026-01-01 00:00:00', 'local')")
+                        .bind::<Text, _>(id.into_string()).execute(conn)?;
+                    diesel::sql_query("INSERT INTO forge_import_ledger (conversation_id, workspace_id, origin, source_locator, source_digest, state) VALUES (?, 0, 'forge', 'fixture-source', 'fixture-digest', 'imported')")
+                        .bind::<Text, _>(id.into_string()).execute(conn)?;
+                    Ok(())
+                }).await?;
+            }
+            let before = repo
+                .run_with_connection(move |conn, _| snapshot(conn, &id.into_string()))
+                .await?;
+            assert_eq!(before.conversation.is_some(), existing);
+            assert_eq!(before.ledger.is_some(), existing);
             let created = legacy.clone();
+            let is_import = mode == "import";
             *legacy_recheck_hook().lock().unwrap() = Some((
                 legacy,
-                Box::new(move || std::fs::write(created, b"appeared").unwrap()),
+                Box::new(move |conn| {
+                    #[derive(diesel::QueryableByName)]
+                    struct Count {
+                        #[diesel(sql_type = BigInt)]
+                        n: i64,
+                    }
+                    #[derive(diesel::QueryableByName)]
+                    struct State {
+                        #[diesel(sql_type = Text)]
+                        state: String,
+                    }
+                    let rows = diesel::sql_query("SELECT COUNT(*) AS n FROM conversations")
+                        .get_result::<Count>(conn)
+                        .unwrap()
+                        .n;
+                    let state = diesel::sql_query(
+                        "SELECT state FROM forge_import_ledger WHERE conversation_id = ?",
+                    )
+                    .bind::<Text, _>(id.into_string())
+                    .get_result::<State>(conn)
+                    .unwrap()
+                    .state;
+                    assert_eq!(
+                        rows,
+                        i64::from(is_import),
+                        "mutation must run before recheck"
+                    );
+                    assert_eq!(state, if is_import { "imported" } else { "deleted" });
+                    std::fs::write(created, b"appeared").unwrap();
+                }),
             ));
             let result = match mode.to_str() {
                 Some("import") => repo
@@ -5232,8 +5298,8 @@ mod tests {
                     )
                     .await
                     .map(|_| ()),
-                Some("delete") => repo.delete_conversation(&id).await,
-                Some("forget") => repo
+                Some("delete" | "delete_existing") => repo.delete_conversation(&id).await,
+                Some("forget" | "forget_existing") => repo
                     .forget_conversations(&forge_domain::ForgeForgetOptions {
                         ids: vec![id],
                         ..Default::default()
@@ -5250,28 +5316,23 @@ mod tests {
                 root.join("legacy.db").is_file(),
                 "recheck injection must run"
             );
-            let counts = repo
-                .run_with_connection(move |conn, _| {
-                    #[derive(diesel::QueryableByName)]
-                    struct Count {
-                        #[diesel(sql_type = diesel::sql_types::BigInt)]
-                        n: i64,
-                    }
-                    let conversations =
-                        diesel::sql_query("SELECT COUNT(*) AS n FROM conversations")
-                            .get_result::<Count>(conn)?
-                            .n;
-                    let ledger = diesel::sql_query("SELECT COUNT(*) AS n FROM forge_import_ledger")
-                        .get_result::<Count>(conn)?
-                        .n;
-                    Ok((conversations, ledger))
-                })
+            let after = repo
+                .run_with_connection(move |conn, _| snapshot(conn, &id.into_string()))
                 .await?;
-            assert_eq!(counts, (0, 0), "entrypoint must roll back all writes");
+            assert_eq!(
+                after, before,
+                "entrypoint must roll back the full conversation and ledger rows"
+            );
             return Ok(());
         }
         let temp = tempfile::tempdir()?;
-        for mode in ["import", "delete", "forget"] {
+        for mode in [
+            "import",
+            "delete",
+            "forget",
+            "delete_existing",
+            "forget_existing",
+        ] {
             let root = temp.path().join(mode);
             std::fs::create_dir_all(&root)?;
             let output = std::process::Command::new(std::env::current_exe()?)
