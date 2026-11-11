@@ -153,6 +153,14 @@ impl DbClient {
         &self,
         request: Request,
     ) -> std::result::Result<Response, DbClientSendError> {
+        self.send_classified_with_policy(request, false).await
+    }
+
+    pub async fn send_classified_with_policy(
+        &self,
+        request: Request,
+        strict_daemon_protocol: bool,
+    ) -> std::result::Result<Response, DbClientSendError> {
         #[cfg(unix)]
         {
             let mut stream = UnixStream::connect(&self.socket_path)
@@ -164,7 +172,7 @@ impl DbClient {
                     )
                 })
                 .map_err(DbClientSendError::Unavailable)?;
-            Self::send_on_stream(&mut stream, request).await
+            Self::send_on_stream_with_policy(&mut stream, request, strict_daemon_protocol).await
         }
 
         #[cfg(windows)]
@@ -174,7 +182,7 @@ impl DbClient {
                 .await
                 .with_context(|| format!("failed to connect to forge_dbd at {pipe_name}"))
                 .map_err(DbClientSendError::Unavailable)?;
-            Self::send_on_stream(&mut stream, request).await
+            Self::send_on_stream_with_policy(&mut stream, request, strict_daemon_protocol).await
         }
     }
 
@@ -185,7 +193,31 @@ impl DbClient {
     where
         S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
     {
-        if matches!(&request, Request::MutationV3 { .. }) {
+        Self::send_on_stream_with_policy(stream, request, false).await
+    }
+
+    async fn send_on_stream_with_policy<S>(
+        stream: &mut S,
+        request: Request,
+        strict_daemon_protocol: bool,
+    ) -> std::result::Result<Response, DbClientSendError>
+    where
+        S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+    {
+        if strict_daemon_protocol {
+            match Self::request_response(stream, Request::Ping).await {
+                Ok(Response::Health(status))
+                    if status.protocol_version
+                        >= crate::protocol::BOUND_MUTATION_PROTOCOL_VERSION
+                        && status.strict_daemon_protocol => {}
+                Ok(_) => {
+                    return Err(DbClientSendError::Unavailable(anyhow::anyhow!(
+                        "daemon did not advertise strict protocol"
+                    )));
+                }
+                Err(error) => return Err(DbClientSendError::Unavailable(error)),
+            }
+        } else if matches!(&request, Request::MutationV3 { .. }) {
             Self::verify_protocol(stream, crate::protocol::BOUND_MUTATION_PROTOCOL_VERSION)
                 .await
                 .map_err(DbClientSendError::Unavailable)?;
@@ -385,6 +417,7 @@ mod bound_protocol_tests {
 
     fn health(version: u16) -> Response {
         Response::Health(HealthStatus {
+            strict_daemon_protocol: false,
             protocol_version: version,
             uptime_secs: 0,
             queue_depth: 0,
@@ -407,6 +440,48 @@ mod bound_protocol_tests {
         assert!(matches!(result, Err(DbClientSendError::Unavailable(_))));
         drop(client);
         assert!(task.await.unwrap(), "old daemon must receive no mutation");
+    }
+
+    #[tokio::test]
+    async fn strict_refuses_non_strict_peer_before_mutation() {
+        let (mut client, mut server) = tokio::io::duplex(4096);
+        let task = tokio::spawn(async move {
+            assert!(matches!(
+                read_frame::<_, Request>(&mut server).await.unwrap(),
+                Request::Ping
+            ));
+            write_frame(&mut server, &health(3)).await.unwrap();
+            read_frame::<_, Request>(&mut server).await.is_err()
+        });
+        let result = DbClient::send_on_stream_with_policy(&mut client, request(), true).await;
+        assert!(matches!(result, Err(DbClientSendError::Unavailable(_))));
+        drop(client);
+        assert!(task.await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn strict_probes_and_sends_on_same_stream_and_lost_ack_is_indeterminate() {
+        let (mut client, mut server) = tokio::io::duplex(4096);
+        let task = tokio::spawn(async move {
+            assert!(matches!(
+                read_frame::<_, Request>(&mut server).await.unwrap(),
+                Request::Ping
+            ));
+            let Response::Health(mut status) = health(3) else {
+                unreachable!()
+            };
+            status.strict_daemon_protocol = true;
+            write_frame(&mut server, &Response::Health(status))
+                .await
+                .unwrap();
+            assert!(matches!(
+                read_frame::<_, Request>(&mut server).await.unwrap(),
+                Request::MutationV3 { .. }
+            ));
+        });
+        let result = DbClient::send_on_stream_with_policy(&mut client, request(), true).await;
+        assert!(matches!(result, Err(DbClientSendError::Indeterminate(_))));
+        task.await.unwrap();
     }
 
     #[tokio::test]

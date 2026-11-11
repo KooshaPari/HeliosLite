@@ -106,9 +106,12 @@ impl<
         let conversation_import_repository = conversation_repository.clone();
         // Daemon mode (P3 single-writer daemon): when FORGE_DBD_ENABLED, route
         // the hot-path conversation writes through forge-dbd and keep reads
-        // direct. The decorator is best-effort — any daemon failure falls back
-        // to the direct implementation, so this is a mode switch only.
-        let conversation_repository: Arc<dyn ConversationRepository> = if env.dbd_enabled() {
+        // direct. Strict protocol mode activates the decorator independently
+        // and refuses direct fallback for its four routed writes.
+        let conversation_repository: Arc<dyn ConversationRepository> = if daemon_routing_requested(
+            env.dbd_enabled(),
+            std::env::var_os("FORGE_DBD_STRICT_PROTOCOL").as_deref(),
+        ) {
             Arc::new(DaemonConversationRepository::new(
                 conversation_repository,
                 env.dbd_socket_path(),
@@ -145,6 +148,23 @@ impl<
             validation_repository,
             fuzzy_search_repository,
         }
+    }
+}
+
+fn daemon_routing_requested(enabled: bool, strict: Option<&std::ffi::OsStr>) -> bool {
+    enabled || strict.is_some()
+}
+
+#[cfg(test)]
+mod strict_routing_tests {
+    #[test]
+    fn strict_presence_enables_decorator_even_when_daemon_flag_is_disabled() {
+        use super::daemon_routing_requested;
+        use std::ffi::OsStr;
+        assert!(!daemon_routing_requested(false, None));
+        assert!(daemon_routing_requested(true, None));
+        assert!(daemon_routing_requested(false, Some(OsStr::new("1"))));
+        assert!(daemon_routing_requested(false, Some(OsStr::new("invalid"))));
     }
 }
 

@@ -49,6 +49,12 @@ async fn main() -> Result<()> {
         println!("forge_dbd — SQLite single-writer daemon for forge conversation storage");
         println!("Usage: forge_dbd [--version|-V] [--help|-h]");
         println!("Env:   FORGE_WRITE_DB_PATH (write DB), FORGE_DBD_SOCKET (socket path)");
+        println!(
+            "       FORGE_DBD_STRICT_PROTOCOL=1 rejects legacy daemon mutations (does not restrict direct SQLite writers)"
+        );
+        println!(
+            "       Strict Unix sockets are preserved at shutdown; stale recovery requires operator action."
+        );
         return Ok(());
     }
 
@@ -56,6 +62,12 @@ async fn main() -> Result<()> {
     let db_path = db_path();
     info!(socket = %socket_path.display(), "starting forge-dbd");
 
-    let server = DbServer::new(socket_path, db_path);
+    let strict = match std::env::var("FORGE_DBD_STRICT_PROTOCOL") {
+        Err(std::env::VarError::NotPresent) => false,
+        Ok(value) if value == "1" => true,
+        _ => anyhow::bail!("FORGE_DBD_STRICT_PROTOCOL must be unset or 1"),
+    };
+    info!(strict_daemon_protocol = strict, "daemon protocol policy");
+    let server = DbServer::new(socket_path, db_path).with_strict_daemon_protocol(strict);
     server.run().await
 }

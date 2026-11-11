@@ -101,6 +101,9 @@ pub enum Request {
 /// Status returned by a [`Request::Ping`].
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HealthStatus {
+    /// This daemon rejects legacy mutation envelopes; absent on older peers.
+    #[serde(default)]
+    pub strict_daemon_protocol: bool,
     /// Protocol version supported by this daemon. Missing on an older daemon
     /// decodes as version one so new clients can reject it before mutation.
     #[serde(default = "legacy_protocol_version")]
