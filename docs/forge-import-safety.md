@@ -7,6 +7,15 @@ digest covers the selected source row, destination workspace, local disposition,
 visible collision count, and configured legacy path and acknowledgement state.
 It does not establish the source installation's identity or full-fidelity conversion.
 
+Unselected discovery scans one source row at a time and fails if any row's
+combined fields exceed the preview limit. UTF-8 sources allow up to 8 MiB;
+UTF-16 sources use a conservative 5,592,405-byte encoded limit to account for
+UTF-8 expansion, so some smaller decoded rows can also be rejected. Selected
+preview applies the same bounds. No oversized row is silently skipped. SQLite may
+still allocate memory while calculating field lengths, and a long source read
+transaction can retain WAL pages and delay checkpoints. The source and destination
+views are separate snapshots, not an atomic cross-database view.
+
 When the configured legacy path is absent, guarded operations fail unless
 `HELIOSLITE_ACCEPT_MISSING_LEGACY` is set to that exact path for the process.
 This is an explicit acceptance that past history is unknown, not proof that no

@@ -1,3 +1,5 @@
+mod history_preview;
+
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -440,34 +442,68 @@ impl ConversationRepositoryImpl {
                 }
             }
 
-            let rows: Vec<DecodedSourceRow> = if let Some((ids, _, _, _)) = &selection {
+            #[derive(diesel::QueryableByName)]
+            struct SourceEncoding {
+                #[diesel(sql_type = Text)]
+                encoding: String,
+            }
+            let encoding: SourceEncoding = diesel::sql_query("PRAGMA encoding").get_result(&mut src)?;
+            let source_byte_limit = match encoding.encoding.as_str() {
+                "UTF-8" => 8_388_608,
+                // UTF-16 code units can expand from two to three UTF-8 bytes.
+                "UTF-16le" | "UTF-16be" => 5_592_405,
+                other => anyhow::bail!("unsupported source database encoding: {other}"),
+            };
+
+            let Some((ids, _, _, _)) = &selection else {
+                return history_preview::scan(
+                    &mut src,
+                    &mut **connection,
+                    &source,
+                    wid,
+                    &options,
+                    require_valid_context,
+                    source_byte_limit,
+                );
+            };
+
+            let rows: Vec<DecodedSourceRow> = src.transaction::<_, anyhow::Error, _>(|src| {
                 anyhow::ensure!(
                     ids.len() == 1,
                     "select exactly one conversation ID per preview and import"
                 );
-                let selected = diesel::sql_query(
-                    "SELECT conversation_id, title, context, created_at, updated_at, metrics \
-                     FROM conversations WHERE conversation_id = ? AND \
+                #[derive(diesel::QueryableByName)]
+                struct SelectionStats {
+                    #[diesel(sql_type = diesel::sql_types::BigInt)]
+                    matches: i64,
+                    #[diesel(sql_type = diesel::sql_types::BigInt)]
+                    max_bytes: i64,
+                }
+                let stats: SelectionStats = diesel::sql_query(
+                    "SELECT COUNT(*) AS matches, COALESCE(MAX( \
+                     COALESCE(length(CAST(conversation_id AS BLOB)), 0) + \
                      COALESCE(length(CAST(title AS BLOB)), 0) + \
                      COALESCE(length(CAST(context AS BLOB)), 0) + \
                      COALESCE(length(CAST(created_at AS BLOB)), 0) + \
                      COALESCE(length(CAST(updated_at AS BLOB)), 0) + \
-                     COALESCE(length(CAST(metrics AS BLOB)), 0) <= 8388608 LIMIT 2",
+                     COALESCE(length(CAST(metrics AS BLOB)), 0)), 0) AS max_bytes \
+                     FROM conversations WHERE conversation_id = ?",
                 )
                 .bind::<Text, _>(&ids[0])
-                .load(&mut src)?;
+                .get_result(src)?;
                 anyhow::ensure!(
-                    selected.len() == 1,
-                    "selected ID is absent, duplicated, or exceeds the 8 MiB preview limit"
+                    stats.matches == 1,
+                    "selected ID is absent or duplicated"
                 );
-                selected
-            } else {
-                diesel::sql_query(
+                anyhow::ensure!(stats.max_bytes <= source_byte_limit, "selected conversation exceeds the 8 MiB preview limit or its conservative encoding bound");
+                let selected = diesel::sql_query(
                     "SELECT conversation_id, title, context, created_at, updated_at, metrics \
-                     FROM conversations",
+                     FROM conversations WHERE conversation_id = ?",
                 )
-                .load(&mut src)?
-            };
+                .bind::<Text, _>(&ids[0])
+                .get_result::<DecodedSourceRow>(src)?;
+                Ok(vec![selected])
+            })?;
 
             let mut report = ForgeImportReport {
                 source_total: rows.len(),
@@ -3100,7 +3136,7 @@ mod tests {
     use crate::conversation::conversation_record::{ContextRecord, MetricsRecord};
     use crate::database::{DatabasePool, PoolConfig};
 
-    fn repository() -> anyhow::Result<ConversationRepositoryImpl> {
+    pub(super) fn repository() -> anyhow::Result<ConversationRepositoryImpl> {
         let pool = Arc::new(DatabasePool::in_memory()?);
         Ok(ConversationRepositoryImpl::new(pool, WorkspaceHash::new(0)))
     }
@@ -4636,7 +4672,7 @@ mod tests {
     /// - one row whose context is not valid heliosLite JSON (counted as
     ///   `context_parse_failed`, still imported),
     /// - one row with a non-UUID `conversation_id` (counted as `invalid_id`).
-    fn seed_official_source_db(path: &std::path::Path) {
+    pub(super) fn seed_official_source_db(path: &std::path::Path) {
         use diesel::Connection;
 
         let url = path.to_string_lossy().to_string();
