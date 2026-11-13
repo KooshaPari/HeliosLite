@@ -4248,6 +4248,23 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_import_does_not_resurrect_deleted_local_copy() -> anyhow::Result<()> {
+        let temp = tempfile::tempdir()?;
+        let source = temp.path().join("official.db");
+        seed_official_source_db(&source);
+        let repo = repository()?;
+        let options = forge_domain::ForgeImportOptions::default();
+        repo.import_forge_db_inner(source.clone(), &options, true).await?;
+        let id = ConversationId::parse("11111111-1111-1111-1111-111111111111")?;
+        assert!(repo.get_conversation(&id).await?.is_some());
+        repo.delete_conversation(&id).await?;
+        assert!(repo.get_conversation(&id).await?.is_none());
+        repo.import_forge_db_inner(source, &options, true).await?;
+        assert!(repo.get_conversation(&id).await?.is_none(), "deleted copy was recreated");
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn test_strict_import_retries_corrected_context() -> anyhow::Result<()> {
         use diesel::Connection;
 
